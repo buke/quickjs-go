@@ -1,0 +1,40 @@
+name: Test
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+
+  build:
+    name: ${{ matrix.os }} @ Go ${{ matrix.go }}
+    strategy:
+        fail-fast: false
+        matrix:
+            os: [ubuntu-18.04, macos-11]
+            go: [1.17, 1.18]
+    runs-on: ${{ matrix.os }}
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Set up Go
+      uses: actions/setup-go@v3
+      with:
+        go-version: ${{ matrix.go }}
+
+    - name: Build
+      run: go build -v ./...
+
+    - name: Test
+      run: go test -v -coverprofile c.out ./...
+
+    - name: Codecov
+      uses: codecov/codecov-action@v3.1.0
+      env:
+        OS: ${{ matrix.os }}
+        GO: ${{ matrix.go }}
+      with:
+        files: ./c.out
+        env_vars: OS,GO

@@ -1,0 +1,71 @@
+name: Build
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build QuickJS Static Library
+    strategy:
+        fail-fast: false
+        matrix:
+            platform: [ubuntu-18.04, macos-11]
+    runs-on: ${{ matrix.platform }}
+    steps:
+
+    - name: Checkout
+      uses: actions/checkout@v3
+      with:
+          submodules: true
+          fetch-depth: 1
+
+    - name: Prebuild for linux
+      if: matrix.platform == 'ubuntu-18.04'
+      run: rm -rf deps/libs/linux* && rm -rf deps/libs/windows* && docker pull multiarch/crossbuild
+    
+    - name: Build linux amd64
+      if: matrix.platform == 'ubuntu-18.04'
+      run: mkdir -p deps/libs/linux_amd64 && cd deps/quickjs && docker run --rm -v $(pwd):/workdir multiarch/crossbuild /bin/bash -c "cd /workdir && make clean && make libquickjs.a "  && mv libquickjs.a ../libs/linux_amd64
+
+    - name: Build linux arm64
+      if: matrix.platform == 'ubuntu-18.04'
+      run: mkdir -p deps/libs/linux_arm64 && cd deps/quickjs && docker run --rm -v $(pwd):/workdir -e CROSS_TRIPLE=aarch64-linux-gnu multiarch/crossbuild /bin/bash -c "cd /workdir && make clean && make libquickjs.a "  && mv libquickjs.a ../libs/linux_arm64
+
+    #- name: Build windows amd64
+      #if: matrix.platform == 'ubuntu-18.04'
+      #run: mkdir -p deps/libs/windows_amd64 && cd deps/quickjs && docker run --rm -v $(pwd):/workdir -e CONFIG_WIN32=y -e CROSS_TRIPLE=x86_64-w64-mingw32 multiarch/crossbuild /bin/bash -c "cd /workdir && make clean && make libquickjs.a "  && mv libquickjs.a ../libs/windows_amd64
+
+    #- name: Build windows 386 
+      #if: matrix.platform == 'ubuntu-18.04'
+      #run: mkdir -p deps/libs/windows_386 && cd deps/quickjs && docker run --rm -v $(pwd):/workdir -e CONFIG_WIN32=y -e CONFIG_M32=y -e CROSS_TRIPLE=i686-w64-mingw32 multiarch/crossbuild /bin/bash -c "cd /workdir && make clean && make libquickjs.a "  && mv libquickjs.a ../libs/windows_386
+
+    - name: Create PR For Linux & Windows
+      if: matrix.platform == 'ubuntu-18.04'
+      uses: peter-evans/create-pull-request@v4
+      with:
+        commit-message: Update QuickJS Static Library For Linux & Windows
+        branch-suffix: random
+        delete-branch: true
+        title: Update QuickJS Static library For Linux & Windows
+
+      
+    - name: Prebuild for mac
+      if: matrix.platform == 'macos-11'
+      run: rm -rf deps/libs/darwin_* && cp -a deps/Makefile deps/quickjs
+
+    - name: Build darwin amd64 
+      if: matrix.platform == 'macos-11'
+      run: mkdir -p deps/libs/darwin_amd64 && cd deps/quickjs && make clean && make libquickjs.a && mv libquickjs.a ../libs/darwin_amd64
+
+    - name: Build darwin arm64 
+      if: matrix.platform == 'macos-11'
+      run: mkdir -p deps/libs/darwin_arm64 && cd deps/quickjs && make clean && make -e CONFIG_DARWIN_ARM64=y libquickjs.a && mv libquickjs.a ../libs/darwin_arm64
+      
+    - name: Create PR For Darwin
+      if: matrix.platform == 'macos-11'
+      uses: peter-evans/create-pull-request@v4
+      with:
+        commit-message: Update QuickJS Static Library For Darwin
+        branch-suffix: random
+        delete-branch: true
+        title: Update QuickJS Static library For Darwin
