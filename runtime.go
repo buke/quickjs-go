@@ -29,17 +29,17 @@ func (r Runtime) Close() {
 
 // SetMemoryLimit the runtime memory limit; if not set, it will be unlimit.
 func (r Runtime) SetMemoryLimit(limit uint32) {
-	C.JS_SetMemoryLimit(r.ref, C.ulong(limit))
+	C.JS_SetMemoryLimit(r.ref, C.size_t(limit))
 }
 
 // SetGCThreshold the runtime's GC threshold; use -1 to disable automatic GC.
 func (r Runtime) SetGCThreshold(threshold int64) {
-	C.JS_SetGCThreshold(r.ref, C.ulong(threshold))
+	C.JS_SetGCThreshold(r.ref, C.size_t(threshold))
 }
 
 // SetMaxStackSize will set max runtime's stack size; default is 255
 func (r Runtime) SetMaxStackSize(stack_size uint32) {
-	C.JS_SetMaxStackSize(r.ref, C.ulong(stack_size))
+	C.JS_SetMaxStackSize(r.ref, C.size_t(stack_size))
 }
 
 // NewContext creates a new JavaScript context.
