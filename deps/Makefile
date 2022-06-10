@@ -171,14 +171,6 @@ all: $(OBJDIR) $(OBJDIR)/quickjs.check.o $(OBJDIR)/qjs.check.o $(PROGS)
 
 QJS_LIB_OBJS=$(OBJDIR)/quickjs.o $(OBJDIR)/libregexp.o $(OBJDIR)/libunicode.o $(OBJDIR)/cutils.o $(OBJDIR)/quickjs-libc.o
 
-# debugger
-QJS_LIB_OBJS+=$(OBJDIR)/quickjs-debugger.o
-ifndef CONFIG_WIN32
-QJS_LIB_OBJS+=$(OBJDIR)/quickjs-debugger-transport-unix.o
-else
-QJS_LIB_OBJS+=$(OBJDIR)/quickjs-debugger-transport-win.o
-endif
-
 QJS_OBJS=$(OBJDIR)/qjs.o $(OBJDIR)/repl.o $(QJS_LIB_OBJS)
 ifdef CONFIG_BIGNUM
 QJS_LIB_OBJS+=$(OBJDIR)/libbf.o 
