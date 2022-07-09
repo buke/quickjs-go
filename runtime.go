@@ -4,6 +4,7 @@ package quickjs
 #include "bridge.h"
 */
 import "C"
+import "io"
 
 // Runtime represents a Javascript runtime corresponding to an object heap. Several runtimes can exist at the same time but they cannot exchange objects. Inside a given runtime, no multi-threading is supported.
 type Runtime struct {
@@ -54,4 +55,19 @@ func (r Runtime) NewContext() *Context {
 	C.JS_EnableBignumExt(ref, C.int(1))
 
 	return &Context{ref: ref}
+}
+
+// ExecutePendingJob will execute all pending jobs.
+func (r Runtime) ExecutePendingJob() (Context, error) {
+	var ctx Context
+
+	err := C.JS_ExecutePendingJob(r.ref, &ctx.ref)
+	if err <= 0 {
+		if err == 0 {
+			return ctx, io.EOF
+		}
+		return ctx, ctx.Exception()
+	}
+
+	return ctx, nil
 }
