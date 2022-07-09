@@ -3,6 +3,7 @@ package quickjs_test
 import (
 	"errors"
 	"fmt"
+	"io"
 	"math/big"
 	"runtime"
 	"strings"
@@ -45,6 +46,15 @@ func Example() {
 	// call js function by go
 	go_ret := ctx.Globals().Get("test").Call("hello", ctx.String("Golang!"))
 	fmt.Println(go_ret.String())
+
+	// Runtime check to execute async jobs
+	for {
+		_, err := rt.ExecutePendingJob()
+		if err == io.EOF {
+			err = nil
+			break
+		}
+	}
 
 	// Output:
 	// Hello Javascript!
