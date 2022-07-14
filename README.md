@@ -12,7 +12,7 @@ Go bindings to QuickJS: a fast, small, and embeddable ES2020 JavaScript interpre
 * Evaluate script
 * Compile script into bytecode and Eval from bytecode
 * Operate JavaScript values and objects in Go
-* Invoke Go function from JavaScript
+* Bind Go function to JavaScript async/sync function
 * Simple exception throwing and catching
 
 ## Guidelines
@@ -90,45 +90,72 @@ func main() {
 ```
 
 
-### Bind Go Funtion to Javascript
+### Bind Go Funtion to Javascript async/sync function
 ```go
 package main
 import "github.com/buke/quickjs-go"
 
 func main() {
     // Create a new runtime
-    rt := quickjs.NewRuntime()
-    defer rt.Close()
+	rt := quickjs.NewRuntime()
+	defer rt.Close()
 
-    // Create a new context
-    ctx := rt.NewContext()
-    defer ctx.Close()
+	// Create a new context
+	ctx := rt.NewContext()
+	defer ctx.Close()
 
-    // Create a new object
-    test := ctx.Object()
-    defer test.Free()
-    // bind go function to js object
-    test.Set("hello", ctx.Function(func(ctx *quickjs.Context, this quickjs.Value, args []quickjs.Value) quickjs.Value {
-        return ctx.String("Hello " + args[0].String())
-    }))
+	// Create a new object
+	test := ctx.Object()
+	defer test.Free()
+	// bind properties to the object
+	test.Set("A", test.Context().String("String A"))
+	test.Set("B", ctx.Int32(0))
+	test.Set("C", ctx.Bool(false))
+	// bind go function to js object
+	test.Set("hello", ctx.Function(func(ctx *quickjs.Context, this quickjs.Value, args []quickjs.Value) quickjs.Value {
+		return ctx.String("Hello " + args[0].String())
+	}))
 
-    // bind "test" object to global object
-    ctx.Globals().Set("test", test)
+	// bind "test" object to global object
+	ctx.Globals().Set("test", test)
 
-    // call js function by js
-    js_ret, _ := ctx.Eval(`test.hello("Javascript!")`)
-    fmt.Println(js_ret.String())
-    // Output:
-    // Hello Javascript!
+	// call js function by js
+	js_ret, _ := ctx.Eval(`test.hello("Javascript!")`)
+	fmt.Println(js_ret.String())
 
+	// call js function by go
+	go_ret := ctx.Globals().Get("test").Call("hello", ctx.String("Golang!"))
+	fmt.Println(go_ret.String())
 
+	//bind go function to Javascript async function
+	ctx.Globals().Set("testAsync", ctx.AsyncFunction(func(ctx *quickjs.Context, this quickjs.Value, promise quickjs.Value, args []quickjs.Value) {
+		promise.Call("resolve", ctx.String("Hello Async Function!"))
+	}))
 
-    // call js function by go
-    go_ret := ctx.Globals().Get("test").Call("hello", ctx.String("Golang!"))
-    fmt.Println(go_ret.String())
+	ret, _ := ctx.Eval(`
+			var ret;
+			testAsync().then(v => ret = v)
+		`)
+	defer ret.Free()
 
-    // Output:
-    // Hello Golang!
+    // wait for promise to resolve
+	for {
+		_, err := rt.ExecutePendingJob()
+		if err == io.EOF {
+			err = nil
+			break
+		}
+	}
+    //get promise result
+	asyncRet, _ := ctx.Eval("ret")
+	defer asyncRet.Free()
+
+	fmt.Println(asyncRet.String())
+
+	// Output:
+	// Hello Javascript!
+	// Hello Golang!
+	// Hello Async Function!
 }
 ```
 

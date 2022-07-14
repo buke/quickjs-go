@@ -47,7 +47,17 @@ func Example() {
 	go_ret := ctx.Globals().Get("test").Call("hello", ctx.String("Golang!"))
 	fmt.Println(go_ret.String())
 
-	// Runtime check to execute async jobs
+	//bind go function to Javascript async function
+	ctx.Globals().Set("testAsync", ctx.AsyncFunction(func(ctx *quickjs.Context, this quickjs.Value, promise quickjs.Value, args []quickjs.Value) {
+		promise.Call("resolve", ctx.String("Hello Async Function!"))
+	}))
+
+	ret, _ := ctx.Eval(`
+			var ret;
+			testAsync().then(v => ret = v)
+		`)
+	defer ret.Free()
+
 	for {
 		_, err := rt.ExecutePendingJob()
 		if err == io.EOF {
@@ -55,10 +65,15 @@ func Example() {
 			break
 		}
 	}
+	asyncRet, _ := ctx.Eval("ret")
+	defer asyncRet.Free()
+
+	fmt.Println(asyncRet.String())
 
 	// Output:
 	// Hello Javascript!
 	// Hello Golang!
+	// Hello Async Function!
 
 }
 
@@ -464,4 +479,35 @@ func TestArray(t *testing.T) {
 
 	test.DeleteIdx(0)
 
+}
+
+func TestAsyncFunction(t *testing.T) {
+	rt := quickjs.NewRuntime()
+	defer rt.Close()
+
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	ctx.Globals().Set("testAsync", ctx.AsyncFunction(func(ctx *quickjs.Context, this quickjs.Value, promise quickjs.Value, args []quickjs.Value) {
+		promise.Call("resolve", ctx.String("hello async"))
+	}))
+
+	ret, _ := ctx.Eval(`
+		var ret;
+		testAsync().then(v => ret = v)
+	`)
+	defer ret.Free()
+
+	for {
+		_, err := rt.ExecutePendingJob()
+		if err == io.EOF {
+			err = nil
+			break
+		}
+	}
+
+	asyncRet, _ := ctx.Eval("ret")
+	defer asyncRet.Free()
+
+	require.EqualValues(t, "hello async", asyncRet.String())
 }
