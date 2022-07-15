@@ -48,10 +48,8 @@ func restoreFuncPtr(ptr int64) funcEntry {
 
 //export goProxy
 func goProxy(ctx *C.JSContext, thisVal C.JSValueConst, argc C.int, argv *C.JSValueConst) C.JSValue {
-	// The maximum capacity of the following two slices is limited to (2^29)-1 to remain compatible
-	// with 32-bit platforms. The size of a `*C.char` (a pointer) is 4 Byte on a 32-bit system
-	// and (2^29)*4 == math.MaxInt32 + 1. -- See issue golang/go#13656
-	refs := (*[(1 << 29) - 1]C.JSValueConst)(unsafe.Pointer(argv))[:argc:argc]
+	// https://github.com/golang/go/wiki/cgo#turning-c-arrays-into-go-slices
+	refs := unsafe.Slice(argv, argc) // Go 1.17 and later
 
 	id := C.int64_t(0)
 	C.JS_ToInt64(ctx, &id, refs[0])
@@ -71,10 +69,8 @@ func goProxy(ctx *C.JSContext, thisVal C.JSValueConst, argc C.int, argv *C.JSVal
 
 //export goAsyncProxy
 func goAsyncProxy(ctx *C.JSContext, thisVal C.JSValueConst, argc C.int, argv *C.JSValueConst) {
-	// The maximum capacity of the following two slices is limited to (2^29)-1 to remain compatible
-	// with 32-bit platforms. The size of a `*C.char` (a pointer) is 4 Byte on a 32-bit system
-	// and (2^29)*4 == math.MaxInt32 + 1. -- See issue golang/go#13656
-	refs := (*[(1 << 29) - 1]C.JSValueConst)(unsafe.Pointer(argv))[:argc:argc]
+	// https://github.com/golang/go/wiki/cgo#turning-c-arrays-into-go-slices
+	refs := unsafe.Slice(argv, argc) // Go 1.17 and later
 
 	id := C.int64_t(0)
 	C.JS_ToInt64(ctx, &id, refs[0])
