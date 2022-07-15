@@ -135,7 +135,7 @@ func (ctx *Context) Function(fn func(ctx *Context, this Value, args []Value) Val
 
 // AsyncFunction returns a js async function value with given function template.
 func (ctx *Context) AsyncFunction(asyncFn func(ctx *Context, this Value, promise Value, args []Value)) Value {
-	val := ctx.eval(`(invokeGoFunction, id, promise) => async function() { 
+	val := ctx.eval(`(invokeGoFunction, id, promise) => async function(...arguments) { 
 		invokeGoFunction.call(this, id, promise,  ...arguments); 
 		return await promise;
 	}`)

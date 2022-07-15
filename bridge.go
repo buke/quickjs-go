@@ -81,12 +81,12 @@ func goAsyncProxy(ctx *C.JSContext, thisVal C.JSValueConst, argc C.int, argv *C.
 
 	entry := restoreFuncPtr(int64(id))
 
-	promise := Value{ctx: entry.ctx, ref: refs[1]}
-	args := make([]Value, len(refs)-2)
+	args := make([]Value, len(refs)-1)
 	for i := 0; i < len(args); i++ {
 		args[i].ctx = entry.ctx
 		args[i].ref = refs[1+i]
 	}
+	promise := args[0]
 
-	entry.asyncFn(entry.ctx, Value{ctx: entry.ctx, ref: thisVal}, promise, args)
+	entry.asyncFn(entry.ctx, Value{ctx: entry.ctx, ref: thisVal}, promise, args[1:])
 }

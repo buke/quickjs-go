@@ -489,12 +489,12 @@ func TestAsyncFunction(t *testing.T) {
 	defer ctx.Close()
 
 	ctx.Globals().Set("testAsync", ctx.AsyncFunction(func(ctx *quickjs.Context, this quickjs.Value, promise quickjs.Value, args []quickjs.Value) {
-		promise.Call("resolve", ctx.String("hello async"))
+		promise.Call("resolve", ctx.String(args[0].String()+args[1].String()))
 	}))
 
 	ret, _ := ctx.Eval(`
 		var ret;
-		testAsync().then(v => ret = v)
+		testAsync('Hello ', 'Async').then(v => ret = v)
 	`)
 	defer ret.Free()
 
@@ -509,5 +509,5 @@ func TestAsyncFunction(t *testing.T) {
 	asyncRet, _ := ctx.Eval("ret")
 	defer asyncRet.Free()
 
-	require.EqualValues(t, "hello async", asyncRet.String())
+	require.EqualValues(t, "Hello Async", asyncRet.String())
 }
