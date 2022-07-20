@@ -2,8 +2,6 @@ package quickjs
 
 import (
 	"fmt"
-	"sync"
-	"sync/atomic"
 	"unsafe"
 )
 
@@ -14,9 +12,10 @@ import "C"
 
 // Context represents a Javascript context (or Realm). Each JSContext has its own global objects and system objects. There can be several JSContexts per JSRuntime and they can share objects, similar to frames of the same origin sharing Javascript objects in a web browser.
 type Context struct {
-	ref     *C.JSContext
-	globals *Value
-	proxy   *Value
+	ref        *C.JSContext
+	globals    *Value
+	proxy      *Value
+	asyncProxy *Value
 }
 
 // Free will free context and all associated objects.
@@ -24,6 +23,11 @@ func (ctx *Context) Close() {
 	if ctx.proxy != nil {
 		ctx.proxy.Free()
 	}
+
+	if ctx.asyncProxy != nil {
+		ctx.asyncProxy.Free()
+	}
+
 	if ctx.globals != nil {
 		ctx.globals.Free()
 	}
@@ -125,6 +129,43 @@ func (ctx *Context) Function(fn func(ctx *Context, this Value, args []Value) Val
 	}
 
 	args := []C.JSValue{ctx.proxy.ref, funcPtrVal.ref}
+
+	return Value{ctx: ctx, ref: C.JS_Call(ctx.ref, val.ref, ctx.Null().ref, C.int(len(args)), &args[0])}
+}
+
+// AsyncFunction returns a js async function value with given function template.
+func (ctx *Context) AsyncFunction(asyncFn func(ctx *Context, this Value, promise Value, args []Value) Value) Value {
+	val := ctx.eval(`(invokeGoFunction, id, promise) => async function(...arguments) { 
+		invokeGoFunction.call(this, id, promise,  ...arguments); 
+		return await promise;
+	}`)
+	defer val.Free()
+
+	promise := ctx.eval(`
+		(()=> {
+			let resolve, reject;
+			const promise = new Promise((resolve_, reject_) => {
+			  resolve = resolve_;
+			  reject = reject_;
+			});
+			promise.resolve = resolve;
+			promise.reject = reject;
+			return promise;
+		})();
+	`)
+	defer promise.Free()
+
+	funcPtr := storeFuncPtr(funcEntry{ctx: ctx, asyncFn: asyncFn})
+	funcPtrVal := ctx.Int64(funcPtr)
+
+	if ctx.asyncProxy == nil {
+		ctx.asyncProxy = &Value{
+			ctx: ctx,
+			ref: C.JS_NewCFunction(ctx.ref, (*C.JSCFunction)(unsafe.Pointer(C.InvokeAsyncProxy)), nil, C.int(0)),
+		}
+	}
+
+	args := []C.JSValue{ctx.asyncProxy.ref, funcPtrVal.ref, promise.ref}
 
 	return Value{ctx: ctx, ref: C.JS_Call(ctx.ref, val.ref, ctx.Null().ref, C.int(len(args)), &args[0])}
 }
@@ -277,61 +318,4 @@ func (ctx *Context) Exception() error {
 	val := Value{ctx: ctx, ref: C.JS_GetException(ctx.ref)}
 	defer val.Free()
 	return val.Error()
-}
-
-type funcEntry struct {
-	ctx *Context
-	fn  func(ctx *Context, this Value, args []Value) Value
-}
-
-var funcPtrLen int64
-var funcPtrLock sync.Mutex
-var funcPtrStore = make(map[int64]funcEntry)
-var funcPtrClassID C.JSClassID
-
-func init() {
-	C.JS_NewClassID(&funcPtrClassID)
-}
-
-func storeFuncPtr(v funcEntry) int64 {
-	id := atomic.AddInt64(&funcPtrLen, 1) - 1
-	funcPtrLock.Lock()
-	defer funcPtrLock.Unlock()
-	funcPtrStore[id] = v
-	return id
-}
-
-func restoreFuncPtr(ptr int64) funcEntry {
-	funcPtrLock.Lock()
-	defer funcPtrLock.Unlock()
-	return funcPtrStore[ptr]
-}
-
-//func freeFuncPtr(ptr int64) {
-//	funcPtrLock.Lock()
-//	defer funcPtrLock.Unlock()
-//	delete(funcPtrStore, ptr)
-//}
-
-//export goProxy
-func goProxy(ctx *C.JSContext, thisVal C.JSValueConst, argc C.int, argv *C.JSValueConst) C.JSValue {
-	// The maximum capacity of the following two slices is limited to (2^29)-1 to remain compatible
-	// with 32-bit platforms. The size of a `*C.char` (a pointer) is 4 Byte on a 32-bit system
-	// and (2^29)*4 == math.MaxInt32 + 1. -- See issue golang/go#13656
-	refs := (*[(1 << 29) - 1]C.JSValueConst)(unsafe.Pointer(argv))[:argc:argc]
-
-	id := C.int64_t(0)
-	C.JS_ToInt64(ctx, &id, refs[0])
-
-	entry := restoreFuncPtr(int64(id))
-
-	args := make([]Value, len(refs)-1)
-	for i := 0; i < len(args); i++ {
-		args[i].ctx = entry.ctx
-		args[i].ref = refs[1+i]
-	}
-
-	result := entry.fn(entry.ctx, Value{ctx: entry.ctx, ref: thisVal}, args)
-
-	return result.ref
 }

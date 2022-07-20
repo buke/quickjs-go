@@ -4,6 +4,7 @@
 #include "quickjs.h"
 
 extern JSValue InvokeProxy(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv);
+extern JSValue InvokeAsyncProxy(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv);
 
 static JSValue JS_NewNull() { return JS_NULL; }
 static JSValue JS_NewUndefined() { return JS_UNDEFINED; }
