@@ -48,8 +48,8 @@ func Example() {
 	fmt.Println(go_ret.String())
 
 	//bind go function to Javascript async function
-	ctx.Globals().Set("testAsync", ctx.AsyncFunction(func(ctx *quickjs.Context, this quickjs.Value, promise quickjs.Value, args []quickjs.Value) {
-		promise.Call("resolve", ctx.String("Hello Async Function!"))
+	ctx.Globals().Set("testAsync", ctx.AsyncFunction(func(ctx *quickjs.Context, this quickjs.Value, promise quickjs.Value, args []quickjs.Value) quickjs.Value {
+		return promise.Call("resolve", ctx.String("Hello Async Function!"))
 	}))
 
 	ret, _ := ctx.Eval(`
@@ -488,8 +488,8 @@ func TestAsyncFunction(t *testing.T) {
 	ctx := rt.NewContext()
 	defer ctx.Close()
 
-	ctx.Globals().Set("testAsync", ctx.AsyncFunction(func(ctx *quickjs.Context, this quickjs.Value, promise quickjs.Value, args []quickjs.Value) {
-		promise.Call("resolve", ctx.String(args[0].String()+args[1].String()))
+	ctx.Globals().Set("testAsync", ctx.AsyncFunction(func(ctx *quickjs.Context, this quickjs.Value, promise quickjs.Value, args []quickjs.Value) quickjs.Value {
+		return promise.Call("resolve", ctx.String(args[0].String()+args[1].String()))
 	}))
 
 	ret, _ := ctx.Eval(`

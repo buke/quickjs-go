@@ -14,7 +14,7 @@ import "C"
 type funcEntry struct {
 	ctx     *Context
 	fn      func(ctx *Context, this Value, args []Value) Value
-	asyncFn func(ctx *Context, this Value, promise Value, args []Value)
+	asyncFn func(ctx *Context, this Value, promise Value, args []Value) Value
 }
 
 var funcPtrLen int64
@@ -68,7 +68,7 @@ func goProxy(ctx *C.JSContext, thisVal C.JSValueConst, argc C.int, argv *C.JSVal
 }
 
 //export goAsyncProxy
-func goAsyncProxy(ctx *C.JSContext, thisVal C.JSValueConst, argc C.int, argv *C.JSValueConst) {
+func goAsyncProxy(ctx *C.JSContext, thisVal C.JSValueConst, argc C.int, argv *C.JSValueConst) C.JSValue {
 	// https://github.com/golang/go/wiki/cgo#turning-c-arrays-into-go-slices
 	refs := unsafe.Slice(argv, argc) // Go 1.17 and later
 
@@ -84,5 +84,7 @@ func goAsyncProxy(ctx *C.JSContext, thisVal C.JSValueConst, argc C.int, argv *C.
 	}
 	promise := args[0]
 
-	entry.asyncFn(entry.ctx, Value{ctx: entry.ctx, ref: thisVal}, promise, args[1:])
+	result := entry.asyncFn(entry.ctx, Value{ctx: entry.ctx, ref: thisVal}, promise, args[1:])
+	return result.ref
+
 }
