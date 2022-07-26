@@ -435,14 +435,8 @@ func TestObject(t *testing.T) {
 	// invoke js function by go
 	f_func := test.Get("F")
 	defer f_func.Free()
-	ret, _ := ctx.Invoke(f_func, ctx.Null(), ctx.Int32(2), ctx.Int32(3))
+	ret := ctx.Invoke(f_func, ctx.Null(), ctx.Int32(2), ctx.Int32(3))
 	require.True(t, ret.IsNumber() && ret.Int32() == 6)
-
-	// test error invoke
-	f_func = test.Get("C")
-	defer f_func.Free()
-	ret, err = ctx.Invoke(f_func, ctx.Null(), ctx.Int32(2), ctx.Int32(3))
-	require.Error(t, err)
 
 	// test error call
 	F_ret_err := test.Call("A", ctx.Int32(2), ctx.Int32(3))
