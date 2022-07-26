@@ -197,10 +197,8 @@ func (v Value) Error() error {
 
 // propertyEnum is a wrapper around JSValue.
 func (v Value) propertyEnum() ([]propertyEnum, error) {
-	var (
-		ptr  *C.JSPropertyEnum
-		size C.uint32_t
-	)
+	var ptr *C.JSPropertyEnum
+	var size C.uint32_t
 
 	result := int(C.JS_GetOwnPropertyNames(v.ctx.ref, &ptr, &size, v.ref, C.int(1<<0|1<<1|1<<2)))
 	if result < 0 {
@@ -208,13 +206,10 @@ func (v Value) propertyEnum() ([]propertyEnum, error) {
 	}
 	defer C.js_free(v.ctx.ref, unsafe.Pointer(ptr))
 
-	entries := (*[(1 << 29) - 1]C.JSPropertyEnum)(unsafe.Pointer(ptr))
-
-	names := make([]propertyEnum, uint32(size))
-
+	entries := unsafe.Slice(ptr, size) // Go 1.17 and later
+	names := make([]propertyEnum, len(entries))
 	for i := 0; i < len(names); i++ {
 		names[i].IsEnumerable = entries[i].is_enumerable == 1
-
 		names[i].atom = Atom{ctx: v.ctx, ref: entries[i].atom}
 		names[i].atom.Free()
 	}
