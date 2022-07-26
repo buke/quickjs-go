@@ -1,6 +1,7 @@
 package quickjs
 
 import (
+	"errors"
 	"fmt"
 	"unsafe"
 )
@@ -192,6 +193,22 @@ func (ctx *Context) evalFile(code, filename string, evalType C.int) Value {
 	defer C.free(unsafe.Pointer(filenamePtr))
 
 	return Value{ctx: ctx, ref: C.JS_Eval(ctx.ref, codePtr, C.size_t(len(code)), filenamePtr, evalType)}
+}
+
+// Invoke invokes a function with given this value and arguments.
+func (ctx *Context) Invoke(fn Value, this Value, args ...Value) (Value, error) {
+	if !fn.IsFunction() {
+		return ctx.Null(), errors.New("Object not a function")
+	}
+	cargs := []C.JSValue{}
+	for _, x := range args {
+		cargs = append(cargs, x.ref)
+	}
+	ret := Value{ctx: ctx, ref: C.JS_Call(ctx.ref, fn.ref, this.ref, C.int(len(cargs)), &cargs[0])}
+	if ret.IsException() {
+		return ctx.Null(), ctx.Exception()
+	}
+	return ret, nil
 }
 
 // Eval returns a js value with given code.
