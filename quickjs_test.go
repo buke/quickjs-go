@@ -504,11 +504,13 @@ func TestAsyncFunction(t *testing.T) {
 	`)
 	defer ret.Free()
 
-	for {
-		_, err := rt.ExecutePendingJob()
-		if err == io.EOF {
-			err = nil
-			break
+	if rt.IsJobPending() {
+		for {
+			_, err := rt.ExecutePendingJob()
+			if err == io.EOF {
+				err = nil
+				break
+			}
 		}
 	}
 

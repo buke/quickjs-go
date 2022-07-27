@@ -71,3 +71,8 @@ func (r Runtime) ExecutePendingJob() (Context, error) {
 
 	return ctx, nil
 }
+
+// IsJobPending returns true if there is a pending job.
+func (r Runtime) IsJobPending() bool {
+	return C.JS_IsJobPending(r.ref) == 1
+}
