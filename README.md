@@ -19,9 +19,10 @@ Go bindings to QuickJS: a fast, small, and embeddable ES2020 JavaScript interpre
 
 1. Free `quickjs.Runtime` and `quickjs.Context` once you are done using them.
 2. Free `quickjs.Value`'s returned by `Eval()` and `EvalFile()`. All other values do not need to be freed, as they get garbage-collected.
-3. You may access the stacktrace of an error returned by `Eval()` or `EvalFile()` by casting it to a `*quickjs.Error`.
-4. Make new copies of arguments should you want to return them in functions you created.
-5. Make sure to call `runtime.LockOSThread()` to ensure that QuickJS always operates in the exact same thread.
+3. Use `EvalOnLoop` to evaluate script on a loop if you using async functions or promise
+4. You may access the stacktrace of an error returned by `Eval()` or `EvalFile()` by casting it to a `*quickjs.Error`.
+5. Make new copies of arguments should you want to return them in functions you created.
+6. Make sure to call `runtime.LockOSThread()` to ensure that QuickJS always operates in the exact same thread.
 
 ## Usage
 
@@ -132,20 +133,12 @@ func main() {
 		promise.Call("resolve", ctx.String("Hello Async Function!"))
 	}))
 
-	ret, _ := ctx.Eval(`
+	ret, _ := ctx.EvalOnLoop(`
 			var ret;
 			testAsync().then(v => ret = v)
 		`)
 	defer ret.Free()
 
-    // wait for promise to resolve
-	for {
-		_, err := rt.ExecutePendingJob()
-		if err == io.EOF {
-			err = nil
-			break
-		}
-	}
     //get promise result
 	asyncRet, _ := ctx.Eval("ret")
 	defer asyncRet.Free()
