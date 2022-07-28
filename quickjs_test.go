@@ -3,7 +3,6 @@ package quickjs_test
 import (
 	"errors"
 	"fmt"
-	"io"
 	"math/big"
 	"runtime"
 	"strings"
@@ -52,19 +51,12 @@ func Example() {
 		return promise.Call("resolve", ctx.String("Hello Async Function!"))
 	}))
 
-	ret, _ := ctx.Eval(`
+	ret, _ := ctx.EvalOnLoop(`
 			var ret;
 			testAsync().then(v => ret = v)
 		`)
 	defer ret.Free()
 
-	for {
-		_, err := rt.ExecutePendingJob()
-		if err == io.EOF {
-			err = nil
-			break
-		}
-	}
 	asyncRet, _ := ctx.Eval("ret")
 	defer asyncRet.Free()
 
@@ -498,21 +490,11 @@ func TestAsyncFunction(t *testing.T) {
 		return promise.Call("resolve", ctx.String(args[0].String()+args[1].String()))
 	}))
 
-	ret, _ := ctx.Eval(`
+	ret, _ := ctx.EvalOnLoop(`
 		var ret;
 		testAsync('Hello ', 'Async').then(v => ret = v)
 	`)
 	defer ret.Free()
-
-	if rt.IsJobPending() {
-		for {
-			_, err := rt.ExecutePendingJob()
-			if err == io.EOF {
-				err = nil
-				break
-			}
-		}
-	}
 
 	asyncRet, _ := ctx.Eval("ret")
 	defer asyncRet.Free()
