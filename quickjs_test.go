@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/buke/quickjs-go"
 	"github.com/stretchr/testify/assert"
@@ -51,11 +52,14 @@ func Example() {
 		return promise.Call("resolve", ctx.String("Hello Async Function!"))
 	}))
 
-	ret, _ := ctx.EvalOnLoop(`
+	ret, _ := ctx.Eval(`
 			var ret;
 			testAsync().then(v => ret = v)
 		`)
 	defer ret.Free()
+
+	// wait for promise resolve
+	rt.ExecuteAllPendingJobs()
 
 	asyncRet, _ := ctx.Eval("ret")
 	defer asyncRet.Free()
@@ -480,6 +484,7 @@ func TestArray(t *testing.T) {
 }
 
 func TestAsyncFunction(t *testing.T) {
+
 	rt := quickjs.NewRuntime()
 	defer rt.Close()
 
@@ -490,14 +495,35 @@ func TestAsyncFunction(t *testing.T) {
 		return promise.Call("resolve", ctx.String(args[0].String()+args[1].String()))
 	}))
 
-	ret, _ := ctx.EvalOnLoop(`
-		var ret;
-		testAsync('Hello ', 'Async').then(v => ret = v)
+	ret1, _ := ctx.Eval(`
+		var ret = "";
 	`)
-	defer ret.Free()
+	defer ret1.Free()
 
-	asyncRet, _ := ctx.Eval("ret")
-	defer asyncRet.Free()
+	go func() {
+		rt.Loop.ScheduleJob(func() {
+			ret2, _ := ctx.Eval(`ret = ret + "Job Done: ";`)
+			defer ret2.Free()
+		})
+	}()
 
-	require.EqualValues(t, "Hello Async", asyncRet.String())
+	// wait gorutine execute
+	time.Sleep(time.Second * 1)
+
+	// wait for job resolve
+	rt.ExecuteAllPendingJobs()
+
+	// testAsync
+	ret3, _ := ctx.Eval(`
+		testAsync('Hello ', 'Async').then(v => ret = ret + v)
+	`)
+	defer ret3.Free()
+
+	// wait promise execute
+	rt.ExecuteAllPendingJobs()
+
+	ret4, _ := ctx.Eval("ret")
+	defer ret4.Free()
+
+	require.EqualValues(t, "Job Done: Hello Async", ret4.String())
 }

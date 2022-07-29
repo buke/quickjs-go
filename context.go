@@ -2,7 +2,6 @@ package quickjs
 
 import (
 	"fmt"
-	"io"
 	"unsafe"
 )
 
@@ -209,26 +208,6 @@ func (ctx *Context) Invoke(fn Value, this Value, args ...Value) Value {
 // Need call Free() `quickjs.Value`'s returned by `Eval()` and `EvalFile()` and `EvalBytecode()`.
 func (ctx *Context) Eval(code string) (Value, error) { return ctx.EvalFile(code, "code") }
 
-// EvalOnLoop returns a js value with loop (eg:async function, setTimeout ... etc).
-// Need call Free() `quickjs.Value`'s returned by `Eval()` and `EvalFile()` and `EvalBytecode()`.
-func (ctx *Context) EvalOnLoop(code string) (Value, error) {
-	v, err := ctx.Eval(code)
-	if err != nil {
-		return v, err
-	}
-	// excute promise
-	if ctx.runtime.IsJobPending() {
-		for {
-			_, err := ctx.runtime.ExecutePendingJob()
-			if err == io.EOF {
-				err = nil
-				break
-			}
-		}
-	}
-	return v, err
-}
-
 // EvalFile returns a js value with given code and filename.
 // Need call Free() `quickjs.Value`'s returned by `Eval()` and `EvalFile()` and `EvalBytecode()`.
 func (ctx *Context) EvalFile(code, filename string) (Value, error) {
@@ -237,28 +216,6 @@ func (ctx *Context) EvalFile(code, filename string) (Value, error) {
 		return val, ctx.Exception()
 	}
 	return val, nil
-}
-
-/// EvalFile returns a js value with loop (eg:async function, setTimeout ... etc).
-// Need call Free() `quickjs.Value`'s returned by `Eval()` and `EvalFile()` and `EvalBytecode()`.
-func (ctx *Context) EvalFileOnLoop(code, filename string) (Value, error) {
-	v, err := ctx.EvalFile(code, filename)
-	if err != nil {
-		return v, err
-	}
-
-	// excute promise
-	if ctx.runtime.IsJobPending() {
-		for {
-			_, err := ctx.runtime.ExecutePendingJob()
-			if err == io.EOF {
-				err = nil
-				break
-			}
-		}
-	}
-
-	return v, err
 }
 
 // EvalBytecode returns a js value with given bytecode.
@@ -277,28 +234,6 @@ func (ctx *Context) EvalBytecode(buf []byte) (Value, error) {
 	}
 
 	return val, nil
-}
-
-// EvalBytecode returns a js value with loop (eg:async function, setTimeout ... etc).
-// Need call Free() `quickjs.Value`'s returned by `Eval()` and `EvalFile()` and `EvalBytecode()`.
-func (ctx *Context) EvalBytecodeOnLoop(buf []byte) (Value, error) {
-	v, err := ctx.EvalBytecode(buf)
-	if err != nil {
-		return v, err
-	}
-
-	// excute promise
-	if ctx.runtime.IsJobPending() {
-		for {
-			_, err := ctx.runtime.ExecutePendingJob()
-			if err == io.EOF {
-				err = nil
-				break
-			}
-		}
-	}
-
-	return v, err
 }
 
 // Compile returns a compiled bytecode with given code.
