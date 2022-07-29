@@ -3,12 +3,12 @@ package quickjs_test
 import (
 	"errors"
 	"fmt"
-	"io"
 	"math/big"
 	"runtime"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/buke/quickjs-go"
 	"github.com/stretchr/testify/assert"
@@ -58,13 +58,9 @@ func Example() {
 		`)
 	defer ret.Free()
 
-	for {
-		_, err := rt.ExecutePendingJob()
-		if err == io.EOF {
-			err = nil
-			break
-		}
-	}
+	// wait for promise resolve
+	rt.ExecuteAllPendingJobs()
+
 	asyncRet, _ := ctx.Eval("ret")
 	defer asyncRet.Free()
 
@@ -488,6 +484,7 @@ func TestArray(t *testing.T) {
 }
 
 func TestAsyncFunction(t *testing.T) {
+
 	rt := quickjs.NewRuntime()
 	defer rt.Close()
 
@@ -498,24 +495,35 @@ func TestAsyncFunction(t *testing.T) {
 		return promise.Call("resolve", ctx.String(args[0].String()+args[1].String()))
 	}))
 
-	ret, _ := ctx.Eval(`
-		var ret;
-		testAsync('Hello ', 'Async').then(v => ret = v)
+	ret1, _ := ctx.Eval(`
+		var ret = "";
 	`)
-	defer ret.Free()
+	defer ret1.Free()
 
-	if rt.IsJobPending() {
-		for {
-			_, err := rt.ExecutePendingJob()
-			if err == io.EOF {
-				err = nil
-				break
-			}
-		}
-	}
+	go func() {
+		rt.Loop.ScheduleJob(func() {
+			ret2, _ := ctx.Eval(`ret = ret + "Job Done: ";`)
+			defer ret2.Free()
+		})
+	}()
 
-	asyncRet, _ := ctx.Eval("ret")
-	defer asyncRet.Free()
+	// wait gorutine execute
+	time.Sleep(time.Second * 1)
 
-	require.EqualValues(t, "Hello Async", asyncRet.String())
+	// wait for job resolve
+	rt.ExecuteAllPendingJobs()
+
+	// testAsync
+	ret3, _ := ctx.Eval(`
+		testAsync('Hello ', 'Async').then(v => ret = ret + v)
+	`)
+	defer ret3.Free()
+
+	// wait promise execute
+	rt.ExecuteAllPendingJobs()
+
+	ret4, _ := ctx.Eval("ret")
+	defer ret4.Free()
+
+	require.EqualValues(t, "Job Done: Hello Async", ret4.String())
 }

@@ -12,6 +12,7 @@ import "C"
 
 // Context represents a Javascript context (or Realm). Each JSContext has its own global objects and system objects. There can be several JSContexts per JSRuntime and they can share objects, similar to frames of the same origin sharing Javascript objects in a web browser.
 type Context struct {
+	runtime    *Runtime
 	ref        *C.JSContext
 	globals    *Value
 	proxy      *Value

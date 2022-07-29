@@ -4,16 +4,21 @@ package quickjs
 #include "bridge.h"
 */
 import "C"
-import "io"
+import (
+	"io"
+	"runtime"
+)
 
 // Runtime represents a Javascript runtime corresponding to an object heap. Several runtimes can exist at the same time but they cannot exchange objects. Inside a given runtime, no multi-threading is supported.
 type Runtime struct {
-	ref *C.JSRuntime
+	ref  *C.JSRuntime
+	Loop *Loop // only one loop per runtime
 }
 
 // NewRuntime creates a new quickjs runtime.
 func NewRuntime() Runtime {
-	rt := Runtime{ref: C.JS_NewRuntime()}
+	runtime.LockOSThread() // prevent multiple quickjs runtime from being created
+	rt := Runtime{ref: C.JS_NewRuntime(), Loop: NewLoop()}
 	C.JS_SetCanBlock(rt.ref, C.int(1))
 	return rt
 }
@@ -54,7 +59,7 @@ func (r Runtime) NewContext() *Context {
 	C.JS_AddIntrinsicOperators(ref)
 	C.JS_EnableBignumExt(ref, C.int(1))
 
-	return &Context{ref: ref}
+	return &Context{ref: ref, runtime: &r}
 }
 
 // ExecutePendingJob will execute all pending jobs.
@@ -75,4 +80,19 @@ func (r Runtime) ExecutePendingJob() (Context, error) {
 // IsJobPending returns true if there is a pending job.
 func (r Runtime) IsJobPending() bool {
 	return C.JS_IsJobPending(r.ref) == 1
+}
+
+func (r Runtime) ExecuteAllPendingJobs() error {
+	var err error
+	for r.Loop.IsLoopPending() || r.IsJobPending() {
+		// execute loop job
+		r.Loop.Run()
+
+		// excute promiIs
+		_, err := r.ExecutePendingJob()
+		if err == io.EOF {
+			err = nil
+		}
+	}
+	return err
 }
