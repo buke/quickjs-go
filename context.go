@@ -329,3 +329,10 @@ func (ctx *Context) Exception() error {
 	defer val.Free()
 	return val.Error()
 }
+
+// ScheduleJob Schedule a context's job.
+func (ctx *Context) ScheduleJob(fn func()) {
+	go func() {
+		ctx.runtime.loop.scheduleJob(fn)
+	}()
+}
