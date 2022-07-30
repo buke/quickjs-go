@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
-	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -16,6 +15,7 @@ import (
 )
 
 func Example() {
+
 	// Create a new runtime
 	rt := quickjs.NewRuntime()
 	defer rt.Close()
@@ -360,7 +360,6 @@ func TestConcurrency(t *testing.T) {
 
 	for i := 0; i < n; i++ {
 		go func() {
-			runtime.LockOSThread()
 
 			defer wg.Done()
 
@@ -484,7 +483,6 @@ func TestArray(t *testing.T) {
 }
 
 func TestAsyncFunction(t *testing.T) {
-
 	rt := quickjs.NewRuntime()
 	defer rt.Close()
 
@@ -500,10 +498,12 @@ func TestAsyncFunction(t *testing.T) {
 	`)
 	defer ret1.Free()
 
-	ctx.ScheduleJob(func() {
-		ret2, _ := ctx.Eval(`ret = ret + "Job Done: ";`)
-		defer ret2.Free()
-	})
+	go func() {
+		ctx.ScheduleJob(func() {
+			ret2, _ := ctx.Eval(`ret = ret + "Job Done: ";`)
+			defer ret2.Free()
+		})
+	}()
 
 	// wait gorutine execute
 	time.Sleep(time.Second * 1)

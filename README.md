@@ -22,7 +22,6 @@ Go bindings to QuickJS: a fast, small, and embeddable ES2020 JavaScript interpre
 3. Use `ExecuteAllPendingJobs` wait for promise/job result after you using promise/job
 4. You may access the stacktrace of an error returned by `Eval()` or `EvalFile()` by casting it to a `*quickjs.Error`.
 5. Make new copies of arguments should you want to return them in functions you created.
-6. Make sure to call `runtime.LockOSThread()` to ensure that QuickJS always operates in the exact same thread.
 
 ## Usage
 
