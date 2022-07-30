@@ -13,18 +13,18 @@ func NewLoop() *Loop {
 }
 
 // AddJob adds a job to the loop.
-func (l *Loop) ScheduleJob(j Job) error {
+func (l *Loop) scheduleJob(j Job) error {
 	l.jobChan <- j
 	return nil
 }
 
 // AddJob adds a job to the loop.
-func (l *Loop) IsLoopPending() bool {
+func (l *Loop) isLoopPending() bool {
 	return len(l.jobChan) > 0
 }
 
 // run executes all pending jobs.
-func (l *Loop) Run() error {
+func (l *Loop) run() error {
 	for {
 		select {
 		case job, ok := <-l.jobChan:
@@ -45,7 +45,7 @@ func (l *Loop) Run() error {
 }
 
 // stop stops the loop.
-func (l *Loop) Stop() error {
+func (l *Loop) stop() error {
 	close(l.jobChan)
 	return nil
 }
