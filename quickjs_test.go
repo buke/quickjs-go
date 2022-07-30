@@ -498,12 +498,10 @@ func TestAsyncFunction(t *testing.T) {
 	`)
 	defer ret1.Free()
 
-	go func() {
-		ctx.ScheduleJob(func() {
-			ret2, _ := ctx.Eval(`ret = ret + "Job Done: ";`)
-			defer ret2.Free()
-		})
-	}()
+	ctx.ScheduleJob(func() {
+		ret2, _ := ctx.Eval(`ret = ret + "Job Done: ";`)
+		defer ret2.Free()
+	})
 
 	// wait gorutine execute
 	time.Sleep(time.Second * 1)

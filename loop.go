@@ -8,7 +8,7 @@ type Loop struct {
 
 func NewLoop() *Loop {
 	return &Loop{
-		jobChan: make(chan Job),
+		jobChan: make(chan Job, 1024),
 	}
 }
 

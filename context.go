@@ -332,5 +332,7 @@ func (ctx *Context) Exception() error {
 
 // ScheduleJob Schedule a context's job.
 func (ctx *Context) ScheduleJob(fn func()) {
-	ctx.runtime.loop.scheduleJob(fn)
+	go func() {
+		ctx.runtime.loop.scheduleJob(fn)
+	}()
 }
