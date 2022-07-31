@@ -7,7 +7,6 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/buke/quickjs-go"
 	"github.com/stretchr/testify/assert"
@@ -502,9 +501,6 @@ func TestAsyncFunction(t *testing.T) {
 		ret2, _ := ctx.Eval(`ret = ret + "Job Done: ";`)
 		defer ret2.Free()
 	})
-
-	// wait gorutine execute
-	time.Sleep(time.Second * 1)
 
 	// wait for job resolve
 	rt.ExecuteAllPendingJobs()

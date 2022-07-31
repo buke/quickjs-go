@@ -7,6 +7,7 @@ import "C"
 import (
 	"io"
 	"runtime"
+	"time"
 )
 
 // Runtime represents a Javascript runtime corresponding to an object heap. Several runtimes can exist at the same time but they cannot exchange objects. Inside a given runtime, no multi-threading is supported.
@@ -98,6 +99,7 @@ func (r Runtime) ExecuteAllPendingJobs() error {
 		if err == io.EOF {
 			err = nil
 		}
+		time.Sleep(time.Millisecond * 1) // prevent 100% CPU
 	}
 	return err
 }
