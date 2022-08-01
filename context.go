@@ -137,24 +137,18 @@ func (ctx *Context) Function(fn func(ctx *Context, this Value, args []Value) Val
 // AsyncFunction returns a js async function value with given function template.
 func (ctx *Context) AsyncFunction(asyncFn func(ctx *Context, this Value, promise Value, args []Value) Value) Value {
 	val := ctx.eval(`(invokeGoFunction, id, promise) => async function(...arguments) { 
+		let resolve, reject;
+		const promise = new Promise((resolve_, reject_) => {
+		  resolve = resolve_;
+		  reject = reject_;
+		});
+		promise.resolve = resolve;
+		promise.reject = reject;
+		
 		invokeGoFunction.call(this, id, promise,  ...arguments); 
 		return await promise;
 	}`)
 	defer val.Free()
-
-	promise := ctx.eval(`
-		(()=> {
-			let resolve, reject;
-			const promise = new Promise((resolve_, reject_) => {
-			  resolve = resolve_;
-			  reject = reject_;
-			});
-			promise.resolve = resolve;
-			promise.reject = reject;
-			return promise;
-		})();
-	`)
-	defer promise.Free()
 
 	funcPtr := storeFuncPtr(funcEntry{ctx: ctx, asyncFn: asyncFn})
 	funcPtrVal := ctx.Int64(funcPtr)
@@ -166,7 +160,7 @@ func (ctx *Context) AsyncFunction(asyncFn func(ctx *Context, this Value, promise
 		}
 	}
 
-	args := []C.JSValue{ctx.asyncProxy.ref, funcPtrVal.ref, promise.ref}
+	args := []C.JSValue{ctx.asyncProxy.ref, funcPtrVal.ref}
 
 	return Value{ctx: ctx, ref: C.JS_Call(ctx.ref, val.ref, ctx.Null().ref, C.int(len(args)), &args[0])}
 }
