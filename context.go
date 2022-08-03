@@ -109,6 +109,17 @@ func (ctx *Context) Object() Value {
 	return Value{ctx: ctx, ref: C.JS_NewObject(ctx.ref)}
 }
 
+// ParseJson parses given json string and returns a object value.
+func (ctx *Context) ParseJSON(v string) Value {
+	ptr := C.CString(v)
+	defer C.free(unsafe.Pointer(ptr))
+
+	filenamePtr := C.CString("")
+	defer C.free(unsafe.Pointer(filenamePtr))
+
+	return Value{ctx: ctx, ref: C.JS_ParseJSON(ctx.ref, ptr, C.size_t(len(v)), filenamePtr)}
+}
+
 // Array returns a new array value.
 func (ctx *Context) Array() Value {
 	return Value{ctx: ctx, ref: C.JS_NewArray(ctx.ref)}

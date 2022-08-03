@@ -77,6 +77,14 @@ func (v Value) String() string {
 	return C.GoString(ptr)
 }
 
+// JSONString returns the JSON string representation of the value.
+func (v Value) JSONStringify() string {
+	ref := C.JS_JSONStringify(v.ctx.ref, v.ref, C.JS_NewNull(), C.JS_NewNull())
+	ptr := C.JS_ToCString(v.ctx.ref, ref)
+	defer C.JS_FreeCString(v.ctx.ref, ptr)
+	return C.GoString(ptr)
+}
+
 // Int64 returns the int64 value of the value.
 func (v Value) Int64() int64 {
 	val := C.int64_t(0)

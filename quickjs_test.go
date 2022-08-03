@@ -391,6 +391,24 @@ func TestConcurrency(t *testing.T) {
 	}
 }
 
+func TestJson(t *testing.T) {
+	// Create a new runtime
+	rt := quickjs.NewRuntime()
+	defer rt.Close()
+
+	// Create a new context
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	// Create a  object from json
+	fooObj := ctx.ParseJSON(`{"foo":"bar"}`)
+	defer fooObj.Free()
+
+	// JSONStringify
+	jsonStr := fooObj.JSONStringify()
+	require.EqualValues(t, "{\"foo\":\"bar\"}", jsonStr)
+}
+
 func TestObject(t *testing.T) {
 	// Create a new runtime
 	rt := quickjs.NewRuntime()
