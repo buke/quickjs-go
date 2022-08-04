@@ -1,5 +1,5 @@
 # quickjs-go
-English | [简体中文](README_zh-cn.md)
+[English](README.md) | 简体中文
 
 [![Test](https://github.com/buke/quickjs-go/workflows/Test/badge.svg)](https://github.com/buke/quickjs-go/actions?query=workflow%3ATest)
 [![codecov](https://codecov.io/gh/buke/quickjs-go/branch/main/graph/badge.svg?token=DW5RGD01AG)](https://codecov.io/gh/buke/quickjs-go)
@@ -7,31 +7,31 @@ English | [简体中文](README_zh-cn.md)
 [![GoDoc](https://pkg.go.dev/badge/github.com/buke/quickjs-go?status.svg)](https://pkg.go.dev/github.com/buke/quickjs-go?tab=doc)
 [![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2Fbuke%2Fquickjs-go.svg?type=shield)](https://app.fossa.com/projects/git%2Bgithub.com%2Fbuke%2Fquickjs-go?ref=badge_shield)
 
-Go bindings to QuickJS: a fast, small, and embeddable ES2020 JavaScript interpreter.
+Go 语言的QuickJS绑定库：快速、小型、可嵌入的ES2020 JavaScript解释器。
 
+## 功能
+* 执行javascript脚本
+* 编译javascript脚本到字节码并执行字节码
+* 在 Go 中操作 JavaScript 值和对象
+* 绑定 Go 函数到 JavaScript 同步函数和异步函数
+* 简单的异常抛出和捕获
 
-## Features
-* Evaluate script
-* Compile script into bytecode and Eval from bytecode
-* Operate JavaScript values and objects in Go
-* Bind Go function to JavaScript async/sync function
-* Simple exception throwing and catching
+## 指南
 
-## Guidelines
-
-1. Free `quickjs.Runtime` and `quickjs.Context` once you are done using them.
-2. Free `quickjs.Value`'s returned by `Eval()` and `EvalFile()`. All other values do not need to be freed, as they get garbage-collected.
-3. Use `ExecuteAllPendingJobs` wait for promise/job result after you using promise/job
+1. 在使用完毕后，请记得关闭 `quickjs.Runtime` 和 `quickjs.Context`。
+2. 请记得关闭由 `Eval()` 和 `EvalFile()` 返回的 `quickjs.Value`。其他值不需要关闭，因为它们会被垃圾回收。
+3. 如果你使用了promise 或 async function，请使用 `ExecuteAllPendingJobs` 等待所有的promise/job结果。
 4. You may access the stacktrace of an error returned by `Eval()` or `EvalFile()` by casting it to a `*quickjs.Error`.
-5. Make new copies of arguments should you want to return them in functions you created.
+4.  如果`Eval()` 或 `EvalFile()`返回了错误，可强制转换为`*quickjs.Error`以读取错误的堆栈信息。
+5. 如果你想在函数中返回参数，请在函数中复制参数。
 
-## Usage
+## 用法 
 
 ```go
 import "github.com/buke/quickjs-go"
 ```
 
-### Run a script
+### 执行javascript脚本
 ```go
 package main
 
@@ -59,7 +59,7 @@ func main() {
 ```
 
 
-### Get/Set Javascript Object
+### 读取/设置 JavaScript 对象
 ```go
 package main
 
@@ -92,7 +92,7 @@ func main() {
 ```
 
 
-### Bind Go Funtion to Javascript async/sync function
+### 函数绑定
 ```go
 package main
 import "github.com/buke/quickjs-go"
@@ -156,7 +156,7 @@ func main() {
 }
 ```
 
-### Error Handling
+### 异常抛出和捕获
 ```go
 package main
 
@@ -185,7 +185,7 @@ func main() {
 }
 ```
 
-### Bytecode Compiler
+### Bytecode编译和执行
 ```go
 
 package main
@@ -233,7 +233,7 @@ func main() {
 }
 ```
 
-### Runtime Options: memory, stack, GC, ...
+### 设置内存、栈、GC等等
 ```go
 package main
 
@@ -261,14 +261,14 @@ func main() {
 }
 ```
 
-## Documentation
-Go Reference & more examples: https://pkg.go.dev/github.com/buke/quickjs-go
+## 文档
+Go 语言文档和示例: https://pkg.go.dev/github.com/buke/quickjs-go
 
-## License
+## 协议
 [MIT](./LICENSE)
 
 
 [![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2Fbuke%2Fquickjs-go.svg?type=large)](https://app.fossa.com/projects/git%2Bgithub.com%2Fbuke%2Fquickjs-go?ref=badge_large)
 
-## Related Projects 
+## 相关项目
 * https://github.com/buke/quickjs-go-polyfill
