@@ -121,8 +121,8 @@ func (ctx *Context) ParseJSON(v string) Value {
 }
 
 // Array returns a new array value.
-func (ctx *Context) Array() Value {
-	return Value{ctx: ctx, ref: C.JS_NewArray(ctx.ref)}
+func (ctx *Context) Array() Array {
+	return NewQjsArray(Value{ctx: ctx, ref: C.JS_NewArray(ctx.ref)})
 }
 
 // Function returns a js function value with given function template.
