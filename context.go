@@ -121,8 +121,21 @@ func (ctx *Context) ParseJSON(v string) Value {
 }
 
 // Array returns a new array value.
-func (ctx *Context) Array() Array {
-	return NewQjsArray(Value{ctx: ctx, ref: C.JS_NewArray(ctx.ref)})
+func (ctx *Context) Array() *Array {
+	val := ctx.eval(`[];`)
+	return NewQjsArray(val, ctx)
+}
+
+func (ctx *Context) Map() *Map {
+	val := ctx.eval(`new Map();`)
+	//defer val.Free()
+	return NewQjsMap(val, ctx)
+}
+
+func (ctx *Context) Set() *Set {
+	val := ctx.eval(`new Set();`)
+	//defer val.Free()
+	return NewQjsSet(val, ctx)
 }
 
 // Function returns a js function value with given function template.

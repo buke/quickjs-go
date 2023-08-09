@@ -46,7 +46,7 @@ type propertyEnum struct {
 	atom         Atom
 }
 
-//String returns the atom string representation of the value.
+// String returns the atom string representation of the value.
 func (p propertyEnum) String() string { return p.atom.String() }
 
 // JSValue represents a Javascript value which can be a primitive type or an object. Reference counting is used, so it is important to explicitly duplicate (JS_DupValue(), increment the reference count) or free (JS_FreeValue(), decrement the reference count) JSValues.
@@ -136,6 +136,45 @@ func (v Value) BigFloat() *big.Float {
 	}
 	return val
 }
+
+// ToArray
+//
+//	@Description: return array object
+//	@receiver v :
+//	@return *Array
+func (v Value) ToArray() *Array {
+	if !v.IsArray() {
+		return nil
+	}
+	return NewQjsArray(v, v.ctx)
+}
+
+// ToMap
+//
+//	@Description: return map object
+//	@receiver v :
+//	@return *Map
+func (v Value) ToMap() *Map {
+	if !v.IsMap() {
+		return nil
+	}
+	return NewQjsMap(v, v.ctx)
+}
+
+// ToSet
+//
+//	@Description: return set object
+//	@receiver v :
+//	@return *Set
+func (v Value) ToSet() *Set {
+	if v.IsSet() {
+		return nil
+	}
+	return NewQjsSet(v, v.ctx)
+}
+
+func (v Value) IsMap() bool { return v.String() == "[object Map]" }
+func (v Value) IsSet() bool { return v.String() == "[object Set]" }
 
 // Len returns the length of the array.
 func (v Value) Len() int64 {
