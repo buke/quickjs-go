@@ -122,19 +122,21 @@ func (ctx *Context) ParseJSON(v string) Value {
 
 // Array returns a new array value.
 func (ctx *Context) Array() *Array {
-	val := ctx.eval(`[];`)
+	val := Value{ctx: ctx, ref: C.JS_NewArray(ctx.ref)}
 	return NewQjsArray(val, ctx)
 }
 
 func (ctx *Context) Map() *Map {
-	val := ctx.eval(`new Map();`)
-	//defer val.Free()
+	ctor := ctx.Globals().Get("Map")
+	defer ctor.Free()
+	val := Value{ctx: ctx, ref: C.JS_CallConstructor(ctx.ref, ctor.ref, 0, nil)}
 	return NewQjsMap(val, ctx)
 }
 
 func (ctx *Context) Set() *Set {
-	val := ctx.eval(`new Set();`)
-	//defer val.Free()
+	ctor := ctx.Globals().Get("Set")
+	defer ctor.Free()
+	val := Value{ctx: ctx, ref: C.JS_CallConstructor(ctx.ref, ctor.ref, 0, nil)}
 	return NewQjsSet(val, ctx)
 }
 
