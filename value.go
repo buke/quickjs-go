@@ -173,8 +173,15 @@ func (v Value) ToSet() *Set {
 	return NewQjsSet(v, v.ctx)
 }
 
-func (v Value) IsMap() bool { return v.String() == "[object Map]" }
-func (v Value) IsSet() bool { return v.String() == "[object Set]" }
+// IsMap return true if the value is a map
+func (v Value) IsMap() bool {
+	return v.IsObject() && v.globalInstanceof("Map") || v.String() == "[object Map]"
+}
+
+// IsSet return true if the value is a set
+func (v Value) IsSet() bool {
+	return v.IsObject() && v.globalInstanceof("Set") || v.String() == "[object Set]"
+}
 
 // Len returns the length of the array.
 func (v Value) Len() int64 {
@@ -303,6 +310,16 @@ func (v Value) Delete(name string) bool {
 // DeleteIdx deletes the property with the given index.
 func (v Value) DeleteIdx(idx int64) bool {
 	return C.JS_DeletePropertyInt64(v.ctx.ref, v.ref, C.int64_t(idx), C.int(1)) == 1
+}
+
+// globalInstanceof checks if the value is an instance of the given global constructor
+func (v Value) globalInstanceof(name string) bool {
+	ctor := v.ctx.Globals().Get(name)
+	defer ctor.Free()
+	if ctor.IsUndefined() {
+		return false
+	}
+	return C.JS_IsInstanceOf(v.ctx.ref, v.ref, ctor.ref) == 1
 }
 
 func (v Value) IsNumber() bool        { return C.JS_IsNumber(v.ref) == 1 }

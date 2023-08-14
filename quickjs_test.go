@@ -528,6 +528,7 @@ func TestMap(t *testing.T) {
 
 	test := ctx.Map()
 	defer test.Free()
+	require.True(t, test.ToValue().IsMap())
 
 	for i := int64(0); i < 3; i++ {
 		test.Put(ctx.Int64(i), ctx.String(fmt.Sprintf("test %d", i)))
@@ -574,8 +575,8 @@ func TestSet(t *testing.T) {
 	defer ctx.Close()
 
 	test := ctx.Set()
-
 	defer test.Free()
+	require.True(t, test.ToValue().IsSet())
 
 	for i := int64(0); i < 3; i++ {
 		test.Add(ctx.Int64(i))
