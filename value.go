@@ -222,7 +222,9 @@ func (v Value) Call(fname string, args ...Value) Value {
 	for _, x := range args {
 		cargs = append(cargs, x.ref)
 	}
-
+	if len(cargs) == 0 {
+		return Value{ctx: v.ctx, ref: C.JS_Call(v.ctx.ref, fn.ref, v.ref, C.int(0), nil)}
+	}
 	return Value{ctx: v.ctx, ref: C.JS_Call(v.ctx.ref, fn.ref, v.ref, C.int(len(cargs)), &cargs[0])}
 }
 

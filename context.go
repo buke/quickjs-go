@@ -221,6 +221,9 @@ func (ctx *Context) Invoke(fn Value, this Value, args ...Value) Value {
 	for _, x := range args {
 		cargs = append(cargs, x.ref)
 	}
+	if len(cargs) == 0 {
+		return Value{ctx: ctx, ref: C.JS_Call(ctx.ref, fn.ref, this.ref, 0, nil)}
+	}
 	return Value{ctx: ctx, ref: C.JS_Call(ctx.ref, fn.ref, this.ref, C.int(len(cargs)), &cargs[0])}
 }
 
