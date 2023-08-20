@@ -347,6 +347,26 @@ func TestBadBytecode(t *testing.T) {
 
 }
 
+func TestArrayBuffer(t *testing.T) {
+	rt := quickjs.NewRuntime()
+	defer rt.Close()
+
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	binaryData := []uint8{1, 2, 3, 4, 5}
+	value := ctx.ArrayBuffer(binaryData)
+	defer value.Free()
+	for i := 1; i <= len(binaryData); i++ {
+		data := value.ToArrayBuffer(uint(i))
+		//fmt.Println(data)
+		assert.EqualValues(t, data, binaryData[:i])
+	}
+	assert.True(t, value.IsArrayBuffer())
+	binaryLen := len(binaryData)
+	assert.Equal(t, value.ByteLen(), int64(binaryLen))
+}
+
 func TestConcurrency(t *testing.T) {
 	n := 32
 	m := 10000
