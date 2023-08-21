@@ -85,17 +85,17 @@ func (v Value) JSONStringify() string {
 	return C.GoString(ptr)
 }
 
-func (v Value) ToArrayBuffer(size uint) []byte {
+func (v Value) ToByteArray(size uint) ([]byte, error) {
 	if v.ByteLen() < int64(size) {
-		return nil
+		return nil, errors.New("exceeds the maximum length of the current binary array")
 	}
 	cSize := C.size_t(size)
 	outBuf := C.JS_GetArrayBuffer(v.ctx.ref, &cSize, v.ref)
-	return C.GoBytes(unsafe.Pointer(outBuf), C.int(size))
+	return C.GoBytes(unsafe.Pointer(outBuf), C.int(size)), nil
 }
 
-// IsArrayBuffer return true if the value is array buffer
-func (v Value) IsArrayBuffer() bool {
+// IsByteArray return true if the value is array buffer
+func (v Value) IsByteArray() bool {
 	v.Len()
 	return v.IsObject() && v.globalInstanceof("ArrayBuffer") || v.String() == "[object ArrayBuffer]"
 }

@@ -358,11 +358,14 @@ func TestArrayBuffer(t *testing.T) {
 	value := ctx.ArrayBuffer(binaryData)
 	defer value.Free()
 	for i := 1; i <= len(binaryData); i++ {
-		data := value.ToArrayBuffer(uint(i))
+		data, err := value.ToByteArray(uint(i))
+		assert.NoError(t, err)
 		//fmt.Println(data)
 		assert.EqualValues(t, data, binaryData[:i])
 	}
-	assert.True(t, value.IsArrayBuffer())
+	_, err := value.ToByteArray(uint(len(binaryData)) + 1)
+	assert.Error(t, err)
+	assert.True(t, value.IsByteArray())
 	binaryLen := len(binaryData)
 	assert.Equal(t, value.ByteLen(), int64(binaryLen))
 }
