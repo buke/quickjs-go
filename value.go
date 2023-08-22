@@ -96,7 +96,6 @@ func (v Value) ToByteArray(size uint) ([]byte, error) {
 
 // IsByteArray return true if the value is array buffer
 func (v Value) IsByteArray() bool {
-	v.Len()
 	return v.IsObject() && v.globalInstanceof("ArrayBuffer") || v.String() == "[object ArrayBuffer]"
 }
 
