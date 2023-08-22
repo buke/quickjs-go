@@ -85,6 +85,20 @@ func (v Value) JSONStringify() string {
 	return C.GoString(ptr)
 }
 
+func (v Value) ToByteArray(size uint) ([]byte, error) {
+	if v.ByteLen() < int64(size) {
+		return nil, errors.New("exceeds the maximum length of the current binary array")
+	}
+	cSize := C.size_t(size)
+	outBuf := C.JS_GetArrayBuffer(v.ctx.ref, &cSize, v.ref)
+	return C.GoBytes(unsafe.Pointer(outBuf), C.int(size)), nil
+}
+
+// IsByteArray return true if the value is array buffer
+func (v Value) IsByteArray() bool {
+	return v.IsObject() && v.globalInstanceof("ArrayBuffer") || v.String() == "[object ArrayBuffer]"
+}
+
 // Int64 returns the int64 value of the value.
 func (v Value) Int64() int64 {
 	val := C.int64_t(0)
@@ -186,6 +200,11 @@ func (v Value) IsSet() bool {
 // Len returns the length of the array.
 func (v Value) Len() int64 {
 	return v.Get("length").Int64()
+}
+
+// ByteLen returns the length of the ArrayBuffer.
+func (v Value) ByteLen() int64 {
+	return v.Get("byteLength").Int64()
 }
 
 // Set sets the value of the property with the given name.
