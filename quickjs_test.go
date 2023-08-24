@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/buke/quickjs-go"
 	"github.com/stretchr/testify/assert"
@@ -654,4 +655,27 @@ func TestAsyncFunction(t *testing.T) {
 	defer ret4.Free()
 
 	require.EqualValues(t, "Job Done: Hello Async", ret4.String())
+}
+
+func TestSetInterruptHandler(t *testing.T) {
+	rt := quickjs.NewRuntime()
+	defer rt.Close()
+
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	startTime := time.Now().Unix()
+
+	ctx.SetInterruptHandler(func() int {
+		if time.Now().Unix()-startTime > 30 {
+			return 1
+		}
+		return 0
+	})
+
+	ret, err := ctx.Eval(`while(true){}`)
+	defer ret.Free()
+
+	assert.Error(t, err, "expected interrupted by quickjs")
+	require.Equal(t, "InternalError: interrupted", err.Error())
 }
