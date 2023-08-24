@@ -2,10 +2,12 @@ package quickjs
 
 import (
 	"fmt"
+	"runtime/cgo"
 	"unsafe"
 )
 
 /*
+#include <stdint.h> // for uintptr_t
 #include "bridge.h"
 */
 import "C"
@@ -194,6 +196,18 @@ func (ctx *Context) AsyncFunction(asyncFn func(ctx *Context, this Value, promise
 	args := []C.JSValue{ctx.asyncProxy.ref, funcPtrVal.ref}
 
 	return Value{ctx: ctx, ref: C.JS_Call(ctx.ref, val.ref, ctx.Null().ref, C.int(len(args)), &args[0])}
+}
+
+// InterruptHandler is a function type for interrupt handler.
+/* return != 0 if the JS code needs to be interrupted */
+type InterruptHandler func() int
+
+// SetInterruptHandler sets a interrupt handler.
+func (ctx *Context) SetInterruptHandler(handler InterruptHandler) {
+	handlerArgs := C.handlerArgs{
+		fn: (C.uintptr_t)(cgo.NewHandle(handler)),
+	}
+	C.SetInterruptHandler(ctx.runtime.ref, unsafe.Pointer(&handlerArgs))
 }
 
 // Atom returns a new Atom value with given string.

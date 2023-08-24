@@ -1,12 +1,14 @@
 package quickjs
 
 import (
+	"runtime/cgo"
 	"sync"
 	"sync/atomic"
 	"unsafe"
 )
 
 /*
+#include <stdint.h>
 #include "bridge.h"
 */
 import "C"
@@ -87,4 +89,15 @@ func goAsyncProxy(ctx *C.JSContext, thisVal C.JSValueConst, argc C.int, argv *C.
 	result := entry.asyncFn(entry.ctx, Value{ctx: entry.ctx, ref: thisVal}, promise, args[1:])
 	return result.ref
 
+}
+
+//export goInterruptHandler
+func goInterruptHandler(rt *C.JSRuntime, handlerArgs unsafe.Pointer) C.int {
+	handlerArgsStruct := (*C.handlerArgs)(handlerArgs)
+
+	hFn := cgo.Handle(handlerArgsStruct.fn)
+	hFnValue := hFn.Value().(InterruptHandler)
+	// defer hFn.Delete()
+
+	return C.int(hFnValue())
 }
