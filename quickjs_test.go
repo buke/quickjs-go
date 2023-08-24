@@ -667,7 +667,7 @@ func TestSetInterruptHandler(t *testing.T) {
 	startTime := time.Now().Unix()
 
 	ctx.SetInterruptHandler(func() int {
-		if time.Now().Unix()-startTime > 30 {
+		if time.Now().Unix()-startTime > 1 {
 			return 1
 		}
 		return 0
