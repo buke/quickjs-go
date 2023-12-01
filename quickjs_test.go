@@ -618,6 +618,25 @@ func TestSet(t *testing.T) {
 	require.True(t, !test.Has(ctx.Int64(0)))
 }
 
+func TestFunction(t *testing.T) {
+	rt := quickjs.NewRuntime()
+	defer rt.Close()
+
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	ctx.Globals().Set("test", ctx.Function(func(ctx *quickjs.Context, this quickjs.Value, args []quickjs.Value) quickjs.Value {
+		return ctx.String("Hello " + args[0].String() + args[1].String())
+	}))
+
+	ret, _ := ctx.Eval(`
+		test('Go ', 'JS')
+	`)
+	defer ret.Free()
+
+	require.EqualValues(t, "Hello Go JS", ret.String())
+}
+
 func TestAsyncFunction(t *testing.T) {
 	rt := quickjs.NewRuntime()
 	defer rt.Close()
