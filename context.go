@@ -149,12 +149,6 @@ func (ctx *Context) Set() *Set {
 
 // Function returns a js function value with given function template.
 func (ctx *Context) Function(fn func(ctx *Context, this Value, args []Value) Value) Value {
-	val := ctx.eval(`(invokeGoFunction, id) => function() { return invokeGoFunction.call(this, id, ...arguments); }`)
-	defer val.Free()
-
-	funcPtr := storeFuncPtr(funcEntry{ctx: ctx, fn: fn})
-	funcPtrVal := ctx.Int64(funcPtr)
-
 	if ctx.proxy == nil {
 		ctx.proxy = &Value{
 			ctx: ctx,
@@ -162,30 +156,18 @@ func (ctx *Context) Function(fn func(ctx *Context, this Value, args []Value) Val
 		}
 	}
 
-	args := []C.JSValue{ctx.proxy.ref, funcPtrVal.ref}
+	fnHandler := ctx.Int64(int64(cgo.NewHandle(fn)))
+	ctxHandler := ctx.Int64(int64(cgo.NewHandle(ctx)))
+	args := []C.JSValue{ctx.proxy.ref, fnHandler.ref, ctxHandler.ref}
+
+	val := ctx.eval(`(proxy, fnHandler, ctx) => function() { return proxy.call(this, fnHandler, ctx, ...arguments); }`)
+	defer val.Free()
 
 	return Value{ctx: ctx, ref: C.JS_Call(ctx.ref, val.ref, ctx.Null().ref, C.int(len(args)), &args[0])}
 }
 
 // AsyncFunction returns a js async function value with given function template.
 func (ctx *Context) AsyncFunction(asyncFn func(ctx *Context, this Value, promise Value, args []Value) Value) Value {
-	val := ctx.eval(`(invokeGoFunction, id) => async function(...arguments) { 
-		let resolve, reject;
-		const promise = new Promise((resolve_, reject_) => {
-		  resolve = resolve_;
-		  reject = reject_;
-		});
-		promise.resolve = resolve;
-		promise.reject = reject;
-		
-		invokeGoFunction.call(this, id, promise,  ...arguments); 
-		return await promise;
-	}`)
-	defer val.Free()
-
-	funcPtr := storeFuncPtr(funcEntry{ctx: ctx, asyncFn: asyncFn})
-	funcPtrVal := ctx.Int64(funcPtr)
-
 	if ctx.asyncProxy == nil {
 		ctx.asyncProxy = &Value{
 			ctx: ctx,
@@ -193,7 +175,23 @@ func (ctx *Context) AsyncFunction(asyncFn func(ctx *Context, this Value, promise
 		}
 	}
 
-	args := []C.JSValue{ctx.asyncProxy.ref, funcPtrVal.ref}
+	fnHandler := ctx.Int64(int64(cgo.NewHandle(asyncFn)))
+	ctxHandler := ctx.Int64(int64(cgo.NewHandle(ctx)))
+	args := []C.JSValue{ctx.asyncProxy.ref, fnHandler.ref, ctxHandler.ref}
+
+	val := ctx.eval(`(proxy, fnHandler, ctx) => async function(...arguments) {
+		let resolve, reject;
+		const promise = new Promise((resolve_, reject_) => {
+		  resolve = resolve_;
+		  reject = reject_;
+		});
+		promise.resolve = resolve;
+		promise.reject = reject;
+
+		proxy.call(this, fnHandler, ctx, promise,  ...arguments);
+		return await promise;
+	}`)
+	defer val.Free()
 
 	return Value{ctx: ctx, ref: C.JS_Call(ctx.ref, val.ref, ctx.Null().ref, C.int(len(args)), &args[0])}
 }
