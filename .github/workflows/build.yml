@@ -9,7 +9,7 @@ jobs:
     strategy:
         fail-fast: false
         matrix:
-            platform: [ubuntu-latest, macos-11]
+            platform: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.platform }}
     steps:
 
@@ -50,19 +50,19 @@ jobs:
 
       
     - name: Prebuild for mac
-      if: matrix.platform == 'macos-11'
+      if: matrix.platform == 'macos-latest'
       run: rm -rf deps/libs/darwin_* && cp -a deps/Makefile deps/quickjs
 
     - name: Build darwin amd64 
-      if: matrix.platform == 'macos-11'
+      if: matrix.platform == 'macos-latest'
       run: mkdir -p deps/libs/darwin_amd64 && cd deps/quickjs && make clean && make libquickjs.a && mv libquickjs.a ../libs/darwin_amd64
 
     - name: Build darwin arm64 
-      if: matrix.platform == 'macos-11'
+      if: matrix.platform == 'macos-latest'
       run: mkdir -p deps/libs/darwin_arm64 && cd deps/quickjs && make clean && make -e CONFIG_DARWIN_ARM64=y libquickjs.a && mv libquickjs.a ../libs/darwin_arm64
       
     - name: Create PR For Darwin
-      if: matrix.platform == 'macos-11'
+      if: matrix.platform == 'macos-latest'
       uses: peter-evans/create-pull-request@v5
       with:
         commit-message: Update QuickJS Static Library For Darwin
