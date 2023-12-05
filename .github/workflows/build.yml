@@ -9,7 +9,7 @@ jobs:
     strategy:
         fail-fast: false
         matrix:
-            platform: [ubuntu-18.04, macos-11]
+            platform: [ubuntu-latest, macos-11]
     runs-on: ${{ matrix.platform }}
     steps:
 
@@ -20,27 +20,27 @@ jobs:
           fetch-depth: 1
 
     - name: Prebuild for linux
-      if: matrix.platform == 'ubuntu-18.04'
+      if: matrix.platform == 'ubuntu-latest'
       run: rm -rf deps/libs/linux* && rm -rf deps/libs/windows* && docker pull multiarch/crossbuild
     
     - name: Build linux amd64
-      if: matrix.platform == 'ubuntu-18.04'
+      if: matrix.platform == 'ubuntu-latest'
       run: mkdir -p deps/libs/linux_amd64 && cd deps/quickjs && docker run --rm -v $(pwd):/workdir multiarch/crossbuild /bin/bash -c "cd /workdir && make clean && make libquickjs.a "  && mv libquickjs.a ../libs/linux_amd64
 
     - name: Build linux arm64
-      if: matrix.platform == 'ubuntu-18.04'
+      if: matrix.platform == 'ubuntu-latest'
       run: mkdir -p deps/libs/linux_arm64 && cd deps/quickjs && docker run --rm -v $(pwd):/workdir -e CROSS_TRIPLE=aarch64-linux-gnu multiarch/crossbuild /bin/bash -c "cd /workdir && make clean && make libquickjs.a "  && mv libquickjs.a ../libs/linux_arm64
 
     - name: Build windows amd64
-      if: matrix.platform == 'ubuntu-18.04'
+      if: matrix.platform == 'ubuntu-latest'
       run: mkdir -p deps/libs/windows_amd64 && cd deps/quickjs && docker run --rm -v $(pwd):/workdir -e CONFIG_WIN32=y -e CROSS_TRIPLE=x86_64-w64-mingw32 multiarch/crossbuild /bin/bash -c "cd /workdir && make clean && make libquickjs.a "  && mv libquickjs.a ../libs/windows_amd64
 
     - name: Build windows 386 
-      if: matrix.platform == 'ubuntu-18.04'
+      if: matrix.platform == 'ubuntu-latest'
       run: mkdir -p deps/libs/windows_386 && cd deps/quickjs && docker run --rm -v $(pwd):/workdir -e CONFIG_WIN32=y -e CONFIG_M32=y -e CROSS_TRIPLE=i686-w64-mingw32 multiarch/crossbuild /bin/bash -c "cd /workdir && make clean && make libquickjs.a "  && mv libquickjs.a ../libs/windows_386
 
     - name: Create PR For Linux & Windows
-      if: matrix.platform == 'ubuntu-18.04'
+      if: matrix.platform == 'ubuntu-latest'
       uses: peter-evans/create-pull-request@v5
       with:
         commit-message: Update QuickJS Static Library For Linux & Windows
