@@ -9,6 +9,13 @@
 
 Go 语言的QuickJS绑定库：快速、小型、可嵌入的ES2020 JavaScript解释器。
 
+## 版本支持
+
+| quickjs-go | QuickJS |
+| ---------- | ------- |
+| v0.1.x     | v2021-03-27 |
+| v0.2.x     | v2023-12-09 |
+
 ## 功能
 * 执行javascript脚本
 * 编译javascript脚本到字节码并执行字节码

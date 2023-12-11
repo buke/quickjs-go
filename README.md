@@ -9,6 +9,12 @@ English | [简体中文](README_zh-cn.md)
 
 Go bindings to QuickJS: a fast, small, and embeddable ES2020 JavaScript interpreter.
 
+## Version Support
+
+| quickjs-go | QuickJS |
+| ---------- | ------- |
+| v0.1.x     | v2021-03-27 |
+| v0.2.x     | v2023-12-09 |
 
 ## Features
 * Evaluate script
