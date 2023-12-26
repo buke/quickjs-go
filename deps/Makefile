@@ -68,7 +68,7 @@ ifdef CONFIG_CLANG
   CC=$(CROSS_PREFIX)clang
   CFLAGS=-g -Wall -MMD -MF $(OBJDIR)/$(@F).d
   ifdef CONFIG_DARWIN_ARM64
-    CFLAGS += -target arm64-apple-macos11
+    CFLAGS += -target arm64-apple-macos12
   endif
   CFLAGS += -Wextra
   CFLAGS += -Wno-sign-compare
