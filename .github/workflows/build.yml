@@ -55,11 +55,11 @@ jobs:
 
     - name: Build darwin amd64 
       if: matrix.platform == 'macos-latest'
-      run: mkdir -p deps/libs/darwin_amd64 && cd deps/quickjs && make clean && make libquickjs.a && mv libquickjs.a ../libs/darwin_amd64
+      run: mkdir -p deps/libs/darwin_amd64 && cd deps/quickjs && make clean && make -e CONFIG_CLANG=y CONFIG_DEFAULT_AR=y libquickjs.a && mv libquickjs.a ../libs/darwin_amd64
 
     - name: Build darwin arm64 
       if: matrix.platform == 'macos-latest'
-      run: mkdir -p deps/libs/darwin_arm64 && cd deps/quickjs && make clean && make -e CONFIG_DARWIN_ARM64=y libquickjs.a && mv libquickjs.a ../libs/darwin_arm64
+      run: mkdir -p deps/libs/darwin_arm64 && cd deps/quickjs && make clean && make -e CONFIG_CLANG=y CONFIG_DEFAULT_AR=y CONFIG_DARWIN_ARM64=y libquickjs.a && mv libquickjs.a ../libs/darwin_arm64
       
     - name: Create PR For Darwin
       if: matrix.platform == 'macos-latest'
