@@ -41,7 +41,7 @@ jobs:
 
     - name: Create PR For Linux & Windows
       if: matrix.platform == 'ubuntu-latest'
-      uses: peter-evans/create-pull-request@v5
+      uses: peter-evans/create-pull-request@v6
       with:
         commit-message: Update QuickJS Static Library For Linux & Windows
         branch-suffix: random
@@ -63,7 +63,7 @@ jobs:
       
     - name: Create PR For Darwin
       if: matrix.platform == 'macos-latest'
-      uses: peter-evans/create-pull-request@v5
+      uses: peter-evans/create-pull-request@v6
       with:
         commit-message: Update QuickJS Static Library For Darwin
         branch-suffix: random
