@@ -565,7 +565,7 @@ func TestMap(t *testing.T) {
 	count := 0
 	test.ForEach(func(key quickjs.Value, value quickjs.Value) {
 		count++
-		fmt.Println(fmt.Sprintf("key:%s value:%s", key.String(), value.String()))
+		fmt.Printf("key:%s value:%s\n", key.String(), value.String())
 	})
 	require.EqualValues(t, count, 3)
 
@@ -574,7 +574,7 @@ func TestMap(t *testing.T) {
 	count = 0
 	test.ForEach(func(key quickjs.Value, value quickjs.Value) {
 		count++
-		fmt.Println(fmt.Sprintf("key:%s value:%s", key.String(), value.String()))
+		fmt.Printf("key:%s value:%s\n", key.String(), value.String())
 	})
 	require.EqualValues(t, count, 4)
 
@@ -586,7 +586,7 @@ func TestMap(t *testing.T) {
 			panic(errors.New("map did not delete the key"))
 		}
 		count++
-		fmt.Println(fmt.Sprintf("key:%s value:%s", key.String(), value.String()))
+		fmt.Printf("key:%s value:%s\n", key.String(), value.String())
 	})
 	require.EqualValues(t, count, 3)
 }
@@ -610,7 +610,7 @@ func TestSet(t *testing.T) {
 	count := 0
 	test.ForEach(func(key quickjs.Value) {
 		count++
-		fmt.Println(fmt.Sprintf("value:%s", key.String()))
+		fmt.Printf("value:%s\n", key.String())
 	})
 	require.EqualValues(t, count, 3)
 
