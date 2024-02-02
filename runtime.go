@@ -31,6 +31,7 @@ func (r Runtime) RunGC() {
 
 // Close will free the runtime pointer.
 func (r Runtime) Close() {
+	r.loop.stop() // stop loop
 	C.JS_FreeRuntime(r.ref)
 }
 
@@ -94,7 +95,7 @@ func (r Runtime) ExecuteAllPendingJobs() error {
 		// execute loop job
 		r.loop.run()
 
-		// excute promiIs
+		// excute promise job
 		_, err := r.ExecutePendingJob()
 		if err == io.EOF {
 			err = nil
