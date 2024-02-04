@@ -370,7 +370,7 @@ func (ctx *Context) Exception() error {
 	return val.Error()
 }
 
-// ScheduleJob Schedule a context's job.
-func (ctx *Context) ScheduleJob(fn func()) {
-	ctx.runtime.loop.scheduleJob(fn)
+// Loop runs the context's event loop.
+func (ctx *Context) Loop() {
+	C.js_std_loop(ctx.ref)
 }
