@@ -67,7 +67,7 @@ jobs:
 
     - name: Build windows amd64 
       if: matrix.platform == 'windows-latest'
-      run: cd deps/quickjs && make clean && make -e CONFIG_WIN32=y  libquickjs.a && copy libquickjs.a ../libs/darwin_amd64
+      run: cd deps/quickjs && make clean && make -e CONFIG_WIN32=y  libquickjs.a && copy libquickjs.a ../libs/windows_amd64
 
     # - name: Build windows 386
     #   if: matrix.platform == 'windows-latest'
