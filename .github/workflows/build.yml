@@ -21,7 +21,7 @@ jobs:
 
     - name: Prebuild for linux
       if: matrix.platform == 'ubuntu-latest'
-      run: rm -rf deps/libs/linux* && rm -rf deps/libs/windows* && docker pull multiarch/crossbuild
+      run: rm -rf deps/libs/linux* && docker pull multiarch/crossbuild
     
     - name: Build linux amd64
       if: matrix.platform == 'ubuntu-latest'
@@ -69,10 +69,6 @@ jobs:
       if: matrix.platform == 'windows-latest'
       run: cd deps/quickjs && make clean && make -e CONFIG_WIN32=y  libquickjs.a && copy libquickjs.a ../libs/windows_amd64
 
-    # - name: Build windows 386
-    #   if: matrix.platform == 'windows-latest'
-    #   run: cd deps/quickjs && make clean && make -e CONFIG_WIN32=y CONFIG_M32=y libquickjs.a && copy libquickjs.a ../libs/darwin_arm64
-      
     - name: Create PR For Windows
       if: matrix.platform == 'windows-latest'
       uses: peter-evans/create-pull-request@v6
