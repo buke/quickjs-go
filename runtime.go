@@ -50,15 +50,31 @@ func (r Runtime) SetMaxStackSize(stack_size uint32) {
 // enable BigFloat/BigDecimal support and enable .
 // enable operator overloading.
 func (r Runtime) NewContext() *Context {
-	ref := C.JS_NewContext(r.ref)
+	C.js_std_init_handlers(r.ref)
 
-	C.JS_AddIntrinsicBigFloat(ref)
-	C.JS_AddIntrinsicBigDecimal(ref)
-	C.JS_AddIntrinsicOperators(ref)
-	C.JS_EnableBignumExt(ref, C.int(1))
+	// create a new context (heap, global object and context stack
+	ctx_ref := C.JS_NewContext(r.ref)
 
-	C.js_init_module_std(ref, C.CString("std"))
-	C.js_init_module_os(ref, C.CString("os"))
+	C.JS_AddIntrinsicBigFloat(ctx_ref)
+	C.JS_AddIntrinsicBigDecimal(ctx_ref)
+	C.JS_AddIntrinsicOperators(ctx_ref)
+	C.JS_EnableBignumExt(ctx_ref, C.int(1))
 
-	return &Context{ref: ref, runtime: &r}
+	// import the 'std' and 'os' modules
+	C.js_init_module_std(ctx_ref, C.CString("std"))
+	C.js_init_module_os(ctx_ref, C.CString("os"))
+
+	// import setTimeout and clearTimeout from 'os' to globalThis
+	code := `
+	import { setTimeout, clearTimeout } from "os";
+	globalThis.setTimeout = setTimeout;
+	globalThis.clearTimeout = clearTimeout;
+	`
+	init_compile := C.JS_Eval(ctx_ref, C.CString(code), C.size_t(len(code)), C.CString("init.js"), C.JS_EVAL_TYPE_MODULE|C.JS_EVAL_FLAG_COMPILE_ONLY)
+	C.js_module_set_import_meta(ctx_ref, init_compile, 1, 1)
+	init_run := C.JS_EvalFunction(ctx_ref, init_compile)
+	C.JS_FreeValue(ctx_ref, init_run)
+	C.js_std_loop(ctx_ref)
+
+	return &Context{ref: ctx_ref, runtime: &r}
 }
