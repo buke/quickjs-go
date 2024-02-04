@@ -5,21 +5,18 @@ package quickjs
 */
 import "C"
 import (
-	"io"
 	"runtime"
-	"time"
 )
 
 // Runtime represents a Javascript runtime corresponding to an object heap. Several runtimes can exist at the same time but they cannot exchange objects. Inside a given runtime, no multi-threading is supported.
 type Runtime struct {
-	ref  *C.JSRuntime
-	loop *Loop // only one loop per runtime
+	ref *C.JSRuntime
 }
 
 // NewRuntime creates a new quickjs runtime.
 func NewRuntime() Runtime {
 	runtime.LockOSThread() // prevent multiple quickjs runtime from being created
-	rt := Runtime{ref: C.JS_NewRuntime(), loop: NewLoop()}
+	rt := Runtime{ref: C.JS_NewRuntime()}
 	C.JS_SetCanBlock(rt.ref, C.int(1))
 	return rt
 }
@@ -31,7 +28,6 @@ func (r Runtime) RunGC() {
 
 // Close will free the runtime pointer.
 func (r Runtime) Close() {
-	r.loop.stop() // stop loop
 	C.JS_FreeRuntime(r.ref)
 }
 
@@ -61,46 +57,8 @@ func (r Runtime) NewContext() *Context {
 	C.JS_AddIntrinsicOperators(ref)
 	C.JS_EnableBignumExt(ref, C.int(1))
 
+	C.js_init_module_std(ref, C.CString("std"))
+	C.js_init_module_os(ref, C.CString("os"))
+
 	return &Context{ref: ref, runtime: &r}
-}
-
-// ExecutePendingJob will execute all pending jobs.
-func (r Runtime) ExecutePendingJob() (Context, error) {
-	var ctx Context
-
-	err := C.JS_ExecutePendingJob(r.ref, &ctx.ref)
-	if err <= 0 {
-		if err == 0 {
-			return ctx, io.EOF
-		}
-		return ctx, ctx.Exception()
-	}
-
-	return ctx, nil
-}
-
-// IsJobPending returns true if there is a pending job.
-func (r Runtime) IsJobPending() bool {
-	return C.JS_IsJobPending(r.ref) == 1
-}
-
-// IsLoopJobPending returns true if there is a pending loop job.
-func (r Runtime) IsLoopJobPending() bool {
-	return r.loop.isLoopPending()
-}
-
-func (r Runtime) ExecuteAllPendingJobs() error {
-	var err error
-	for r.loop.isLoopPending() || r.IsJobPending() {
-		// execute loop job
-		r.loop.run()
-
-		// excute promise job
-		_, err := r.ExecutePendingJob()
-		if err == io.EOF {
-			err = nil
-		}
-		time.Sleep(time.Millisecond * 1) // prevent 100% CPU
-	}
-	return err
 }

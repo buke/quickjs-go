@@ -59,7 +59,7 @@ func Example() {
 	defer ret.Free()
 
 	// wait for promise resolve
-	rt.ExecuteAllPendingJobs()
+	ctx.Loop()
 
 	asyncRet, _ := ctx.Eval("ret")
 	defer asyncRet.Free()
@@ -653,27 +653,22 @@ func TestAsyncFunction(t *testing.T) {
 	`)
 	defer ret1.Free()
 
-	ctx.ScheduleJob(func() {
-		ret2, _ := ctx.Eval(`ret = ret + "Job Done: ";`)
-		defer ret2.Free()
-	})
-
 	// wait for job resolve
-	rt.ExecuteAllPendingJobs()
+	ctx.Loop()
 
 	// testAsync
-	ret3, _ := ctx.Eval(`
+	ret2, _ := ctx.Eval(`
 		testAsync('Hello ', 'Async').then(v => ret = ret + v)
 	`)
-	defer ret3.Free()
+	defer ret2.Free()
 
 	// wait promise execute
-	rt.ExecuteAllPendingJobs()
+	ctx.Loop()
 
-	ret4, _ := ctx.Eval("ret")
-	defer ret4.Free()
+	ret3, _ := ctx.Eval("ret")
+	defer ret3.Free()
 
-	require.EqualValues(t, "Job Done: Hello Async", ret4.String())
+	require.EqualValues(t, "Hello Async", ret3.String())
 }
 
 func TestSetInterruptHandler(t *testing.T) {

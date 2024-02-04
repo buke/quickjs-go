@@ -28,7 +28,7 @@ Go bindings to QuickJS: a fast, small, and embeddable ES2020 JavaScript interpre
 
 1. Free `quickjs.Runtime` and `quickjs.Context` once you are done using them.
 2. Free `quickjs.Value`'s returned by `Eval()` and `EvalFile()`. All other values do not need to be freed, as they get garbage-collected.
-3. Use `ExecuteAllPendingJobs` wait for promise/job result after you using promise/job
+3. Use `ctx.Loop()` wait for promise/job result after you using promise/job
 4. You may access the stacktrace of an error returned by `Eval()` or `EvalFile()` by casting it to a `*quickjs.Error`.
 5. Make new copies of arguments should you want to return them in functions you created.
 
@@ -148,7 +148,7 @@ func main() {
 	defer ret.Free()
 
 	// wait for promise resolve
-	rt.ExecuteAllPendingJobs()
+    ctx.Loop()
 
     //get promise result
 	asyncRet, _ := ctx.Eval("ret")
