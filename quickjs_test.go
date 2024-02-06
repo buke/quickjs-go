@@ -96,7 +96,7 @@ func TestRuntimeMemoryLimit(t *testing.T) {
 	defer rt.Close()
 
 	// set runtime options
-	rt.SetMemoryLimit(256 * 1024) //512KB
+	rt.SetMemoryLimit(128 * 1024) //512KB
 
 	ctx := rt.NewContext()
 	defer ctx.Close()
