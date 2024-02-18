@@ -25,11 +25,11 @@ jobs:
     
     - name: Build linux amd64
       if: matrix.platform == 'ubuntu-latest'
-      run: mkdir -p deps/libs/linux_amd64 && cd deps/quickjs && docker run --rm -v $(pwd):/workdir multiarch/crossbuild /bin/bash -c "cd /workdir && make clean && make libquickjs.a "  && mv libquickjs.a ../libs/linux_amd64
+      run: mkdir -p deps/libs/linux_amd64 && cd deps/quickjs && docker run --rm -v $(pwd):/workdir multiarch/crossbuild /bin/bash -c "cd /workdir && make clean && make -e CONFIG_LTO=y libquickjs.a "  && mv libquickjs.a ../libs/linux_amd64
 
     - name: Build linux arm64
       if: matrix.platform == 'ubuntu-latest'
-      run: mkdir -p deps/libs/linux_arm64 && cd deps/quickjs && docker run --rm -v $(pwd):/workdir -e CROSS_TRIPLE=aarch64-linux-gnu multiarch/crossbuild /bin/bash -c "cd /workdir && make clean && make libquickjs.a "  && mv libquickjs.a ../libs/linux_arm64
+      run: mkdir -p deps/libs/linux_arm64 && cd deps/quickjs && docker run --rm -v $(pwd):/workdir -e CROSS_TRIPLE=aarch64-linux-gnu multiarch/crossbuild /bin/bash -c "cd /workdir && make clean && make -e CONFIG_LTO=y libquickjs.a "  && mv libquickjs.a ../libs/linux_arm64
 
     - name: Create PR For Linux 
       if: matrix.platform == 'ubuntu-latest'
@@ -46,11 +46,11 @@ jobs:
 
     - name: Build darwin amd64 
       if: matrix.platform == 'macos-latest'
-      run: mkdir -p deps/libs/darwin_amd64 && cd deps/quickjs && make clean && make -e CONFIG_CLANG=y CONFIG_DEFAULT_AR=y libquickjs.a && mv libquickjs.a ../libs/darwin_amd64
+      run: mkdir -p deps/libs/darwin_amd64 && cd deps/quickjs && make clean && make -e CONFIG_CLANG=y CONFIG_DEFAULT_AR=y CONFIG_LTO=y libquickjs.a && mv libquickjs.a ../libs/darwin_amd64
 
     - name: Build darwin arm64 
       if: matrix.platform == 'macos-latest'
-      run: mkdir -p deps/libs/darwin_arm64 && cd deps/quickjs && make clean && make -e CONFIG_CLANG=y CONFIG_DEFAULT_AR=y CONFIG_DARWIN_ARM64=y libquickjs.a && mv libquickjs.a ../libs/darwin_arm64
+      run: mkdir -p deps/libs/darwin_arm64 && cd deps/quickjs && make clean && make -e CONFIG_CLANG=y CONFIG_DEFAULT_AR=y CONFIG_DARWIN_ARM64=y CONFIG_LTO=y libquickjs.a && mv libquickjs.a ../libs/darwin_arm64
       
     - name: Create PR For Darwin
       if: matrix.platform == 'macos-latest'
@@ -67,7 +67,7 @@ jobs:
 
     - name: Build windows amd64 
       if: matrix.platform == 'windows-latest'
-      run: cd deps/quickjs && make clean && make -e CONFIG_WIN32=y  libquickjs.a && copy libquickjs.a ../libs/windows_amd64
+      run: cd deps/quickjs && make clean && make -e CONFIG_WIN32=y CONFIG_LTO=y libquickjs.a && copy libquickjs.a ../libs/windows_amd64
 
     - name: Create PR For Windows
       if: matrix.platform == 'windows-latest'
