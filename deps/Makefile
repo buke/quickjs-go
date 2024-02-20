@@ -48,12 +48,23 @@ PREFIX?=/usr/local
 #CONFIG_ASAN=y
 # use memory sanitizer
 #CONFIG_MSAN=y
-# include the code for BigFloat/BigDecimal, math mode and faster large integers
 # use UB sanitizer
 #CONFIG_UBSAN=y
+
+# include the code for BigFloat/BigDecimal and math mode
 CONFIG_BIGNUM=y
 
 OBJDIR=.obj
+
+ifdef CONFIG_ASAN
+OBJDIR:=$(OBJDIR)/asan
+endif
+ifdef CONFIG_MSAN
+OBJDIR:=$(OBJDIR)/msan
+endif
+ifdef CONFIG_UBSAN
+OBJDIR:=$(OBJDIR)/ubsan
+endif
 
 ifdef CONFIG_DARWIN
 # use clang instead of gcc
@@ -343,6 +354,7 @@ clean:
 	rm -f examples/*.so tests/*.so
 	rm -rf $(OBJDIR)/ *.dSYM/ qjs-debug
 	rm -rf run-test262-debug run-test262-32
+	rm -f run_octane run_sunspider_like
 
 install: all
 	mkdir -p "$(DESTDIR)$(PREFIX)/bin"
@@ -433,6 +445,7 @@ test: qjs
 	./qjs tests/test_language.js
 	./qjs tests/test_builtin.js
 	./qjs tests/test_loop.js
+	./qjs tests/test_bignum.js
 	./qjs tests/test_std.js
 	./qjs tests/test_worker.js
 ifdef CONFIG_SHARED_LIBS
@@ -445,7 +458,7 @@ endif
 endif
 ifdef CONFIG_BIGNUM
 	./qjs --bignum tests/test_op_overloading.js
-	./qjs --bignum tests/test_bignum.js
+	./qjs --bignum tests/test_bigfloat.js
 	./qjs --qjscalc tests/test_qjscalc.js
 endif
 ifdef CONFIG_M32
@@ -453,11 +466,12 @@ ifdef CONFIG_M32
 	./qjs32 tests/test_language.js
 	./qjs32 tests/test_builtin.js
 	./qjs32 tests/test_loop.js
+	./qjs32 tests/test_bignum.js
 	./qjs32 tests/test_std.js
 	./qjs32 tests/test_worker.js
 ifdef CONFIG_BIGNUM
 	./qjs32 --bignum tests/test_op_overloading.js
-	./qjs32 --bignum tests/test_bignum.js
+	./qjs32 --bignum tests/test_bigfloat.js
 	./qjs32 --qjscalc tests/test_qjscalc.js
 endif
 endif
@@ -472,31 +486,41 @@ microbench: qjs
 microbench-32: qjs32
 	./qjs32 --std tests/microbench.js
 
+ifeq ($(wildcard test262o/tests.txt),)
+test2o test2o-32 test2o-update:
+	@echo test262o tests not installed
+else
 # ES5 tests (obsolete)
 test2o: run-test262
-	time ./run-test262 -m -c test262o.conf
+	time ./run-test262 -t -m -c test262o.conf
 
 test2o-32: run-test262-32
-	time ./run-test262-32 -m -c test262o.conf
+	time ./run-test262-32 -t -m -c test262o.conf
 
 test2o-update: run-test262
-	./run-test262 -u -c test262o.conf
+	./run-test262 -t -u -c test262o.conf
+endif
 
+ifeq ($(wildcard test262o/tests.txt),)
+test2 test2-32 test2-update test2-default test2-check:
+	@echo test262 tests not installed
+else
 # Test262 tests
 test2-default: run-test262
-	time ./run-test262 -m -c test262.conf
+	time ./run-test262 -t -m -c test262.conf
 
 test2: run-test262
-	time ./run-test262 -m -c test262.conf -a
+	time ./run-test262 -t -m -c test262.conf -a
 
 test2-32: run-test262-32
-	time ./run-test262-32 -m -c test262.conf -a
+	time ./run-test262-32 -t -m -c test262.conf -a
 
 test2-update: run-test262
-	./run-test262 -u -c test262.conf -a
+	./run-test262 -t -u -c test262.conf -a
 
 test2-check: run-test262
-	time ./run-test262 -m -c test262.conf -E -a
+	time ./run-test262 -t -m -c test262.conf -E -a
+endif
 
 testall: all test microbench test2o test2
 
@@ -510,5 +534,19 @@ bench-v8: qjs
 
 tests/bjson.so: $(OBJDIR)/tests/bjson.pic.o
 	$(CC) $(LDFLAGS) -shared -o $@ $^ $(LIBS)
+
+BENCHMARKDIR=../quickjs-benchmarks
+
+run_sunspider_like: $(BENCHMARKDIR)/run_sunspider_like.c
+	$(CC) $(CFLAGS) $(LDFLAGS) -DNO_INCLUDE_DIR -I. -o $@ $< libquickjs$(LTOEXT).a $(LIBS)
+
+run_octane: $(BENCHMARKDIR)/run_octane.c
+	$(CC) $(CFLAGS) $(LDFLAGS) -DNO_INCLUDE_DIR -I. -o $@ $< libquickjs$(LTOEXT).a $(LIBS)
+
+benchmarks: run_sunspider_like run_octane
+	./run_sunspider_like $(BENCHMARKDIR)/kraken-1.0/
+	./run_sunspider_like $(BENCHMARKDIR)/kraken-1.1/
+	./run_sunspider_like $(BENCHMARKDIR)/sunspider-1.0/
+	./run_octane $(BENCHMARKDIR)/
 
 -include $(wildcard $(OBJDIR)/*.d)
