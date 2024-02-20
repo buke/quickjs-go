@@ -16,6 +16,7 @@ Go bindings to QuickJS: a fast, small, and embeddable ES2020 JavaScript interpre
 | v0.1.x     | v2021-03-27 |
 | v0.2.x     | v2023-12-09 |
 | v0.3.x     | v2024-01-13 |
+| v0.4.x     | v2024-02-14 |
 
 ## Features
 * Evaluate script
