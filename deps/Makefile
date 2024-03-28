@@ -443,7 +443,7 @@ endif
 test: qjs
 	./qjs tests/test_closure.js
 	./qjs tests/test_language.js
-	./qjs tests/test_builtin.js
+	./qjs --std tests/test_builtin.js
 	./qjs tests/test_loop.js
 	./qjs tests/test_bignum.js
 	./qjs tests/test_std.js
@@ -464,7 +464,7 @@ endif
 ifdef CONFIG_M32
 	./qjs32 tests/test_closure.js
 	./qjs32 tests/test_language.js
-	./qjs32 tests/test_builtin.js
+	./qjs32 --std tests/test_builtin.js
 	./qjs32 tests/test_loop.js
 	./qjs32 tests/test_bignum.js
 	./qjs32 tests/test_std.js
@@ -528,9 +528,24 @@ testall-32: all test-32 microbench-32 test2o-32 test2-32
 
 testall-complete: testall testall-32
 
+node-test:
+	node tests/test_closure.js
+	node tests/test_language.js
+	node tests/test_builtin.js
+	node tests/test_loop.js
+	node tests/test_bignum.js
+
+node-microbench:
+	node tests/microbench.js -s microbench-node.txt
+	node --jitless tests/microbench.js -s microbench-node-jitless.txt
+
 bench-v8: qjs
 	make -C tests/bench-v8
 	./qjs -d tests/bench-v8/combined.js
+
+node-bench-v8:
+	make -C tests/bench-v8
+	node --jitless tests/bench-v8/combined.js
 
 tests/bjson.so: $(OBJDIR)/tests/bjson.pic.o
 	$(CC) $(LDFLAGS) -shared -o $@ $^ $(LIBS)
