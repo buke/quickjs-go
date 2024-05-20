@@ -190,9 +190,8 @@ jobs:
               with:
                   submodules: true
                   fetch-depth: 1
-            - name: build
-              shell: alpine.sh {0}
-              run: |
+            - name: Copy headers
+              run: 
                 cp -a deps/quickjs/*.h deps/include/
             - name: Create PR
               uses: peter-evans/create-pull-request@v6
