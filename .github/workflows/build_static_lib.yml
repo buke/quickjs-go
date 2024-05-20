@@ -27,7 +27,6 @@ jobs:
               run: |
                 mkdir -p deps/libs/linux_amd64
                 cd deps/quickjs
-                cp *.h ../include
                 make clean
                 make -e CONFIG_LTO=y libquickjs.a
                 mv libquickjs.a ../libs/linux_amd64
@@ -183,3 +182,22 @@ jobs:
                   branch-suffix: random
                   delete-branch: true
                   title: Update QuickJS Static library For windows_amd64
+
+    update_headers:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+              with:
+                  submodules: true
+                  fetch-depth: 1
+            - name: build
+              shell: alpine.sh {0}
+              run: |
+                cp -a deps/quickjs/*.h deps/include/
+            - name: Create PR
+              uses: peter-evans/create-pull-request@v6
+              with:
+                  commit-message: Update QuickJS Header Files
+                  branch-suffix: random
+                  delete-branch: true
+                  title: Update QuickJS Header Files
