@@ -25,6 +25,7 @@ jobs:
             - name: build
               shell: alpine.sh {0}
               run: |
+                cd deps/quickjs
                 make clean
                 make -e CONFIG_LTO=y libquickjs.a
                 mv libquickjs.a ../libs/linux_amd64
