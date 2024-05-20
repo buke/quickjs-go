@@ -9,7 +9,20 @@ English | [简体中文](README_zh-cn.md)
 
 Go bindings to QuickJS: a fast, small, and embeddable ES2020 JavaScript interpreter.
 
-## Version Support
+## Platform Support
+we prebuilt quickjs static library for the following platforms:
+
+|  Platform | Arch | Static Library |
+| --------- | ---- | -------------- |
+| Linux     | x64  | [libquickjs.a](deps/libs/linux_amd64/libquickjs.a)  |
+| Linux     | arm64| [libquickjs.a](deps/libs/linux_arm64/libquickjs.a)  |
+| Windows   | x64  | [libquickjs.a](deps/libs/windows_amd64/libquickjs.a)  |
+| Windows   | x86  | [libquickjs.a](deps/libs/windows_386/libquickjs.a)    |
+| MacOS     | x64  | [libquickjs.a](deps/libs/darwin_amd64/libquickjs.a) |
+| MacOS     | arm64| [libquickjs.a](deps/libs/darwin_arm64/libquickjs.a) |
+
+
+## Version Notes
 
 | quickjs-go | QuickJS |
 | ---------- | ------- |
