@@ -22,7 +22,7 @@ we prebuilt quickjs static library for the following platforms:
 | MacOS     | arm64| [libquickjs.a](deps/libs/darwin_arm64/libquickjs.a) |
 
 
-## Version Support
+## Version Notes
 
 | quickjs-go | QuickJS |
 | ---------- | ------- |

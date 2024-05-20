@@ -21,7 +21,7 @@ Go 语言的QuickJS绑定库：快速、小型、可嵌入的ES2020 JavaScript�
 | MacOS    | x64          | [libquickjs.a](deps/libs/darwin_amd64/libquickjs.a) |
 | MacOS    | arm64        | [libquickjs.a](deps/libs/darwin_arm64/libquickjs.a) |
 
-## 版本支持
+## 版本说明
 
 | quickjs-go | QuickJS |
 | ---------- | ------- |
