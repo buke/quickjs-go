@@ -124,7 +124,7 @@ jobs:
             uses: egor-tensin/setup-mingw@v2.2.0
             with:
                 platform: x86
-                version: 12.2.0 
+                version: 10.3.0
           - name: build
             run: |
               mkdir deps/libs/windows_386 -force
@@ -151,7 +151,7 @@ jobs:
               uses: egor-tensin/setup-mingw@v2.2.0
               with:
                   platform: x64
-                  version: 12.2.0 
+                  version: 10.3.0
             - name: build
               run: |
                 mkdir deps/libs/windows_amd64 -force
