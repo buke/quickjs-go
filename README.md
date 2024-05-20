@@ -21,6 +21,7 @@ we prebuilt quickjs static library for the following platforms:
 | MacOS     | x64  | [libquickjs.a](deps/libs/darwin_amd64/libquickjs.a) |
 | MacOS     | arm64| [libquickjs.a](deps/libs/darwin_arm64/libquickjs.a) |
 
+\* The windows static library is compiled based on mingw32 12.2.0. Please confirm  go version > 1.20.0
 
 ## Version Notes
 
