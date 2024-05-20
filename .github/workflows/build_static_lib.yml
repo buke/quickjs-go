@@ -1,0 +1,180 @@
+name: Build static library for QuickJS
+
+# on:
+#     pull_request:
+#         types:
+#         - opened
+#         branches:
+#         - 'dependabot/submodules/deps/quickjs-*'
+
+on:
+    workflow_dispatch:
+
+jobs:
+    linux-x86_64:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+              with:
+                  submodules: true
+                  fetch-depth: 1
+            - uses: jirutka/setup-alpine@v1
+              with:
+                  arch: x86_64
+                  packages: "build-base make cmake"
+            - name: build
+              shell: alpine.sh {0}
+              run: |
+                mkdir -p deps/libs/linux_amd64
+                cd deps/quickjs
+                make clean
+                make -e CONFIG_LTO=y libquickjs.a
+                mv libquickjs.a ../libs/linux_amd64
+            - name: Create PR
+              uses: peter-evans/create-pull-request@v6
+              with:
+                  commit-message: Update QuickJS Static Library For Linux x86_64
+                  branch-suffix: random
+                  delete-branch: true
+                  title: Update QuickJS Static library For Linux x86_64
+
+    linux-aarch64:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+              with:
+                submodules: true
+                fetch-depth: 1
+            - uses: jirutka/setup-alpine@v1
+              with:
+                arch: aarch64
+                packages: "build-base make cmake"
+            - name: build
+              shell: alpine.sh {0}
+              run: |
+                mkdir -p deps/libs/linux_arm64
+                cd deps/quickjs
+                make clean
+                make -e CONFIG_LTO=y libquickjs.a
+                mv libquickjs.a ../libs/linux_arm64
+            - name: Create PR
+              uses: peter-evans/create-pull-request@v6
+              with:
+                commit-message: Update QuickJS Static Library For Linux aarch64
+                branch-suffix: random
+                delete-branch: true
+                title: Update QuickJS Static library For Linux aarch64
+
+    darwin_amd64:
+        runs-on: macos-latest
+        steps:
+            - uses: actions/checkout@v4
+              with:
+                  submodules: true
+                  fetch-depth: 1
+            - name: build
+              run: |
+                mkdir -p deps/libs/darwin_amd64
+                cd deps/quickjs
+                make clean
+                make -e CONFIG_LTO=y libquickjs.a
+                mv libquickjs.a ../libs/darwin_amd64
+            - name: Create PR
+              uses: peter-evans/create-pull-request@v6
+              with:
+                  commit-message: Update QuickJS Static Library For darwin_amd64
+                  branch-suffix: random
+                  delete-branch: true
+                  title: Update QuickJS Static library For darwin_amd64
+
+    darwin_arm64:
+        runs-on: macos-latest
+        steps:
+            - uses: actions/checkout@v4
+              with:
+                  submodules: true
+                  fetch-depth: 1
+            - name: build
+              run: |
+                mkdir -p deps/libs/darwin_arm64
+                cd deps/quickjs
+                make clean
+                sed -i '.bak' 's/CFLAGS += -Wextra/CFLAGS += -Wextra -target arm64-apple-macos12/' Makefile
+                make -e CONFIG_LTO=y libquickjs.a
+                mv Makefile.bak Makefile
+                mv libquickjs.a ../libs/darwin_arm64
+            - name: Create PR For darwin_arm64
+              uses: peter-evans/create-pull-request@v6
+              with:
+                  commit-message: Update QuickJS Static Library For darwin_arm64
+                  branch-suffix: random
+                  delete-branch: true
+                  title: Update QuickJS Static library For darwin_arm64
+                  
+                        
+    windows_386:
+      runs-on: windows-latest
+      steps:
+          - uses: actions/checkout@v4
+            with:
+                submodules: true
+                fetch-depth: 1
+          - name: Set up MinGW
+            uses: egor-tensin/setup-mingw@v2.2.0
+            with:
+                platform: x86
+                version: 12.2.0 
+          - name: build
+            run: |
+              mkdir deps/libs/windows_386 -force
+              cd deps/quickjs
+              make clean
+              make -e CONFIG_WIN32=y CONFIG_M32=y CONFIG_LTO=y libquickjs.a
+              copy libquickjs.a ../libs/windows_386
+          - name: Create PR
+            uses: peter-evans/create-pull-request@v6
+            with:
+                commit-message: Update QuickJS Static Library For windows_386
+                branch-suffix: random
+                delete-branch: true
+                title: Update QuickJS Static library For windows_386
+
+    windows_amd64:
+        runs-on: windows-latest
+        steps:
+            - uses: actions/checkout@v4
+              with:
+                  submodules: true
+                  fetch-depth: 1
+            - name: build
+              run: |
+                mkdir deps/libs/windows_amd64 -force
+                cd deps/quickjs
+                make clean
+                make -e CONFIG_WIN32=y CONFIG_LTO=y libquickjs.a
+                copy libquickjs.a ../libs/windows_amd64
+            - name: Create PR
+              uses: peter-evans/create-pull-request@v6
+              with:
+                  commit-message: Update QuickJS Static Library For windows_amd64
+                  branch-suffix: random
+                  delete-branch: true
+                  title: Update QuickJS Static library For windows_amd64
+
+    update_headers:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+              with:
+                  submodules: true
+                  fetch-depth: 1
+            - name: Copy headers
+              run: 
+                cp -a deps/quickjs/*.h deps/include/
+            - name: Create PR
+              uses: peter-evans/create-pull-request@v6
+              with:
+                  commit-message: Update QuickJS Header Files
+                  branch-suffix: random
+                  delete-branch: true
+                  title: Update QuickJS Header Files
