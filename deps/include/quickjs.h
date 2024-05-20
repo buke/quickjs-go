@@ -633,7 +633,9 @@ static inline JS_BOOL JS_IsObject(JSValueConst v)
 
 JSValue JS_Throw(JSContext *ctx, JSValue obj);
 JSValue JS_GetException(JSContext *ctx);
+JS_BOOL JS_HasException(JSContext *ctx);
 JS_BOOL JS_IsError(JSContext *ctx, JSValueConst val);
+void JS_SetUncatchableError(JSContext *ctx, JSValueConst val, JS_BOOL flag);
 void JS_ResetUncatchableError(JSContext *ctx);
 JSValue JS_NewError(JSContext *ctx);
 JSValue __js_printf_like(2, 3) JS_ThrowSyntaxError(JSContext *ctx, const char *fmt, ...);
@@ -681,6 +683,10 @@ static inline JSValue JS_DupValueRT(JSRuntime *rt, JSValueConst v)
     }
     return (JSValue)v;
 }
+
+JS_BOOL JS_StrictEq(JSContext *ctx, JSValueConst op1, JSValueConst op2);
+JS_BOOL JS_SameValue(JSContext *ctx, JSValueConst op1, JSValueConst op2);
+JS_BOOL JS_SameValueZero(JSContext *ctx, JSValueConst op1, JSValueConst op2);
 
 int JS_ToBool(JSContext *ctx, JSValueConst val); /* return -1 for JS_EXCEPTION */
 int JS_ToInt32(JSContext *ctx, int32_t *pres, JSValueConst val);
@@ -824,6 +830,23 @@ JSValue JS_NewArrayBuffer(JSContext *ctx, uint8_t *buf, size_t len,
 JSValue JS_NewArrayBufferCopy(JSContext *ctx, const uint8_t *buf, size_t len);
 void JS_DetachArrayBuffer(JSContext *ctx, JSValueConst obj);
 uint8_t *JS_GetArrayBuffer(JSContext *ctx, size_t *psize, JSValueConst obj);
+
+typedef enum JSTypedArrayEnum {
+    JS_TYPED_ARRAY_UINT8C = 0,
+    JS_TYPED_ARRAY_INT8,
+    JS_TYPED_ARRAY_UINT8,
+    JS_TYPED_ARRAY_INT16,
+    JS_TYPED_ARRAY_UINT16,
+    JS_TYPED_ARRAY_INT32,
+    JS_TYPED_ARRAY_UINT32,
+    JS_TYPED_ARRAY_BIG_INT64,
+    JS_TYPED_ARRAY_BIG_UINT64,
+    JS_TYPED_ARRAY_FLOAT32,
+    JS_TYPED_ARRAY_FLOAT64,
+} JSTypedArrayEnum;
+
+JSValue JS_NewTypedArray(JSContext *ctx, int argc, JSValueConst *argv,
+                         JSTypedArrayEnum array_type);
 JSValue JS_GetTypedArrayBuffer(JSContext *ctx, JSValueConst obj,
                                size_t *pbyte_offset,
                                size_t *pbyte_length,
