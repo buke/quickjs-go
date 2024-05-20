@@ -6,6 +6,7 @@ on:
         - opened
         branches:
         - 'dependabot/submodules/deps/quickjs-*'
+    workflow_dispatch:
 
 # on:
 #     workflow_dispatch:
@@ -113,7 +114,7 @@ jobs:
                   
                         
     windows_386:
-      runs-on: windows-latest
+      runs-on: windows-2019
       steps:
           - uses: actions/checkout@v4
             with:
@@ -140,12 +141,17 @@ jobs:
                 title: Update QuickJS Static library For windows_386
 
     windows_amd64:
-        runs-on: windows-latest
+        runs-on: windows-2019
         steps:
             - uses: actions/checkout@v4
               with:
                   submodules: true
                   fetch-depth: 1
+            - name: Set up MinGW
+              uses: egor-tensin/setup-mingw@v2.2.0
+              with:
+                  platform: x64
+                  version: 12.2.0 
             - name: build
               run: |
                 mkdir deps/libs/windows_amd64 -force
