@@ -27,6 +27,7 @@ jobs:
               run: |
                 mkdir -p deps/libs/linux_amd64
                 cd deps/quickjs
+                cp *.h ../include
                 make clean
                 make -e CONFIG_LTO=y libquickjs.a
                 mv libquickjs.a ../libs/linux_amd64
