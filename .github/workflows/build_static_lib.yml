@@ -137,7 +137,7 @@ jobs:
                 mkdir -p deps/libs/windows_386
                 cd deps/quickjs
                 make clean
-                make -e CONFIG_LTO=y libquickjs.a
+                make -e CONFIG_WIN32=y CONFIG_LTO=y libquickjs.a
                 mv libquickjs.a ../libs/windows_386
             - name: Create PR
               uses: peter-evans/create-pull-request@v6
@@ -173,7 +173,7 @@ jobs:
                 mkdir -p deps/libs/windows_amd64
                 cd deps/quickjs
                 make clean
-                make -e CONFIG_LTO=y libquickjs.a
+                make -e CONFIG_WIN32=y CONFIG_LTO=y libquickjs.a
                 mv libquickjs.a ../libs/windows_amd64
             - name: Create PR
               uses: peter-evans/create-pull-request@v6
