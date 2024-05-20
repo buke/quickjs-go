@@ -9,6 +9,18 @@
 
 Go 语言的QuickJS绑定库：快速、小型、可嵌入的ES2020 JavaScript解释器。
 
+## 平台支持
+使用预编译的quickjs静态库，支持以下平台：
+
+|  平台    | 架构 | 静态库 |
+| -------- | ------------ | --------------------------------------------------- |
+| Linux    | x64          | [libquickjs.a](deps/libs/linux_amd64/libquickjs.a)  |
+| Linux    | arm64        | [libquickjs.a](deps/libs/linux_arm64/libquickjs.a)  |
+| Windows  | x64          | [libquickjs.a](deps/libs/windows_amd64/libquickjs.a)  |
+| Windows  | x86          | [libquickjs.a](deps/libs/windows_386/libquickjs.a)    |
+| MacOS    | x64          | [libquickjs.a](deps/libs/darwin_amd64/libquickjs.a) |
+| MacOS    | arm64        | [libquickjs.a](deps/libs/darwin_arm64/libquickjs.a) |
+
 ## 版本支持
 
 | quickjs-go | QuickJS |
