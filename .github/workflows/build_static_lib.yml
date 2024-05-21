@@ -78,8 +78,10 @@ jobs:
                 mkdir -p deps/libs/darwin_amd64
                 cd deps/quickjs
                 make clean
+                sed -i '.bak' 's/CFLAGS += -Wextra/CFLAGS += -Wextra -target x86_64-apple-macos12/' Makefile
                 make -e CONFIG_LTO=y libquickjs.a
-                mv libquickjs.a ../libs/darwin_amd64
+                mv Makefile.bak Makefile
+                mv libquickjs.a ../libs/darwin_amd64 
             - name: Create PR
               uses: peter-evans/create-pull-request@v6
               with:
