@@ -21,6 +21,11 @@ type Context struct {
 	asyncProxy *Value
 }
 
+// Runtime returns the runtime of the context.
+func (ctx *Context) Runtime() *Runtime {
+	return ctx.runtime
+}
+
 // Free will free context and all associated objects.
 func (ctx *Context) Close() {
 	if ctx.proxy != nil {
