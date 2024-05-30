@@ -2,6 +2,7 @@ package quickjs
 
 /*
 #include "bridge.h"
+#include <time.h>
 */
 import "C"
 import (
@@ -130,7 +131,7 @@ func (r Runtime) SetMaxStackSize(stack_size uint64) {
 
 // SetExecuteTimeout will set the runtime's execute timeout; default is 0
 func (r Runtime) SetExecuteTimeout(timeout uint64) {
-	C.SetExecuteTimeout(r.ref, C.long(timeout))
+	C.SetExecuteTimeout(r.ref, C.time_t(timeout))
 }
 
 // NewContext creates a new JavaScript context.
