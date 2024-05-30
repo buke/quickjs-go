@@ -1,6 +1,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 #include "quickjs.h"
 #include "quickjs-libc.h"
 
@@ -23,3 +24,5 @@ typedef struct {
 } handlerArgs;
 
 extern void SetInterruptHandler(JSRuntime *rt, void *handlerArgs);
+
+extern void SetExecuteTimeout(JSRuntime *rt, time_t timeout);

@@ -46,6 +46,11 @@ func (r Runtime) SetMaxStackSize(stack_size uint32) {
 	C.JS_SetMaxStackSize(r.ref, C.size_t(stack_size))
 }
 
+// SetExecuteTimeout will set the runtime's execute timeout; default is 0
+func (r Runtime) SetExecuteTimeout(timeout uint32) {
+	C.SetExecuteTimeout(r.ref, C.long(timeout))
+}
+
 // NewContext creates a new JavaScript context.
 // enable BigFloat/BigDecimal support and enable .
 // enable operator overloading.

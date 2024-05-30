@@ -694,6 +694,22 @@ func TestSetInterruptHandler(t *testing.T) {
 	require.Equal(t, "InternalError: interrupted", err.Error())
 }
 
+func TestSetExecuteTimeout(t *testing.T) {
+	rt := quickjs.NewRuntime()
+	defer rt.Close()
+
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	rt.SetExecuteTimeout(1)
+
+	ret, err := ctx.Eval(`while(true){}`)
+	defer ret.Free()
+
+	assert.Error(t, err, "expected interrupted by quickjs")
+	require.Equal(t, "InternalError: interrupted", err.Error())
+}
+
 func TestSetTimeout(t *testing.T) {
 	rt := quickjs.NewRuntime()
 	defer rt.Close()
