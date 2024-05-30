@@ -17,7 +17,13 @@ import (
 func Example() {
 
 	// Create a new runtime
-	rt := quickjs.NewRuntime()
+	rt := quickjs.NewRuntime(
+		quickjs.WithExecuteTimeout(30),
+		quickjs.WithMemoryLimit(128*1024),
+		quickjs.WithGCThreshold(256*1024),
+		quickjs.WithMaxStackSize(65534),
+		quickjs.WithCanBlock(true),
+	)
 	defer rt.Close()
 
 	// Create a new context
@@ -74,11 +80,14 @@ func Example() {
 }
 
 func TestRuntimeGC(t *testing.T) {
-	rt := quickjs.NewRuntime()
+	rt := quickjs.NewRuntime(
+		quickjs.WithExecuteTimeout(30),
+		quickjs.WithMemoryLimit(128*1024),
+		quickjs.WithGCThreshold(256*1024),
+		quickjs.WithMaxStackSize(65534),
+		quickjs.WithCanBlock(true),
+	)
 	defer rt.Close()
-
-	// set runtime options
-	rt.SetGCThreshold(256 * 1024)
 
 	ctx := rt.NewContext()
 	defer ctx.Close()
@@ -701,7 +710,7 @@ func TestSetExecuteTimeout(t *testing.T) {
 	ctx := rt.NewContext()
 	defer ctx.Close()
 
-	rt.SetExecuteTimeout(1)
+	rt.SetExecuteTimeout(3)
 
 	ret, err := ctx.Eval(`while(true){}`)
 	defer ret.Free()

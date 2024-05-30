@@ -65,7 +65,13 @@ import (
 
 func main() {
     // Create a new runtime
-    rt := quickjs.NewRuntime()
+	rt := quickjs.NewRuntime(
+		quickjs.WithExecuteTimeout(30),
+		quickjs.WithMemoryLimit(128*1024),
+		quickjs.WithGCThreshold(256*1024),
+		quickjs.WithMaxStackSize(65534),
+		quickjs.WithCanBlock(true),
+	)
     defer rt.Close()
 
     // Create a new context
@@ -163,7 +169,7 @@ func main() {
 	defer ret.Free()
 
 	// wait for promise resolve
-    ctx.Loop()
+	ctx.Loop()
 
     //get promise result
 	asyncRet, _ := ctx.Eval("ret")
@@ -271,8 +277,11 @@ func main() {
     defer rt.Close()
 
     // set runtime options
-    rt.SetMemoryLimit(256 * 1024) //256KB
-    rt.SetMaxStackSize(65534)
+    rt.SetExecuteTimeout(30) // Set execute timeout to 30 seconds
+    rt.SetMemoryLimit(256 * 1024) // Set memory limit to 256KB
+    rt.SetMaxStackSize(65534) // Set max stack size to 65534
+    rt.SetGCThreshold(256 * 1024) // Set GC threshold to 256KB
+    rt.SetCanBlock(true) // Set can block to true
 
     // Create a new context
     ctx := rt.NewContext()
