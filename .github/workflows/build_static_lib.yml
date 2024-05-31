@@ -1,18 +1,13 @@
 name: Build static library for QuickJS
 
 on:
-    pull_request:
-        types:
-        - opened
-        branches:
-        - 'dependabot/submodules/deps/quickjs-*'
     workflow_dispatch:
-
-# on:
-#     workflow_dispatch:
+    pull_request:
+        types: [opened, reopened]
 
 jobs:
     linux-x86_64:
+        if:  startsWith(github.head_ref, 'dependabot/submodules/deps/quickjs')
         runs-on: ubuntu-latest
         steps:
             - uses: actions/checkout@v4
@@ -38,8 +33,10 @@ jobs:
                   branch-suffix: random
                   delete-branch: true
                   title: Update QuickJS Static library For Linux x86_64
+                  base: ${{ github.head_ref }}
 
     linux-aarch64:
+        if:  startsWith(github.head_ref, 'dependabot/submodules/deps/quickjs')
         runs-on: ubuntu-latest
         steps:
             - uses: actions/checkout@v4
@@ -65,8 +62,10 @@ jobs:
                 branch-suffix: random
                 delete-branch: true
                 title: Update QuickJS Static library For Linux aarch64
+                base: ${{ github.head_ref }}
 
     darwin_amd64:
+        if:  startsWith(github.head_ref, 'dependabot/submodules/deps/quickjs')
         runs-on: macos-latest
         steps:
             - uses: actions/checkout@v4
@@ -89,8 +88,10 @@ jobs:
                   branch-suffix: random
                   delete-branch: true
                   title: Update QuickJS Static library For darwin_amd64
+                  base: ${{ github.head_ref }}
 
     darwin_arm64:
+        if:  startsWith(github.head_ref, 'dependabot/submodules/deps/quickjs')
         runs-on: macos-latest
         steps:
             - uses: actions/checkout@v4
@@ -113,36 +114,40 @@ jobs:
                   branch-suffix: random
                   delete-branch: true
                   title: Update QuickJS Static library For darwin_arm64
+                  base: ${{ github.head_ref }}
                   
                         
     windows_386:
-      runs-on: windows-2019
-      steps:
-          - uses: actions/checkout@v4
-            with:
-                submodules: true
-                fetch-depth: 1
-          - name: Set up MinGW
-            uses: egor-tensin/setup-mingw@v2.2.0
-            with:
-                platform: x86
-                version: 12.2.0 
-          - name: build
-            run: |
-              mkdir deps/libs/windows_386 -force
-              cd deps/quickjs
-              make clean
-              make -e CONFIG_WIN32=y CONFIG_M32=y CONFIG_LTO=y libquickjs.a
-              copy libquickjs.a ../libs/windows_386
-          - name: Create PR
-            uses: peter-evans/create-pull-request@v6
-            with:
-                commit-message: Update QuickJS Static Library For windows_386
-                branch-suffix: random
-                delete-branch: true
-                title: Update QuickJS Static library For windows_386
+        if:  startsWith(github.head_ref, 'dependabot/submodules/deps/quickjs')
+        runs-on: windows-2019
+        steps:
+            - uses: actions/checkout@v4
+              with:
+                  submodules: true
+                  fetch-depth: 1
+            - name: Set up MinGW
+              uses: egor-tensin/setup-mingw@v2.2.0
+              with:
+                  platform: x86
+                  version: 12.2.0 
+            - name: build
+              run: |
+                mkdir deps/libs/windows_386 -force
+                cd deps/quickjs
+                make clean
+                make -e CONFIG_WIN32=y CONFIG_M32=y CONFIG_LTO=y libquickjs.a
+                copy libquickjs.a ../libs/windows_386
+            - name: Create PR
+              uses: peter-evans/create-pull-request@v6
+              with:
+                  commit-message: Update QuickJS Static Library For windows_386
+                  branch-suffix: random
+                  delete-branch: true
+                  title: Update QuickJS Static library For windows_386
+                  base: ${{ github.head_ref }}
 
     windows_amd64:
+        if:  startsWith(github.head_ref, 'dependabot/submodules/deps/quickjs')
         runs-on: windows-2019
         steps:
             - uses: actions/checkout@v4
@@ -168,8 +173,10 @@ jobs:
                   branch-suffix: random
                   delete-branch: true
                   title: Update QuickJS Static library For windows_amd64
+                  base: ${{ github.head_ref }}
 
     update_headers:
+        if:  startsWith(github.head_ref, 'dependabot/submodules/deps/quickjs')
         runs-on: ubuntu-latest
         steps:
             - uses: actions/checkout@v4
@@ -186,3 +193,4 @@ jobs:
                   branch-suffix: random
                   delete-branch: true
                   title: Update QuickJS Header Files
+                  base: ${{ github.head_ref }}
