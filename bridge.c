@@ -1,5 +1,6 @@
 #include "_cgo_export.h"
 #include "quickjs.h"
+#include <time.h>
 
 
 JSValue JS_NewNull() { return JS_NULL; }
@@ -26,4 +27,33 @@ int interruptHandler(JSRuntime *rt, void *handlerArgs) {
 
 void SetInterruptHandler(JSRuntime *rt, void *handlerArgs){
 	JS_SetInterruptHandler(rt, &interruptHandler, handlerArgs);
+}
+
+typedef struct {
+    time_t start;
+    time_t timeout;
+} TimeoutStruct;
+
+int timeoutHandler(JSRuntime *rt, void *opaque) {
+    TimeoutStruct* ts = (TimeoutStruct*)opaque;
+    time_t timeout = ts->timeout;
+    time_t start = ts->start;
+	if (timeout <= 0) {
+		return 0;
+	}
+
+	time_t now = time(NULL);
+	if (now - start > timeout) {
+		free(ts);
+		return 1;
+	}
+
+	return 0;
+}
+
+void SetExecuteTimeout(JSRuntime *rt, time_t timeout){
+    TimeoutStruct* ts = malloc(sizeof(TimeoutStruct));
+    ts->start = time(NULL);
+    ts->timeout = timeout;
+    JS_SetInterruptHandler(rt, &timeoutHandler, ts);
 }
