@@ -5,10 +5,9 @@ on:
     pull_request:
         types: [opened, reopened]
 
-
 jobs:
     linux-x86_64:
-        # if:  startsWith(github.head_ref, 'dependabot/submodules/deps/quickjs')
+        if:  startsWith(github.head_ref, 'dependabot/submodules/deps/quickjs')
         runs-on: ubuntu-latest
         steps:
             - uses: actions/checkout@v4
@@ -37,7 +36,7 @@ jobs:
                   base: ${{ github.head_ref }}
 
     linux-aarch64:
-        # if:  startsWith(github.head_ref, 'dependabot/submodules/deps/quickjs')
+        if:  startsWith(github.head_ref, 'dependabot/submodules/deps/quickjs')
         runs-on: ubuntu-latest
         steps:
             - uses: actions/checkout@v4
@@ -66,7 +65,7 @@ jobs:
                 base: ${{ github.head_ref }}
 
     darwin_amd64:
-        # if:  startsWith(github.head_ref, 'dependabot/submodules/deps/quickjs')
+        if:  startsWith(github.head_ref, 'dependabot/submodules/deps/quickjs')
         runs-on: macos-latest
         steps:
             - uses: actions/checkout@v4
@@ -92,7 +91,7 @@ jobs:
                   base: ${{ github.head_ref }}
 
     darwin_arm64:
-        # if:  startsWith(github.head_ref, 'dependabot/submodules/deps/quickjs')
+        if:  startsWith(github.head_ref, 'dependabot/submodules/deps/quickjs')
         runs-on: macos-latest
         steps:
             - uses: actions/checkout@v4
@@ -119,7 +118,7 @@ jobs:
                   
                         
     windows_386:
-        # if:  startsWith(github.head_ref, 'dependabot/submodules/deps/quickjs')
+        if:  startsWith(github.head_ref, 'dependabot/submodules/deps/quickjs')
         runs-on: windows-2019
         steps:
             - uses: actions/checkout@v4
@@ -148,7 +147,7 @@ jobs:
                   base: ${{ github.head_ref }}
 
     windows_amd64:
-        # if:  startsWith(github.head_ref, 'dependabot/submodules/deps/quickjs')
+        if:  startsWith(github.head_ref, 'dependabot/submodules/deps/quickjs')
         runs-on: windows-2019
         steps:
             - uses: actions/checkout@v4
@@ -177,7 +176,7 @@ jobs:
                   base: ${{ github.head_ref }}
 
     update_headers:
-        # if:  startsWith(github.head_ref, 'dependabot/submodules/deps/quickjs')
+        if:  startsWith(github.head_ref, 'dependabot/submodules/deps/quickjs')
         runs-on: ubuntu-latest
         steps:
             - uses: actions/checkout@v4
