@@ -379,3 +379,12 @@ func (ctx *Context) Exception() error {
 func (ctx *Context) Loop() {
 	C.js_std_loop(ctx.ref)
 }
+
+// Wait for a promise and execute pending jobs while waiting for it. Return the promise result or JS_EXCEPTION in case of promise rejection.
+func (ctx *Context) Await(v Value) (Value, error) {
+	val := Value{ctx: ctx, ref: C.js_std_await(ctx.ref, v.ref)}
+	if val.IsException() {
+		return val, ctx.Exception()
+	}
+	return val, nil
+}

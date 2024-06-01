@@ -741,3 +741,22 @@ func TestSetTimeout(t *testing.T) {
 
 	require.EqualValues(t, true, a.Bool())
 }
+
+func TestAwait(t *testing.T) {
+	rt := quickjs.NewRuntime()
+	defer rt.Close()
+
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	// async function bind to global
+	ctx.Globals().Set("testAsync", ctx.AsyncFunction(func(ctx *quickjs.Context, this quickjs.Value, promise quickjs.Value, args []quickjs.Value) quickjs.Value {
+		return promise.Call("resolve", ctx.String(args[0].String()+args[1].String()))
+	}))
+
+	// testAwait
+	promise, _ := ctx.Eval("testAsync('Hello ', 'Await')")
+	promiseAwait, _ := ctx.Await(promise)
+
+	require.EqualValues(t, "Hello Await", promiseAwait.String())
+}
