@@ -756,7 +756,13 @@ func TestAwait(t *testing.T) {
 
 	// testAwait
 	promise, _ := ctx.Eval("testAsync('Hello ', 'Await')")
-	promiseAwait, _ := ctx.Await(promise)
+	require.EqualValues(t, true, promise.IsPromise())
 
+	promiseAwait, _ := ctx.Await(promise)
 	require.EqualValues(t, "Hello Await", promiseAwait.String())
+
+	// test AwaitEval
+	promiseAwaitEval, _ := ctx.AwaitEval("testAsync('Hello ', 'AwaitEval')")
+	require.EqualValues(t, "Hello AwaitEval", promiseAwaitEval.String())
+
 }

@@ -356,5 +356,12 @@ func (v Value) IsObject() bool        { return C.JS_IsObject(v.ref) == 1 }
 func (v Value) IsArray() bool         { return C.JS_IsArray(v.ctx.ref, v.ref) == 1 }
 func (v Value) IsError() bool         { return C.JS_IsError(v.ctx.ref, v.ref) == 1 }
 func (v Value) IsFunction() bool      { return C.JS_IsFunction(v.ctx.ref, v.ref) == 1 }
+func (v Value) IsPromise() bool {
+	state := C.JS_PromiseState(v.ctx.ref, v.ref)
+	if state == C.JS_PROMISE_PENDING || state == C.JS_PROMISE_FULFILLED || state == C.JS_PROMISE_REJECTED {
+		return true
+	}
+	return false
+}
 
 // func (v Value) IsConstructor() bool   { return C.JS_IsConstructor(v.ctx.ref, v.ref) == 1 }
