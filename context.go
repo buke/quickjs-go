@@ -388,3 +388,12 @@ func (ctx *Context) Await(v Value) (Value, error) {
 	}
 	return val, nil
 }
+
+// AwaitEval evaluates a string and await the result. Return the promise result or JS_EXCEPTION in case of promise rejection.
+func (ctx *Context) AwaitEval(v string) (Value, error) {
+	val := Value{ctx: ctx, ref: C.js_std_await(ctx.ref, ctx.eval(v).ref)}
+	if val.IsException() {
+		return val, ctx.Exception()
+	}
+	return val, nil
+}
