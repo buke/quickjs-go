@@ -804,10 +804,28 @@ func TestModule(t *testing.T) {
 	// call module
 	r3, err := ctx.Eval(`
 	import {fib} from 'fib_foo';
-	globalThis.result = fib(9);
+	globalThis.result = fib(11);
 	`)
 	defer r3.Free()
 	require.NoError(t, err)
 
-	require.EqualValues(t, 34, ctx.Globals().Get("result").Int32())
+	require.EqualValues(t, 89, ctx.Globals().Get("result").Int32())
+
+	// load module from bytecode
+	buf, err := ctx.CompileFile("./test/fib_module.js")
+	require.NoError(t, err)
+
+	r4, err := ctx.LoadModuleBytecode(buf, "fib_foo")
+	defer r4.Free()
+	require.NoError(t, err)
+
+	r5, err := ctx.Eval(`
+	import {fib} from 'fib_foo';
+	globalThis.result = fib(12);
+	`)
+	defer r5.Free()
+	require.NoError(t, err)
+
+	require.EqualValues(t, 144, ctx.Globals().Get("result").Int32())
+
 }

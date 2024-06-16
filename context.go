@@ -399,6 +399,27 @@ func (ctx *Context) LoadModuleFile(filePath string, moduleName string) (Value, e
 	return ctx.LoadModule(string(b), moduleName)
 }
 
+// LoadModuleByteCode returns a js value with given bytecode and module name.
+func (ctx *Context) LoadModuleBytecode(buf []byte, moduleName string) (Value, error) {
+	cbuf := C.CBytes(buf)
+	cVal := C.JS_ReadObject(ctx.ref, (*C.uint8_t)(cbuf), C.size_t(len(buf)), C.JS_READ_OBJ_BYTECODE)
+	defer C.js_free(ctx.ref, unsafe.Pointer(cbuf))
+	if C.JS_IsException(cVal) == 1 {
+		return ctx.Null(), ctx.Exception()
+	}
+	if C.ValueGetTag(cVal) != C.JS_TAG_MODULE {
+		return ctx.Null(), fmt.Errorf("not a module")
+	}
+	if C.JS_ResolveModule(ctx.ref, cVal) != 0 {
+		C.JS_FreeValue(ctx.ref, cVal)
+		return ctx.Null(), fmt.Errorf("resolve module failed")
+	}
+	C.js_module_set_import_meta(ctx.ref, cVal, 0, 1)
+	cVal = C.js_std_await(ctx.ref, cVal)
+
+	return Value{ctx: ctx, ref: cVal}, nil
+}
+
 // EvalBytecode returns a js value with given bytecode.
 // Need call Free() `quickjs.Value`'s returned by `Eval()` and `EvalFile()` and `EvalBytecode()`.
 func (ctx *Context) EvalBytecode(buf []byte) (Value, error) {
@@ -440,12 +461,21 @@ func (ctx *Context) Compile(code string, opts ...EvalOption) ([]byte, error) {
 }
 
 // Compile returns a compiled bytecode with given filename.
-func (ctx *Context) CompileFile(filePath string) ([]byte, error) {
+func (ctx *Context) CompileFile(filePath string, opts ...EvalOption) ([]byte, error) {
 	b, err := os.ReadFile(filePath)
 	if err != nil {
 		return nil, err
 	}
-	return ctx.Compile(string(b), EvalFileName(filePath))
+
+	options := EvalOptions{}
+	for _, fn := range opts {
+		fn(&options)
+	}
+	if options.filename == "" {
+		opts = append(opts, EvalFileName(filePath))
+	}
+
+	return ctx.Compile(string(b), opts...)
 }
 
 // Global returns a context's global object.
