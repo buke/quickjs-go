@@ -363,6 +363,42 @@ func (ctx *Context) EvalFile(filePath string, opts ...EvalOption) (Value, error)
 	return ctx.Eval(string(b), opts...)
 }
 
+// LoadModule returns a js value with given code and module name.
+func (ctx *Context) LoadModule(code string, moduleName string) (Value, error) {
+	codePtr := C.CString(code)
+	defer C.free(unsafe.Pointer(codePtr))
+
+	filenamePtr := C.CString(moduleName)
+	defer C.free(unsafe.Pointer(filenamePtr))
+
+	if C.JS_DetectModule(codePtr, C.size_t(len(code))) == 0 {
+		return ctx.Null(), fmt.Errorf("not a module")
+	}
+
+	cFlag := C.JS_EVAL_TYPE_MODULE | C.JS_EVAL_FLAG_COMPILE_ONLY
+	cVal := C.JS_Eval(ctx.ref, codePtr, C.size_t(len(code)), filenamePtr, C.int(cFlag))
+	if C.ValueGetTag(cVal) != C.JS_TAG_MODULE {
+		return ctx.Null(), fmt.Errorf("not a module")
+	}
+	if C.JS_ResolveModule(ctx.ref, cVal) != 0 {
+		C.JS_FreeValue(ctx.ref, cVal)
+		return ctx.Null(), fmt.Errorf("resolve module failed")
+	}
+	C.js_module_set_import_meta(ctx.ref, cVal, 0, 1)
+	cVal = C.js_std_await(ctx.ref, cVal)
+
+	return Value{ctx: ctx, ref: cVal}, nil
+}
+
+// LoadModuleFile returns a js value with given file path and module name.
+func (ctx *Context) LoadModuleFile(filePath string, moduleName string) (Value, error) {
+	b, err := os.ReadFile(filePath)
+	if err != nil {
+		return ctx.Null(), err
+	}
+	return ctx.LoadModule(string(b), moduleName)
+}
+
 // EvalBytecode returns a js value with given bytecode.
 // Need call Free() `quickjs.Value`'s returned by `Eval()` and `EvalFile()` and `EvalBytecode()`.
 func (ctx *Context) EvalBytecode(buf []byte) (Value, error) {
