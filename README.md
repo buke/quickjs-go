@@ -292,6 +292,50 @@ func main() {
 }
 ```
 
+### ES6 Module Support
+```go
+
+package main
+
+import (
+	"fmt"
+    
+	"github.com/buke/quickjs-go"
+)
+
+func main() {
+// enable module import
+	rt := quickjs.NewRuntime(quickjs.WithModuleImport(true))
+	defer rt.Close()
+
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	// eval module
+	r1, err := ctx.EvalFile("./test/hello_module.js")
+	defer r1.Free()
+	require.NoError(t, err)
+	require.EqualValues(t, 55, ctx.Globals().Get("result").Int32())
+
+	// load module
+	r2, err := ctx.LoadModuleFile("./test/fib_module.js", "fib_foo")
+	defer r2.Free()
+	require.NoError(t, err)
+
+	// call module
+	r3, err := ctx.Eval(`
+	import {fib} from 'fib_foo';
+	globalThis.result = fib(9);
+	`)
+	defer r3.Free()
+	require.NoError(t, err)
+
+	require.EqualValues(t, 34, ctx.Globals().Get("result").Int32())
+}
+
+```
+
+
 ## Documentation
 Go Reference & more examples: https://pkg.go.dev/github.com/buke/quickjs-go
 

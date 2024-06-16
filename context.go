@@ -2,6 +2,7 @@ package quickjs
 
 import (
 	"fmt"
+	"os"
 	"runtime/cgo"
 	"unsafe"
 )
@@ -165,8 +166,11 @@ func (ctx *Context) Function(fn func(ctx *Context, this Value, args []Value) Val
 	ctxHandler := ctx.Int64(int64(cgo.NewHandle(ctx)))
 	args := []C.JSValue{ctx.proxy.ref, fnHandler.ref, ctxHandler.ref}
 
-	val := ctx.eval(`(proxy, fnHandler, ctx) => function() { return proxy.call(this, fnHandler, ctx, ...arguments); }`)
+	val, err := ctx.Eval(`(proxy, fnHandler, ctx) => function() { return proxy.call(this, fnHandler, ctx, ...arguments); }`)
 	defer val.Free()
+	if err != nil {
+		panic(err)
+	}
 
 	return Value{ctx: ctx, ref: C.JS_Call(ctx.ref, val.ref, ctx.Null().ref, C.int(len(args)), &args[0])}
 }
@@ -184,7 +188,7 @@ func (ctx *Context) AsyncFunction(asyncFn func(ctx *Context, this Value, promise
 	ctxHandler := ctx.Int64(int64(cgo.NewHandle(ctx)))
 	args := []C.JSValue{ctx.asyncProxy.ref, fnHandler.ref, ctxHandler.ref}
 
-	val := ctx.eval(`(proxy, fnHandler, ctx) => async function(...arguments) {
+	val, err := ctx.Eval(`(proxy, fnHandler, ctx) => async function(...arguments) {
 		let resolve, reject;
 		const promise = new Promise((resolve_, reject_) => {
 		  resolve = resolve_;
@@ -197,6 +201,9 @@ func (ctx *Context) AsyncFunction(asyncFn func(ctx *Context, this Value, promise
 		return await promise;
 	}`)
 	defer val.Free()
+	if err != nil {
+		panic(err)
+	}
 
 	return Value{ctx: ctx, ref: C.JS_Call(ctx.ref, val.ref, ctx.Null().ref, C.int(len(args)), &args[0])}
 }
@@ -225,18 +232,6 @@ func (ctx *Context) AtomIdx(idx int64) Atom {
 	return Atom{ctx: ctx, ref: C.JS_NewAtomUInt32(ctx.ref, C.uint32_t(idx))}
 }
 
-func (ctx *Context) eval(code string) Value { return ctx.evalFile(code, "code", C.JS_EVAL_TYPE_GLOBAL) }
-
-func (ctx *Context) evalFile(code, filename string, evalType C.int) Value {
-	codePtr := C.CString(code)
-	defer C.free(unsafe.Pointer(codePtr))
-
-	filenamePtr := C.CString(filename)
-	defer C.free(unsafe.Pointer(filenamePtr))
-
-	return Value{ctx: ctx, ref: C.JS_Eval(ctx.ref, codePtr, C.size_t(len(code)), filenamePtr, evalType)}
-}
-
 // Invoke invokes a function with given this value and arguments.
 func (ctx *Context) Invoke(fn Value, this Value, args ...Value) Value {
 	cargs := []C.JSValue{}
@@ -249,18 +244,159 @@ func (ctx *Context) Invoke(fn Value, this Value, args ...Value) Value {
 	return Value{ctx: ctx, ref: C.JS_Call(ctx.ref, fn.ref, this.ref, C.int(len(cargs)), &cargs[0])}
 }
 
+type EvalOptions struct {
+	js_eval_type_global       bool
+	js_eval_type_module       bool
+	js_eval_flag_strict       bool
+	js_eval_flag_strip        bool
+	js_eval_flag_compile_only bool
+	filename                  string
+	await                     bool
+}
+
+type EvalOption func(*EvalOptions)
+
+func EvalFlagGlobal() EvalOption {
+	return func(flags *EvalOptions) {
+		flags.js_eval_type_global = true
+	}
+}
+
+func EvalFlagModule() EvalOption {
+	return func(flags *EvalOptions) {
+		flags.js_eval_type_module = true
+	}
+}
+
+func EvalFlagStrict() EvalOption {
+	return func(flags *EvalOptions) {
+		flags.js_eval_flag_strict = true
+	}
+}
+
+func EvalFlagStrip() EvalOption {
+	return func(flags *EvalOptions) {
+		flags.js_eval_flag_strip = true
+	}
+}
+
+func EvalFlagCompileOnly() EvalOption {
+	return func(flags *EvalOptions) {
+		flags.js_eval_flag_compile_only = true
+	}
+}
+
+func EvalFileName(filename string) EvalOption {
+	return func(flags *EvalOptions) {
+		flags.filename = filename
+	}
+}
+
+func EvalAwait() EvalOption {
+	return func(flags *EvalOptions) {
+		flags.await = true
+	}
+}
+
 // Eval returns a js value with given code.
 // Need call Free() `quickjs.Value`'s returned by `Eval()` and `EvalFile()` and `EvalBytecode()`.
-func (ctx *Context) Eval(code string) (Value, error) { return ctx.EvalFile(code, "code") }
+// func (ctx *Context) Eval(code string) (Value, error) { return ctx.EvalFile(code, "code") }
+func (ctx *Context) Eval(code string, opts ...EvalOption) (Value, error) {
+	options := EvalOptions{
+		js_eval_type_global: true,
+		filename:            "<input>",
+		await:               false,
+	}
+	for _, fn := range opts {
+		fn(&options)
+	}
 
-// EvalFile returns a js value with given code and filename.
-// Need call Free() `quickjs.Value`'s returned by `Eval()` and `EvalFile()` and `EvalBytecode()`.
-func (ctx *Context) EvalFile(code, filename string) (Value, error) {
-	val := ctx.evalFile(code, filename, C.JS_EVAL_TYPE_GLOBAL)
+	cFlag := C.int(0)
+	if options.js_eval_type_global {
+		cFlag |= C.JS_EVAL_TYPE_GLOBAL
+	}
+	if options.js_eval_type_module {
+		cFlag |= C.JS_EVAL_TYPE_MODULE
+	}
+
+	if options.js_eval_flag_strict {
+		cFlag |= C.JS_EVAL_FLAG_STRICT
+	}
+	if options.js_eval_flag_strip {
+		cFlag |= C.JS_EVAL_FLAG_STRIP
+	}
+	if options.js_eval_flag_compile_only {
+		cFlag |= C.JS_EVAL_FLAG_COMPILE_ONLY
+	}
+
+	codePtr := C.CString(code)
+	defer C.free(unsafe.Pointer(codePtr))
+
+	filenamePtr := C.CString(options.filename)
+	defer C.free(unsafe.Pointer(filenamePtr))
+
+	if C.JS_DetectModule(codePtr, C.size_t(len(code))) != 0 {
+		cFlag |= C.JS_EVAL_TYPE_MODULE
+	}
+
+	var val Value
+	if options.await {
+		val = Value{ctx: ctx, ref: C.js_std_await(ctx.ref, C.JS_Eval(ctx.ref, codePtr, C.size_t(len(code)), filenamePtr, cFlag))}
+	} else {
+		val = Value{ctx: ctx, ref: C.JS_Eval(ctx.ref, codePtr, C.size_t(len(code)), filenamePtr, cFlag)}
+	}
 	if val.IsException() {
 		return val, ctx.Exception()
 	}
+
 	return val, nil
+}
+
+// EvalFile returns a js value with given code and filename.
+// Need call Free() `quickjs.Value`'s returned by `Eval()` and `EvalFile()` and `EvalBytecode()`.
+func (ctx *Context) EvalFile(filePath string, opts ...EvalOption) (Value, error) {
+	b, err := os.ReadFile(filePath)
+	if err != nil {
+		return ctx.Null(), err
+	}
+	opts = append(opts, EvalFileName(filePath))
+	return ctx.Eval(string(b), opts...)
+}
+
+// LoadModule returns a js value with given code and module name.
+func (ctx *Context) LoadModule(code string, moduleName string) (Value, error) {
+	codePtr := C.CString(code)
+	defer C.free(unsafe.Pointer(codePtr))
+
+	filenamePtr := C.CString(moduleName)
+	defer C.free(unsafe.Pointer(filenamePtr))
+
+	if C.JS_DetectModule(codePtr, C.size_t(len(code))) == 0 {
+		return ctx.Null(), fmt.Errorf("not a module")
+	}
+
+	cFlag := C.JS_EVAL_TYPE_MODULE | C.JS_EVAL_FLAG_COMPILE_ONLY
+	cVal := C.JS_Eval(ctx.ref, codePtr, C.size_t(len(code)), filenamePtr, C.int(cFlag))
+	if C.ValueGetTag(cVal) != C.JS_TAG_MODULE {
+		return ctx.Null(), fmt.Errorf("not a module")
+	}
+	if C.JS_ResolveModule(ctx.ref, cVal) != 0 {
+		C.JS_FreeValue(ctx.ref, cVal)
+		return ctx.Null(), fmt.Errorf("resolve module failed")
+	}
+	C.js_module_set_import_meta(ctx.ref, cVal, 0, 1)
+	cVal = C.js_std_await(ctx.ref, cVal)
+
+	return Value{ctx: ctx, ref: cVal}, nil
+}
+
+// LoadModuleFile returns a js value with given file path and module name.
+func (ctx *Context) LoadModuleFile(filePath string, moduleName string) (Value, error) {
+	b, err := os.ReadFile(filePath)
+	if err != nil {
+		return ctx.Null(), err
+	}
+	return ctx.LoadModule(string(b), moduleName)
 }
 
 // EvalBytecode returns a js value with given bytecode.
@@ -282,17 +418,13 @@ func (ctx *Context) EvalBytecode(buf []byte) (Value, error) {
 }
 
 // Compile returns a compiled bytecode with given code.
-func (ctx *Context) Compile(code string) ([]byte, error) {
-	return ctx.CompileFile(code, "code")
-}
-
-// Compile returns a compiled bytecode with given filename.
-func (ctx *Context) CompileFile(code, filename string) ([]byte, error) {
-	val := ctx.evalFile(code, filename, C.JS_EVAL_FLAG_COMPILE_ONLY)
-	defer val.Free()
-	if val.IsException() {
-		return nil, ctx.Exception()
+func (ctx *Context) Compile(code string, opts ...EvalOption) ([]byte, error) {
+	opts = append(opts, EvalFlagCompileOnly())
+	val, err := ctx.Eval(code, opts...)
+	if err != nil {
+		return nil, err
 	}
+	defer val.Free()
 
 	var kSize C.size_t
 	ptr := C.JS_WriteObject(ctx.ref, &kSize, val.ref, C.JS_WRITE_OBJ_BYTECODE)
@@ -305,6 +437,15 @@ func (ctx *Context) CompileFile(code, filename string) ([]byte, error) {
 	copy(ret, C.GoBytes(unsafe.Pointer(ptr), C.int(kSize)))
 
 	return ret, nil
+}
+
+// Compile returns a compiled bytecode with given filename.
+func (ctx *Context) CompileFile(filePath string) ([]byte, error) {
+	b, err := os.ReadFile(filePath)
+	if err != nil {
+		return nil, err
+	}
+	return ctx.Compile(string(b), EvalFileName(filePath))
 }
 
 // Global returns a context's global object.
@@ -383,15 +524,6 @@ func (ctx *Context) Loop() {
 // Wait for a promise and execute pending jobs while waiting for it. Return the promise result or JS_EXCEPTION in case of promise rejection.
 func (ctx *Context) Await(v Value) (Value, error) {
 	val := Value{ctx: ctx, ref: C.js_std_await(ctx.ref, v.ref)}
-	if val.IsException() {
-		return val, ctx.Exception()
-	}
-	return val, nil
-}
-
-// AwaitEval evaluates a string and await the result. Return the promise result or JS_EXCEPTION in case of promise rejection.
-func (ctx *Context) AwaitEval(v string) (Value, error) {
-	val := Value{ctx: ctx, ref: C.js_std_await(ctx.ref, ctx.eval(v).ref)}
 	if val.IsException() {
 		return val, ctx.Exception()
 	}

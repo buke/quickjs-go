@@ -300,6 +300,22 @@ func TestValue(t *testing.T) {
 	require.True(t, err.IsError())
 }
 
+func TestEvalFile(t *testing.T) {
+	// enable module import
+	rt := quickjs.NewRuntime(quickjs.WithModuleImport(true))
+	defer rt.Close()
+
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	result, err := ctx.EvalFile("./test/hello_module.js")
+	defer result.Free()
+	require.NoError(t, err)
+
+	require.EqualValues(t, 55, ctx.Globals().Get("result").Int32())
+
+}
+
 func TestEvalBytecode(t *testing.T) {
 	rt := quickjs.NewRuntime()
 	defer rt.Close()
@@ -761,8 +777,37 @@ func TestAwait(t *testing.T) {
 	promiseAwait, _ := ctx.Await(promise)
 	require.EqualValues(t, "Hello Await", promiseAwait.String())
 
-	// test AwaitEval
-	promiseAwaitEval, _ := ctx.AwaitEval("testAsync('Hello ', 'AwaitEval')")
+	promiseAwaitEval, _ := ctx.Eval("testAsync('Hello ', 'AwaitEval')", quickjs.EvalAwait())
 	require.EqualValues(t, "Hello AwaitEval", promiseAwaitEval.String())
 
+}
+
+func TestModule(t *testing.T) {
+	// enable module import
+	rt := quickjs.NewRuntime(quickjs.WithModuleImport(true))
+	defer rt.Close()
+
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	// eval module
+	r1, err := ctx.EvalFile("./test/hello_module.js")
+	defer r1.Free()
+	require.NoError(t, err)
+	require.EqualValues(t, 55, ctx.Globals().Get("result").Int32())
+
+	// load module
+	r2, err := ctx.LoadModuleFile("./test/fib_module.js", "fib_foo")
+	defer r2.Free()
+	require.NoError(t, err)
+
+	// call module
+	r3, err := ctx.Eval(`
+	import {fib} from 'fib_foo';
+	globalThis.result = fib(9);
+	`)
+	defer r3.Free()
+	require.NoError(t, err)
+
+	require.EqualValues(t, 34, ctx.Globals().Get("result").Int32())
 }
