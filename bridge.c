@@ -13,6 +13,10 @@ JSValue ThrowReferenceError(JSContext *ctx, const char *fmt) { return JS_ThrowRe
 JSValue ThrowRangeError(JSContext *ctx, const char *fmt) { return JS_ThrowRangeError(ctx, "%s", fmt); }
 JSValue ThrowInternalError(JSContext *ctx, const char *fmt) { return JS_ThrowInternalError(ctx, "%s", fmt); }
 
+int ValueGetTag(JSValueConst v) {
+	return JS_VALUE_GET_TAG(v);
+}
+
 JSValue InvokeProxy(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
 	 return goProxy(ctx, this_val, argc, argv);
 }

@@ -7,6 +7,7 @@ package quickjs
 import "C"
 import (
 	"runtime"
+	"unsafe"
 )
 
 // Runtime represents a Javascript runtime corresponding to an object heap. Several runtimes can exist at the same time but they cannot exchange objects. Inside a given runtime, no multi-threading is supported.
@@ -21,6 +22,7 @@ type Options struct {
 	gcThreshold  uint64
 	maxStackSize uint64
 	canBlock     bool
+	moduleImport bool
 }
 
 type Option func(*Options)
@@ -60,6 +62,12 @@ func WithCanBlock(canBlock bool) Option {
 	}
 }
 
+func WithModuleImport(moduleImport bool) Option {
+	return func(o *Options) {
+		o.moduleImport = moduleImport
+	}
+}
+
 // NewRuntime creates a new quickjs runtime.
 func NewRuntime(opts ...Option) Runtime {
 	runtime.LockOSThread() // prevent multiple quickjs runtime from being created
@@ -70,6 +78,7 @@ func NewRuntime(opts ...Option) Runtime {
 		gcThreshold:  0,
 		maxStackSize: 0,
 		canBlock:     true,
+		moduleImport: false,
 	}
 	for _, opt := range opts {
 		opt(options)
@@ -148,6 +157,11 @@ func (r Runtime) NewContext() *Context {
 	C.JS_AddIntrinsicOperators(ctx_ref)
 	C.JS_EnableBignumExt(ctx_ref, C.int(1))
 
+	// set the module loader for support dynamic import
+	if r.options.moduleImport {
+		C.JS_SetModuleLoaderFunc(r.ref, (*C.JSModuleNormalizeFunc)(unsafe.Pointer(nil)), (*C.JSModuleLoaderFunc)(C.js_module_loader), unsafe.Pointer(nil))
+	}
+
 	// import the 'std' and 'os' modules
 	C.js_init_module_std(ctx_ref, C.CString("std"))
 	C.js_init_module_os(ctx_ref, C.CString("os"))
@@ -159,8 +173,7 @@ func (r Runtime) NewContext() *Context {
 	globalThis.clearTimeout = clearTimeout;
 	`
 	init_compile := C.JS_Eval(ctx_ref, C.CString(code), C.size_t(len(code)), C.CString("init.js"), C.JS_EVAL_TYPE_MODULE|C.JS_EVAL_FLAG_COMPILE_ONLY)
-	// C.js_module_set_import_meta(ctx_ref, init_compile, 1, 1)
-	init_run := C.JS_EvalFunction(ctx_ref, init_compile)
+	init_run := C.js_std_await(ctx_ref, C.JS_EvalFunction(ctx_ref, init_compile))
 	C.JS_FreeValue(ctx_ref, init_run)
 	// C.js_std_loop(ctx_ref)
 

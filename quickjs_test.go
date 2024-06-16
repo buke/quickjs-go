@@ -300,6 +300,22 @@ func TestValue(t *testing.T) {
 	require.True(t, err.IsError())
 }
 
+func TestEvalFile(t *testing.T) {
+	// enable module import
+	rt := quickjs.NewRuntime(quickjs.WithModuleImport(true))
+	defer rt.Close()
+
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	result, err := ctx.EvalFile("./test/hello_module.js")
+	defer result.Free()
+	require.NoError(t, err)
+
+	require.EqualValues(t, 55, ctx.Globals().Get("result").Int32())
+
+}
+
 func TestEvalBytecode(t *testing.T) {
 	rt := quickjs.NewRuntime()
 	defer rt.Close()
@@ -761,8 +777,7 @@ func TestAwait(t *testing.T) {
 	promiseAwait, _ := ctx.Await(promise)
 	require.EqualValues(t, "Hello Await", promiseAwait.String())
 
-	// test AwaitEval
-	promiseAwaitEval, _ := ctx.AwaitEval("testAsync('Hello ', 'AwaitEval')")
+	promiseAwaitEval, _ := ctx.Eval("testAsync('Hello ', 'AwaitEval')", quickjs.EvalAwait())
 	require.EqualValues(t, "Hello AwaitEval", promiseAwaitEval.String())
 
 }
