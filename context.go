@@ -371,10 +371,6 @@ func (ctx *Context) LoadModule(code string, moduleName string) (Value, error) {
 	filenamePtr := C.CString(moduleName)
 	defer C.free(unsafe.Pointer(filenamePtr))
 
-	if C.JS_DetectModule(codePtr, C.size_t(len(code))) == 0 {
-		return ctx.Null(), fmt.Errorf("not a module")
-	}
-
 	cFlag := C.JS_EVAL_TYPE_MODULE | C.JS_EVAL_FLAG_COMPILE_ONLY
 	cVal := C.JS_Eval(ctx.ref, codePtr, C.size_t(len(code)), filenamePtr, C.int(cFlag))
 	if C.ValueGetTag(cVal) != C.JS_TAG_MODULE {
