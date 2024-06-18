@@ -256,33 +256,33 @@ type EvalOptions struct {
 
 type EvalOption func(*EvalOptions)
 
-func EvalFlagGlobal() EvalOption {
+func EvalFlagGlobal(global bool) EvalOption {
 	return func(flags *EvalOptions) {
-		flags.js_eval_type_global = true
+		flags.js_eval_type_global = global
 	}
 }
 
-func EvalFlagModule() EvalOption {
+func EvalFlagModule(module bool) EvalOption {
 	return func(flags *EvalOptions) {
-		flags.js_eval_type_module = true
+		flags.js_eval_type_module = module
 	}
 }
 
-func EvalFlagStrict() EvalOption {
+func EvalFlagStrict(strict bool) EvalOption {
 	return func(flags *EvalOptions) {
-		flags.js_eval_flag_strict = true
+		flags.js_eval_flag_strict = strict
 	}
 }
 
-func EvalFlagStrip() EvalOption {
+func EvalFlagStrip(strip bool) EvalOption {
 	return func(flags *EvalOptions) {
-		flags.js_eval_flag_strip = true
+		flags.js_eval_flag_strip = strip
 	}
 }
 
-func EvalFlagCompileOnly() EvalOption {
+func EvalFlagCompileOnly(compileOnly bool) EvalOption {
 	return func(flags *EvalOptions) {
-		flags.js_eval_flag_compile_only = true
+		flags.js_eval_flag_compile_only = compileOnly
 	}
 }
 
@@ -292,9 +292,9 @@ func EvalFileName(filename string) EvalOption {
 	}
 }
 
-func EvalAwait() EvalOption {
+func EvalAwait(await bool) EvalOption {
 	return func(flags *EvalOptions) {
-		flags.await = true
+		flags.await = await
 	}
 }
 
@@ -318,7 +318,6 @@ func (ctx *Context) Eval(code string, opts ...EvalOption) (Value, error) {
 	if options.js_eval_type_module {
 		cFlag |= C.JS_EVAL_TYPE_MODULE
 	}
-
 	if options.js_eval_flag_strict {
 		cFlag |= C.JS_EVAL_FLAG_STRICT
 	}
@@ -436,7 +435,7 @@ func (ctx *Context) EvalBytecode(buf []byte) (Value, error) {
 
 // Compile returns a compiled bytecode with given code.
 func (ctx *Context) Compile(code string, opts ...EvalOption) ([]byte, error) {
-	opts = append(opts, EvalFlagCompileOnly())
+	opts = append(opts, EvalFlagCompileOnly(true))
 	val, err := ctx.Eval(code, opts...)
 	if err != nil {
 		return nil, err
