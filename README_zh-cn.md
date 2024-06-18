@@ -45,7 +45,6 @@ Go 语言的QuickJS绑定库：快速、小型、可嵌入的ES2020 JavaScript�
 1. 在使用完毕后，请记得关闭 `quickjs.Runtime` 和 `quickjs.Context`。
 2. 请记得关闭由 `Eval()` 和 `EvalFile()` 返回的 `quickjs.Value`。其他值不需要关闭，因为它们会被垃圾回收。
 3. 如果你使用了promise 或 async function，请使用 `ctx.Loop()` 等待所有的promise/job结果。
-4. You may access the stacktrace of an error returned by `Eval()` or `EvalFile()` by casting it to a `*quickjs.Error`.
 4.  如果`Eval()` 或 `EvalFile()`返回了错误，可强制转换为`*quickjs.Error`以读取错误的堆栈信息。
 5. 如果你想在函数中返回参数，请在函数中复制参数。
 
