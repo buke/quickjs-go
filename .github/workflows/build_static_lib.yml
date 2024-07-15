@@ -33,7 +33,7 @@ jobs:
                   branch-suffix: random
                   delete-branch: true
                   title: Update QuickJS Static library For Linux x86_64
-                  base: ${{ github.base_ref }}
+                  base: ${{ github.head_ref }}
 
     linux-aarch64:
         # if:  startsWith(github.head_ref, 'dependabot/submodules/deps/quickjs')
@@ -62,7 +62,7 @@ jobs:
                 branch-suffix: random
                 delete-branch: true
                 title: Update QuickJS Static library For Linux aarch64
-                base: ${{ github.base_ref }}
+                base: ${{ github.head_ref }}
 
     darwin_amd64:
         # if:  startsWith(github.head_ref, 'dependabot/submodules/deps/quickjs')
@@ -88,7 +88,7 @@ jobs:
                   branch-suffix: random
                   delete-branch: true
                   title: Update QuickJS Static library For darwin_amd64
-                  base: ${{ github.base_ref }}
+                  base: ${{ github.head_ref }}
 
     darwin_arm64:
         # if:  startsWith(github.head_ref, 'dependabot/submodules/deps/quickjs')
@@ -114,7 +114,7 @@ jobs:
                   branch-suffix: random
                   delete-branch: true
                   title: Update QuickJS Static library For darwin_arm64
-                  base: ${{ github.base_ref }}
+                  base: ${{ github.head_ref }}
                   
                         
     windows_386:
@@ -144,7 +144,7 @@ jobs:
                   branch-suffix: random
                   delete-branch: true
                   title: Update QuickJS Static library For windows_386
-                  base: ${{ github.base_ref }}
+                  base: ${{ github.head_ref }}
 
     windows_amd64:
         # if:  startsWith(github.head_ref, 'dependabot/submodules/deps/quickjs')
@@ -173,7 +173,7 @@ jobs:
                   branch-suffix: random
                   delete-branch: true
                   title: Update QuickJS Static library For windows_amd64
-                  base: ${{ github.base_ref }}
+                  base: ${{ github.head_ref }}
 
     update_headers:
         # if:  startsWith(github.head_ref, 'dependabot/submodules/deps/quickjs')
@@ -193,4 +193,4 @@ jobs:
                   branch-suffix: random
                   delete-branch: true
                   title: Update QuickJS Header Files
-                  base: ${{ github.base_ref }}
+                  base: ${{ github.head_ref }}
