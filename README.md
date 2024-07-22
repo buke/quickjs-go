@@ -1,4 +1,5 @@
 # quickjs-go
+
 English | [简体中文](README_zh-cn.md)
 
 [![Test](https://github.com/buke/quickjs-go/workflows/Test/badge.svg)](https://github.com/buke/quickjs-go/actions?query=workflow%3ATest)
@@ -10,34 +11,36 @@ English | [简体中文](README_zh-cn.md)
 Go bindings to QuickJS: a fast, small, and embeddable ES2020 JavaScript interpreter.
 
 ## Platform Support
+
 we prebuilt quickjs static library for the following platforms:
 
-|  Platform | Arch | Static Library |
-| --------- | ---- | -------------- |
-| Linux     | x64  | [libquickjs.a](deps/libs/linux_amd64/libquickjs.a)  |
-| Linux     | arm64| [libquickjs.a](deps/libs/linux_arm64/libquickjs.a)  |
-| Windows   | x64  | [libquickjs.a](deps/libs/windows_amd64/libquickjs.a)  |
-| Windows   | x86  | [libquickjs.a](deps/libs/windows_386/libquickjs.a)    |
-| MacOS     | x64  | [libquickjs.a](deps/libs/darwin_amd64/libquickjs.a) |
-| MacOS     | arm64| [libquickjs.a](deps/libs/darwin_arm64/libquickjs.a) |
+| Platform | Arch  | Static Library                                       |
+| -------- | ----- | ---------------------------------------------------- |
+| Linux    | x64   | [libquickjs.a](deps/libs/linux_amd64/libquickjs.a)   |
+| Linux    | arm64 | [libquickjs.a](deps/libs/linux_arm64/libquickjs.a)   |
+| Windows  | x64   | [libquickjs.a](deps/libs/windows_amd64/libquickjs.a) |
+| Windows  | x86   | [libquickjs.a](deps/libs/windows_386/libquickjs.a)   |
+| MacOS    | x64   | [libquickjs.a](deps/libs/darwin_amd64/libquickjs.a)  |
+| MacOS    | arm64 | [libquickjs.a](deps/libs/darwin_arm64/libquickjs.a)  |
 
-\* The windows static library is compiled based on mingw32 12.2.0. Please confirm  go version > 1.20.0
+\* for build on windows, ples see: https://github.com/buke/quickjs-go/issues/151#issuecomment-2134307728
 
 ## Version Notes
 
-| quickjs-go | QuickJS |
-| ---------- | ------- |
+| quickjs-go | QuickJS     |
+| ---------- | ----------- |
 | v0.1.x     | v2021-03-27 |
 | v0.2.x     | v2023-12-09 |
 | v0.3.x     | v2024-01-13 |
 | v0.4.x     | v2024-02-14 |
 
 ## Features
-* Evaluate script
-* Compile script into bytecode and Eval from bytecode
-* Operate JavaScript values and objects in Go
-* Bind Go function to JavaScript async/sync function
-* Simple exception throwing and catching
+
+- Evaluate script
+- Compile script into bytecode and Eval from bytecode
+- Operate JavaScript values and objects in Go
+- Bind Go function to JavaScript async/sync function
+- Simple exception throwing and catching
 
 ## Guidelines
 
@@ -54,12 +57,13 @@ import "github.com/buke/quickjs-go"
 ```
 
 ### Run a script
+
 ```go
 package main
 
 import (
 	"fmt"
-    
+
 	"github.com/buke/quickjs-go"
 )
 
@@ -86,14 +90,14 @@ func main() {
 }
 ```
 
-
 ### Get/Set Javascript Object
+
 ```go
 package main
 
 import (
 	"fmt"
-    
+
 	"github.com/buke/quickjs-go"
 )
 
@@ -119,8 +123,8 @@ func main() {
 
 ```
 
-
 ### Bind Go Funtion to Javascript async/sync function
+
 ```go
 package main
 import "github.com/buke/quickjs-go"
@@ -185,12 +189,13 @@ func main() {
 ```
 
 ### Error Handling
+
 ```go
 package main
 
 import (
 	"fmt"
-    
+
 	"github.com/buke/quickjs-go"
 )
 
@@ -214,13 +219,14 @@ func main() {
 ```
 
 ### Bytecode Compiler
+
 ```go
 
 package main
 
 import (
 	"fmt"
-    
+
 	"github.com/buke/quickjs-go"
 )
 
@@ -247,7 +253,7 @@ func main() {
     // Compile the script to bytecode
     buf, _ := ctx.Compile(jsStr)
 
-    // Create a new runtime 
+    // Create a new runtime
     rt2 := quickjs.NewRuntime()
     defer rt2.Close()
 
@@ -262,12 +268,13 @@ func main() {
 ```
 
 ### Runtime Options: memory, stack, GC, ...
+
 ```go
 package main
 
 import (
 	"fmt"
-    
+
 	"github.com/buke/quickjs-go"
 )
 
@@ -293,13 +300,14 @@ func main() {
 ```
 
 ### ES6 Module Support
+
 ```go
 
 package main
 
 import (
 	"fmt"
-    
+
 	"github.com/buke/quickjs-go"
 )
 
@@ -335,15 +343,16 @@ func main() {
 
 ```
 
-
 ## Documentation
+
 Go Reference & more examples: https://pkg.go.dev/github.com/buke/quickjs-go
 
 ## License
-[MIT](./LICENSE)
 
+[MIT](./LICENSE)
 
 [![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2Fbuke%2Fquickjs-go.svg?type=large)](https://app.fossa.com/projects/git%2Bgithub.com%2Fbuke%2Fquickjs-go?ref=badge_large)
 
-## Related Projects 
-* https://github.com/buke/quickjs-go-polyfill
+## Related Projects
+
+- https://github.com/buke/quickjs-go-polyfill
