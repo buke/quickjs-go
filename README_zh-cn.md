@@ -1,4 +1,5 @@
 # quickjs-go
+
 [English](README.md) | 简体中文
 
 [![Test](https://github.com/buke/quickjs-go/workflows/Test/badge.svg)](https://github.com/buke/quickjs-go/actions?query=workflow%3ATest)
@@ -7,60 +8,62 @@
 [![GoDoc](https://pkg.go.dev/badge/github.com/buke/quickjs-go?status.svg)](https://pkg.go.dev/github.com/buke/quickjs-go?tab=doc)
 [![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2Fbuke%2Fquickjs-go.svg?type=shield)](https://app.fossa.com/projects/git%2Bgithub.com%2Fbuke%2Fquickjs-go?ref=badge_shield)
 
-Go 语言的QuickJS绑定库：快速、小型、可嵌入的ES2020 JavaScript解释器。
+Go 语言的 QuickJS 绑定库：快速、小型、可嵌入的 ES2020 JavaScript 解释器。
 
 ## 平台支持
-使用预编译的quickjs静态库，支持以下平台：
 
-|  平台    | 架构 | 静态库 |
-| -------- | ------------ | --------------------------------------------------- |
-| Linux    | x64          | [libquickjs.a](deps/libs/linux_amd64/libquickjs.a)  |
-| Linux    | arm64        | [libquickjs.a](deps/libs/linux_arm64/libquickjs.a)  |
-| Windows  | x64          | [libquickjs.a](deps/libs/windows_amd64/libquickjs.a)  |
-| Windows  | x86          | [libquickjs.a](deps/libs/windows_386/libquickjs.a)    |
-| MacOS    | x64          | [libquickjs.a](deps/libs/darwin_amd64/libquickjs.a) |
-| MacOS    | arm64        | [libquickjs.a](deps/libs/darwin_arm64/libquickjs.a) |
+使用预编译的 quickjs 静态库，支持以下平台：
 
-\*  windows 静态库基于 mingw 12.2.0 编译， 请确认  go version > 1.20.0
+| 平台    | 架构  | 静态库                                               |
+| ------- | ----- | ---------------------------------------------------- |
+| Linux   | x64   | [libquickjs.a](deps/libs/linux_amd64/libquickjs.a)   |
+| Linux   | arm64 | [libquickjs.a](deps/libs/linux_arm64/libquickjs.a)   |
+| Windows | x64   | [libquickjs.a](deps/libs/windows_amd64/libquickjs.a) |
+| Windows | x86   | [libquickjs.a](deps/libs/windows_386/libquickjs.a)   |
+| MacOS   | x64   | [libquickjs.a](deps/libs/darwin_amd64/libquickjs.a)  |
+| MacOS   | arm64 | [libquickjs.a](deps/libs/darwin_arm64/libquickjs.a)  |
 
+\* windows 构建步骤请参考：https://github.com/buke/quickjs-go/issues/151#issuecomment-2134307728
 
 ## 版本说明
 
-| quickjs-go | QuickJS |
-| ---------- | ------- |
+| quickjs-go | QuickJS     |
+| ---------- | ----------- |
 | v0.1.x     | v2021-03-27 |
 | v0.2.x     | v2023-12-09 |
 | v0.3.x     | v2024-01-13 |
 | v0.4.x     | v2024-02-14 |
 
 ## 功能
-* 执行javascript脚本
-* 编译javascript脚本到字节码并执行字节码
-* 在 Go 中操作 JavaScript 值和对象
-* 绑定 Go 函数到 JavaScript 同步函数和异步函数
-* 简单的异常抛出和捕获
+
+- 执行 javascript 脚本
+- 编译 javascript 脚本到字节码并执行字节码
+- 在 Go 中操作 JavaScript 值和对象
+- 绑定 Go 函数到 JavaScript 同步函数和异步函数
+- 简单的异常抛出和捕获
 
 ## 指南
 
 1. 在使用完毕后，请记得关闭 `quickjs.Runtime` 和 `quickjs.Context`。
 2. 请记得关闭由 `Eval()` 和 `EvalFile()` 返回的 `quickjs.Value`。其他值不需要关闭，因为它们会被垃圾回收。
-3. 如果你使用了promise 或 async function，请使用 `ctx.Loop()` 等待所有的promise/job结果。
-4.  如果`Eval()` 或 `EvalFile()`返回了错误，可强制转换为`*quickjs.Error`以读取错误的堆栈信息。
+3. 如果你使用了 promise 或 async function，请使用 `ctx.Loop()` 等待所有的 promise/job 结果。
+4. 如果`Eval()` 或 `EvalFile()`返回了错误，可强制转换为`*quickjs.Error`以读取错误的堆栈信息。
 5. 如果你想在函数中返回参数，请在函数中复制参数。
 
-## 用法 
+## 用法
 
 ```go
 import "github.com/buke/quickjs-go"
 ```
 
-### 执行javascript脚本
+### 执行 javascript 脚本
+
 ```go
 package main
 
 import (
 	"fmt"
-    
+
 	"github.com/buke/quickjs-go"
 )
 
@@ -87,14 +90,14 @@ func main() {
 }
 ```
 
-
 ### 读取/设置 JavaScript 对象
+
 ```go
 package main
 
 import (
 	"fmt"
-    
+
 	"github.com/buke/quickjs-go"
 )
 
@@ -120,8 +123,8 @@ func main() {
 
 ```
 
-
 ### 函数绑定
+
 ```go
 package main
 import "github.com/buke/quickjs-go"
@@ -186,12 +189,13 @@ func main() {
 ```
 
 ### 异常抛出和捕获
+
 ```go
 package main
 
 import (
 	"fmt"
-    
+
 	"github.com/buke/quickjs-go"
 )
 
@@ -214,14 +218,15 @@ func main() {
 }
 ```
 
-### Bytecode编译和执行
+### Bytecode 编译和执行
+
 ```go
 
 package main
 
 import (
 	"fmt"
-    
+
 	"github.com/buke/quickjs-go"
 )
 
@@ -248,7 +253,7 @@ func main() {
     // Compile the script to bytecode
     buf, _ := ctx.Compile(jsStr)
 
-    // Create a new runtime 
+    // Create a new runtime
     rt2 := quickjs.NewRuntime()
     defer rt2.Close()
 
@@ -262,13 +267,14 @@ func main() {
 }
 ```
 
-### 设置内存、栈、GC等等
+### 设置内存、栈、GC 等等
+
 ```go
 package main
 
 import (
 	"fmt"
-    
+
 	"github.com/buke/quickjs-go"
 )
 
@@ -293,15 +299,15 @@ func main() {
 }
 ```
 
-
 ### ES6 模块支持
+
 ```go
 
 package main
 
 import (
 	"fmt"
-    
+
 	"github.com/buke/quickjs-go"
 )
 
@@ -338,13 +344,15 @@ func main() {
 ```
 
 ## 文档
+
 Go 语言文档和示例: https://pkg.go.dev/github.com/buke/quickjs-go
 
 ## 协议
-[MIT](./LICENSE)
 
+[MIT](./LICENSE)
 
 [![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2Fbuke%2Fquickjs-go.svg?type=large)](https://app.fossa.com/projects/git%2Bgithub.com%2Fbuke%2Fquickjs-go?ref=badge_large)
 
 ## 相关项目
-* https://github.com/buke/quickjs-go-polyfill
+
+- https://github.com/buke/quickjs-go-polyfill
