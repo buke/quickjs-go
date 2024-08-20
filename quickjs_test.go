@@ -811,11 +811,38 @@ func TestModule(t *testing.T) {
 
 	require.EqualValues(t, 89, ctx.Globals().Get("result").Int32())
 
+	ctx2 := rt.NewContext()
+	defer ctx2.Close()
 	// load module from bytecode
-	buf, err := ctx.CompileFile("./test/fib_module.js")
+	buf, err := ctx2.CompileModule("./test/fib_module.js", "fib_foo2")
 	require.NoError(t, err)
 
-	r4, err := ctx.LoadModuleBytecode(buf, "fib_foo")
+	r4, err := ctx2.LoadModuleBytecode(buf)
+	defer r4.Free()
+	require.NoError(t, err)
+
+	r5, err := ctx2.Eval(`
+	import {fib} from 'fib_foo2';
+	globalThis.result = fib(12);
+	`)
+	defer r5.Free()
+	require.NoError(t, err)
+
+	require.EqualValues(t, 144, ctx2.Globals().Get("result").Int32())
+
+}
+
+func TestModule2(t *testing.T) {
+	// enable module import
+	rt := quickjs.NewRuntime(quickjs.WithModuleImport(true))
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	// load module from bytecode
+	buf, err := ctx.CompileModule("./test/fib_module.js", "fib_foo")
+	require.NoError(t, err)
+	r4, err := ctx.LoadModuleBytecode(buf)
 	defer r4.Free()
 	require.NoError(t, err)
 
@@ -825,7 +852,5 @@ func TestModule(t *testing.T) {
 	`)
 	defer r5.Free()
 	require.NoError(t, err)
-
 	require.EqualValues(t, 144, ctx.Globals().Get("result").Int32())
-
 }
