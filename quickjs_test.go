@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/buke/quickjs-go"
+	"github.com/buke/quickjs-go-polyfill/pkg/console"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -789,6 +790,8 @@ func TestModule(t *testing.T) {
 
 	ctx := rt.NewContext()
 	defer ctx.Close()
+	err := console.InjectTo(ctx)
+	require.NoError(t, err)
 
 	// eval module
 	r1, err := ctx.EvalFile("./test/hello_module.js")
@@ -803,8 +806,16 @@ func TestModule(t *testing.T) {
 
 	// call module
 	r3, err := ctx.Eval(`
-	import {fib} from 'fib_foo';
-	globalThis.result = fib(11);
+
+	function r() {
+		console.log(import)
+	}
+	xxx = r()
+	// console.log(xxx.fib(11));
+	
+
+
+	// globalThis.result = f.fib(11);
 	`)
 	defer r3.Free()
 	require.NoError(t, err)
@@ -853,4 +864,35 @@ func TestModule2(t *testing.T) {
 	defer r5.Free()
 	require.NoError(t, err)
 	require.EqualValues(t, 144, ctx.Globals().Get("result").Int32())
+}
+
+func TestClassConstructor(t *testing.T) {
+	rt := quickjs.NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	ret, err := ctx.Eval(`
+		class Foo {
+			x = 0;	
+			constructor(x) {
+				this.x = x;
+			}
+		}
+		globalThis.Foo = Foo;
+	`)
+	defer ret.Free()
+	require.NoError(t, err)
+
+	Foo := ctx.Globals().Get("Foo")
+	defer Foo.Free()
+
+	fooInstance := Foo.CallConstructor(ctx.Int32(10))
+	defer fooInstance.Free()
+
+	x := fooInstance.Get("x")
+	defer x.Free()
+
+	require.EqualValues(t, 10, x.Int32())
+
 }
