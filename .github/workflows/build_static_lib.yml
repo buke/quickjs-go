@@ -25,7 +25,7 @@ jobs:
                 make -e CONFIG_LTO=y libquickjs.a
                 mv libquickjs.a ../libs/linux_amd64
             - name: Create PR
-              uses: peter-evans/create-pull-request@v6
+              uses: peter-evans/create-pull-request@v7
               with:
                   commit-message: Update QuickJS Static Library For Linux x86_64
                   branch-suffix: random
@@ -54,7 +54,7 @@ jobs:
                 make -e CONFIG_LTO=y libquickjs.a
                 mv libquickjs.a ../libs/linux_arm64
             - name: Create PR
-              uses: peter-evans/create-pull-request@v6
+              uses: peter-evans/create-pull-request@v7
               with:
                 commit-message: Update QuickJS Static Library For Linux aarch64
                 branch-suffix: random
@@ -80,7 +80,7 @@ jobs:
                 mv Makefile.bak Makefile
                 mv libquickjs.a ../libs/darwin_amd64 
             - name: Create PR
-              uses: peter-evans/create-pull-request@v6
+              uses: peter-evans/create-pull-request@v7
               with:
                   commit-message: Update QuickJS Static Library For darwin_amd64
                   branch-suffix: random
@@ -106,7 +106,7 @@ jobs:
                 mv Makefile.bak Makefile
                 mv libquickjs.a ../libs/darwin_arm64
             - name: Create PR For darwin_arm64
-              uses: peter-evans/create-pull-request@v6
+              uses: peter-evans/create-pull-request@v7
               with:
                   commit-message: Update QuickJS Static Library For darwin_arm64
                   branch-suffix: random
@@ -136,7 +136,7 @@ jobs:
                 make -e CONFIG_WIN32=y CONFIG_M32=y CONFIG_LTO=y libquickjs.a
                 copy libquickjs.a ../libs/windows_386
             - name: Create PR
-              uses: peter-evans/create-pull-request@v6
+              uses: peter-evans/create-pull-request@v7
               with:
                   commit-message: Update QuickJS Static Library For windows_386
                   branch-suffix: random
@@ -165,7 +165,7 @@ jobs:
                 make -e CONFIG_WIN32=y CONFIG_LTO=y libquickjs.a
                 copy libquickjs.a ../libs/windows_amd64
             - name: Create PR
-              uses: peter-evans/create-pull-request@v6
+              uses: peter-evans/create-pull-request@v7
               with:
                   commit-message: Update QuickJS Static Library For windows_amd64
                   branch-suffix: random
@@ -185,7 +185,7 @@ jobs:
               run: 
                 cp -a deps/quickjs/*.h deps/include/
             - name: Create PR
-              uses: peter-evans/create-pull-request@v6
+              uses: peter-evans/create-pull-request@v7
               with:
                   commit-message: Update QuickJS Header Files
                   branch-suffix: random
