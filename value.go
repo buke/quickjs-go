@@ -254,6 +254,27 @@ func (v Value) Call(fname string, args ...Value) Value {
 	return Value{ctx: v.ctx, ref: C.JS_Call(v.ctx.ref, fn.ref, v.ref, C.int(len(cargs)), &cargs[0])}
 }
 
+// Call Class Constructor
+func (v Value) New(args ...Value) Value {
+	return v.CallConstructor(args...)
+}
+
+// Call calls the constructor with the given arguments.
+func (v Value) CallConstructor(args ...Value) Value {
+	if !v.IsConstructor() {
+		return v.ctx.Error(errors.New("Object not a constructor"))
+	}
+
+	cargs := []C.JSValue{}
+	for _, x := range args {
+		cargs = append(cargs, x.ref)
+	}
+	if len(cargs) == 0 {
+		return Value{ctx: v.ctx, ref: C.JS_CallConstructor(v.ctx.ref, v.ref, C.int(0), nil)}
+	}
+	return Value{ctx: v.ctx, ref: C.JS_CallConstructor(v.ctx.ref, v.ref, C.int(len(cargs)), &cargs[0])}
+}
+
 // Error returns the error value of the value.
 func (v Value) Error() error {
 	if !v.IsError() {
@@ -364,4 +385,4 @@ func (v Value) IsPromise() bool {
 	return false
 }
 
-// func (v Value) IsConstructor() bool   { return C.JS_IsConstructor(v.ctx.ref, v.ref) == 1 }
+func (v Value) IsConstructor() bool { return C.JS_IsConstructor(v.ctx.ref, v.ref) == 1 }

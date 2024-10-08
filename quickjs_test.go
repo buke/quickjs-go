@@ -854,3 +854,34 @@ func TestModule2(t *testing.T) {
 	require.NoError(t, err)
 	require.EqualValues(t, 144, ctx.Globals().Get("result").Int32())
 }
+
+func TestClassConstructor(t *testing.T) {
+	rt := quickjs.NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	ret, err := ctx.Eval(`
+		class Foo {
+			x = 0;	
+			constructor(x) {
+				this.x = x;
+			}
+		}
+		globalThis.Foo = Foo;
+	`)
+	defer ret.Free()
+	require.NoError(t, err)
+
+	Foo := ctx.Globals().Get("Foo")
+	defer Foo.Free()
+
+	fooInstance := Foo.New(ctx.Int32(10))
+	defer fooInstance.Free()
+
+	x := fooInstance.Get("x")
+	defer x.Free()
+
+	require.EqualValues(t, 10, x.Int32())
+
+}
