@@ -400,7 +400,7 @@ func (ctx *Context) CompileModule(filePath string, moduleName string, opts ...Ev
 	return ctx.CompileFile(filePath, opts...)
 }
 
-// LoadModuleByteCode returns a js value with given bytecode and module name.
+// LoadModuleBytecode returns a js value with given bytecode and module name.
 func (ctx *Context) LoadModuleBytecode(buf []byte) (Value, error) {
 	cbuf := C.CBytes(buf)
 	cVal := C.JS_ReadObject(ctx.ref, (*C.uint8_t)(cbuf), C.size_t(len(buf)), C.JS_READ_OBJ_BYTECODE)

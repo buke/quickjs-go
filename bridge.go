@@ -15,15 +15,13 @@ import "C"
 func goProxy(ctx *C.JSContext, thisVal C.JSValueConst, argc C.int, argv *C.JSValueConst) C.JSValue {
 	refs := unsafe.Slice(argv, argc) // Go 1.17 and later
 
-	// get the function
-	fnHandler := C.int64_t(0)
-	C.JS_ToInt64(ctx, &fnHandler, refs[0])
-	fn := cgo.Handle(fnHandler).Value().(func(ctx *Context, this Value, args []Value) Value)
+	var fnPtr int64
+	C.JS_ToInt64(ctx, (*C.int64_t)(&fnPtr), refs[0])
+	fn := cgo.Handle(fnPtr).Value().(func(ctx *Context, this Value, args []Value) Value)
 
-	// get ctx
-	ctxHandler := C.int64_t(0)
-	C.JS_ToInt64(ctx, &ctxHandler, refs[1])
-	ctxOrigin := cgo.Handle(ctxHandler).Value().(*Context)
+	var ctxPtr int64
+	C.JS_ToInt64(ctx, (*C.int64_t)(&ctxPtr), refs[1])
+	ctxOrigin := cgo.Handle(ctxPtr).Value().(*Context)
 
 	// refs[0] is the id, refs[1] is the ctx
 	args := make([]Value, len(refs)-2)
@@ -41,15 +39,13 @@ func goProxy(ctx *C.JSContext, thisVal C.JSValueConst, argc C.int, argv *C.JSVal
 func goAsyncProxy(ctx *C.JSContext, thisVal C.JSValueConst, argc C.int, argv *C.JSValueConst) C.JSValue {
 	refs := unsafe.Slice(argv, argc) // Go 1.17 and later
 
-	// get the function
-	fnHandler := C.int64_t(0)
-	C.JS_ToInt64(ctx, &fnHandler, refs[0])
-	asyncFn := cgo.Handle(fnHandler).Value().(func(ctx *Context, this Value, promise Value, args []Value) Value)
+	var fnPtr int64
+	C.JS_ToInt64(ctx, (*C.int64_t)(&fnPtr), refs[0])
+	asyncFn := cgo.Handle(fnPtr).Value().(func(ctx *Context, this Value, promise Value, args []Value) Value)
 
-	// get ctx
-	ctxHandler := C.int64_t(0)
-	C.JS_ToInt64(ctx, &ctxHandler, refs[1])
-	ctxOrigin := cgo.Handle(ctxHandler).Value().(*Context)
+	var ctxPtr int64
+	C.JS_ToInt64(ctx, (*C.int64_t)(&ctxPtr), refs[1])
+	ctxOrigin := cgo.Handle(ctxPtr).Value().(*Context)
 
 	args := make([]Value, len(refs)-2)
 	for i := 0; i < len(args); i++ {
