@@ -213,11 +213,10 @@ func (ctx *Context) AsyncFunction(asyncFn func(ctx *Context, this Value, promise
 type InterruptHandler func() int
 
 // SetInterruptHandler sets a interrupt handler.
+//
+// Deprecated: Use SetInterruptHandler on runtime instead
 func (ctx *Context) SetInterruptHandler(handler InterruptHandler) {
-	handlerArgs := C.handlerArgs{
-		fn: (C.uintptr_t)(cgo.NewHandle(handler)),
-	}
-	C.SetInterruptHandler(ctx.runtime.ref, unsafe.Pointer(&handlerArgs))
+	ctx.runtime.SetInterruptHandler(handler)
 }
 
 // Atom returns a new Atom value with given string.

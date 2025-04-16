@@ -7,6 +7,7 @@ package quickjs
 import "C"
 import (
 	"runtime"
+	"runtime/cgo"
 	"unsafe"
 )
 
@@ -14,6 +15,7 @@ import (
 type Runtime struct {
 	ref     *C.JSRuntime
 	options *Options
+	pinner  runtime.Pinner
 }
 
 type Options struct {
@@ -112,6 +114,7 @@ func (r Runtime) RunGC() {
 // Close will free the runtime pointer.
 func (r Runtime) Close() {
 	C.JS_FreeRuntime(r.ref)
+	r.pinner.Unpin()
 }
 
 // SetCanBlock will set the runtime's can block; default is true
@@ -141,6 +144,18 @@ func (r Runtime) SetMaxStackSize(stack_size uint64) {
 // SetExecuteTimeout will set the runtime's execute timeout; default is 0
 func (r Runtime) SetExecuteTimeout(timeout uint64) {
 	C.SetExecuteTimeout(r.ref, C.time_t(timeout))
+}
+
+// SetInterruptHandler sets a interrupt handler.
+func (r *Runtime) SetInterruptHandler(handler InterruptHandler) {
+	handlerArgsPtr := &C.handlerArgs{
+		fn: (C.uintptr_t)(cgo.NewHandle(handler)),
+	}
+
+	// Ensure the C.handlerArgs instance is never moved to a different place or GCed.
+	r.pinner.Pin(handlerArgsPtr)
+
+	C.SetInterruptHandler(r.ref, unsafe.Pointer(handlerArgsPtr))
 }
 
 // NewContext creates a new JavaScript context.
