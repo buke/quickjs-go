@@ -3,7 +3,6 @@ package quickjs
 import (
 	"fmt"
 	"os"
-	"runtime"
 	"runtime/cgo"
 	"unsafe"
 )
@@ -21,7 +20,6 @@ type Context struct {
 	globals    *Value
 	proxy      *Value
 	asyncProxy *Value
-	pinner     runtime.Pinner
 }
 
 // Runtime returns the runtime of the context.
@@ -44,8 +42,6 @@ func (ctx *Context) Close() {
 	}
 
 	C.JS_FreeContext(ctx.ref)
-
-	ctx.pinner.Unpin()
 }
 
 // Null return a null value.
@@ -217,15 +213,10 @@ func (ctx *Context) AsyncFunction(asyncFn func(ctx *Context, this Value, promise
 type InterruptHandler func() int
 
 // SetInterruptHandler sets a interrupt handler.
+//
+// Deprecated: Use SetInterruptHandler on runtime instead
 func (ctx *Context) SetInterruptHandler(handler InterruptHandler) {
-	handlerArgsPtr := &C.handlerArgs{
-		fn: (C.uintptr_t)(cgo.NewHandle(handler)),
-	}
-
-	// Ensure the C.handlerArgs instance is never moved to a different place or GCed.
-	ctx.pinner.Pin(handlerArgsPtr)
-
-	C.SetInterruptHandler(ctx.runtime.ref, unsafe.Pointer(handlerArgsPtr))
+	ctx.runtime.SetInterruptHandler(handler)
 }
 
 // Atom returns a new Atom value with given string.
