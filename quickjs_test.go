@@ -908,6 +908,39 @@ func TestModule2(t *testing.T) {
 	require.EqualValues(t, 144, ctx.Globals().Get("result").ToInt32())
 }
 
+func TestModuleDifferentSizes(t *testing.T) {
+	memoryLimit := uint64(1 * 1024 * 1024)
+	// Map from module name to lines of code
+	specs := map[string]int{
+		"empty": 0,
+		"one":   1,
+		"ten":   10,
+		"1k":    1000,
+		"2k":    2000,
+		// Uncomment to crash
+		// "5k": 5000,
+	}
+
+	for name, locs := range specs {
+		t.Run(name, func(t *testing.T) {
+			rt := quickjs.NewRuntime()
+			defer rt.Close()
+			rt.SetMemoryLimit(memoryLimit)
+			ctx := rt.NewContext()
+			defer ctx.Close()
+
+			code := ""
+			for i := 0; i < locs; i++ {
+				code += fmt.Sprintf(`export var myvar%d = "foo%d";`, i, i) + "\n"
+			}
+
+			result, err := ctx.LoadModule(code, name+".js")
+			require.NoError(t, err)
+			defer result.Free()
+		})
+	}
+}
+
 func TestClassConstructor(t *testing.T) {
 	rt := quickjs.NewRuntime()
 	defer rt.Close()
