@@ -31,7 +31,7 @@ jobs:
       run: go test -v -coverprofile c.out ./...
 
     - name: Codecov
-      uses: codecov/codecov-action@v5.4.0
+      uses: codecov/codecov-action@v5.4.3
       env:
         OS: ${{ matrix.os }}
         GO: ${{ matrix.go }}
