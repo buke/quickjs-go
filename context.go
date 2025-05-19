@@ -114,6 +114,9 @@ func (ctx *Context) String(v string) Value {
 
 // ArrayBuffer returns a string value with given binary data.
 func (ctx *Context) ArrayBuffer(binaryData []byte) Value {
+	if len(binaryData) == 0 {
+		return Value{ctx: ctx, ref: C.JS_NewArrayBufferCopy(ctx.ref, nil, 0)}
+	}
 	return Value{ctx: ctx, ref: C.JS_NewArrayBufferCopy(ctx.ref, (*C.uchar)(&binaryData[0]), C.size_t(len(binaryData)))}
 }
 

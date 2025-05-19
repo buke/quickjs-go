@@ -129,17 +129,17 @@ func TestRuntimeStackSize(t *testing.T) {
 	defer ctx.Close()
 
 	result, err := ctx.Eval(`
-	function fib(n)
-	{
-		if (n <= 0)
-			return 0;
-		else if (n == 1)
-			return 1;
-		else
-			return fib(n - 1) + fib(n - 2);
-	}
-	fib(128)
-	`)
+    function fib(n)
+    {
+        if (n <= 0)
+            return 0;
+        else if (n == 1)
+            return 1;
+        else
+            return fib(n - 1) + fib(n - 2);
+    }
+    fib(128)
+    `)
 	defer result.Free()
 
 	if assert.Error(t, err, "expected a memory limit violation") {
@@ -254,14 +254,14 @@ func TestValue(t *testing.T) {
 
 	// require.EqualValues(t, big.NewInt(1), ctx.BigUint64(uint64(1)).)
 	require.EqualValues(t, true, ctx.Bool(true).IsBool())
-	require.EqualValues(t, true, ctx.Bool(true).Bool())
-	require.EqualValues(t, float64(0.1), ctx.Float64(0.1).Float64())
-	require.EqualValues(t, int32(1), ctx.Int32(1).Int32())
-	require.EqualValues(t, int64(1), ctx.Int64(1).Int64())
-	require.EqualValues(t, uint32(1), ctx.Uint32(1).Uint32())
+	require.EqualValues(t, true, ctx.Bool(true).ToBool())
+	require.EqualValues(t, float64(0.1), ctx.Float64(0.1).ToFloat64())
+	require.EqualValues(t, int32(1), ctx.Int32(1).ToInt32())
+	require.EqualValues(t, int64(1), ctx.Int64(1).ToInt64())
+	require.EqualValues(t, uint32(1), ctx.Uint32(1).ToUint32())
 
-	require.EqualValues(t, big.NewInt(1), ctx.BigInt64(1).BigInt())
-	require.EqualValues(t, big.NewInt(1), ctx.BigUint64(1).BigInt())
+	require.EqualValues(t, big.NewInt(1), ctx.BigInt64(1).ToBigInt())
+	require.EqualValues(t, big.NewInt(1), ctx.BigUint64(1).ToBigInt())
 	require.EqualValues(t, false, ctx.Float64(0.1).IsBigInt())
 
 	a := ctx.Array()
@@ -309,7 +309,7 @@ func TestEvalFile(t *testing.T) {
 	defer result.Free()
 	require.NoError(t, err)
 
-	require.EqualValues(t, 55, ctx.Globals().Get("result").Int32())
+	require.EqualValues(t, 55, ctx.Globals().Get("result").ToInt32())
 
 }
 
@@ -320,16 +320,16 @@ func TestEvalBytecode(t *testing.T) {
 	ctx := rt.NewContext()
 	defer ctx.Close()
 	jsStr := `
-	function fib(n)
-	{
-		if (n <= 0)
-			return 0;
-		else if (n == 1)
-			return 1;
-		else
-			return fib(n - 1) + fib(n - 2);
-	}
-	fib(10)
+    function fib(n)
+    {
+        if (n <= 0)
+            return 0;
+        else if (n == 1)
+            return 1;
+        else
+            return fib(n - 1) + fib(n - 2);
+    }
+    fib(10)
 	`
 	buf, err := ctx.Compile(jsStr)
 	require.NoError(t, err)
@@ -343,7 +343,7 @@ func TestEvalBytecode(t *testing.T) {
 	result, err := ctx2.EvalBytecode(buf)
 	require.NoError(t, err)
 
-	require.EqualValues(t, 55, result.Int32())
+	require.EqualValues(t, 55, result.ToInt32())
 }
 func TestBadSyntax(t *testing.T) {
 	rt := quickjs.NewRuntime()
@@ -418,7 +418,7 @@ func TestConcurrency(t *testing.T) {
 				result, err := ctx.Eval(`new Date().getTime()`)
 				require.NoError(t, err)
 
-				res <- result.Int64()
+				res <- result.ToInt64()
 
 				result.Free()
 			}
@@ -480,21 +480,25 @@ func TestObject(t *testing.T) {
 
 	// set function
 	test.Set("F", ctx.Function(func(ctx *quickjs.Context, this quickjs.Value, args []quickjs.Value) quickjs.Value {
-		arg_x := args[0].Int32()
-		arg_y := args[1].Int32()
+		arg_x := args[0].ToInt32()
+		arg_y := args[1].ToInt32()
 		return ctx.Int32(arg_x * arg_y)
 	}))
-
-	// call js function by go
-	F_ret := test.Call("F", ctx.Int32(2), ctx.Int32(3))
-	defer F_ret.Free()
-	require.True(t, F_ret.IsNumber() && F_ret.Int32() == 6)
 
 	// invoke js function by go
 	f_func := test.Get("F")
 	defer f_func.Free()
-	ret := ctx.Invoke(f_func, ctx.Null(), ctx.Int32(2), ctx.Int32(3))
-	require.True(t, ret.IsNumber() && ret.Int32() == 6)
+
+	ret_execute := f_func.Execute(ctx.Null(), ctx.Int32(3), ctx.Int32(3))
+	require.True(t, ret_execute.IsNumber() && ret_execute.ToInt32() == 9)
+
+	ret_invoke := ctx.Invoke(f_func, ctx.Null(), ctx.Int32(2), ctx.Int32(3))
+	require.True(t, ret_invoke.IsNumber() && ret_invoke.ToInt32() == 6)
+
+	// call js function by go
+	F_ret := test.Call("F", ctx.Int32(2), ctx.Int32(3))
+	defer F_ret.Free()
+	require.True(t, F_ret.IsNumber() && F_ret.ToInt32() == 6)
 
 	// test error call
 	F_ret_err := test.Call("A", ctx.Int32(2), ctx.Int32(3))
@@ -803,7 +807,7 @@ func TestSetTimeout(t *testing.T) {
 	a, _ := ctx.Eval("a")
 	defer a.Free()
 
-	require.EqualValues(t, true, a.Bool())
+	require.EqualValues(t, true, a.ToBool())
 }
 
 func TestAwait(t *testing.T) {
@@ -842,7 +846,7 @@ func TestModule(t *testing.T) {
 	r1, err := ctx.EvalFile("./test/hello_module.js")
 	defer r1.Free()
 	require.NoError(t, err)
-	require.EqualValues(t, 55, ctx.Globals().Get("result").Int32())
+	require.EqualValues(t, 55, ctx.Globals().Get("result").ToInt32())
 
 	// load module
 	r2, err := ctx.LoadModuleFile("./test/fib_module.js", "fib_foo")
@@ -857,7 +861,7 @@ func TestModule(t *testing.T) {
 	defer r3.Free()
 	require.NoError(t, err)
 
-	require.EqualValues(t, 89, ctx.Globals().Get("result").Int32())
+	require.EqualValues(t, 89, ctx.Globals().Get("result").ToInt32())
 
 	ctx2 := rt.NewContext()
 	defer ctx2.Close()
@@ -876,7 +880,7 @@ func TestModule(t *testing.T) {
 	defer r5.Free()
 	require.NoError(t, err)
 
-	require.EqualValues(t, 144, ctx2.Globals().Get("result").Int32())
+	require.EqualValues(t, 144, ctx2.Globals().Get("result").ToInt32())
 
 }
 
@@ -900,7 +904,7 @@ func TestModule2(t *testing.T) {
 	`)
 	defer r5.Free()
 	require.NoError(t, err)
-	require.EqualValues(t, 144, ctx.Globals().Get("result").Int32())
+	require.EqualValues(t, 144, ctx.Globals().Get("result").ToInt32())
 }
 
 func TestClassConstructor(t *testing.T) {
@@ -930,6 +934,6 @@ func TestClassConstructor(t *testing.T) {
 	x := fooInstance.Get("x")
 	defer x.Free()
 
-	require.EqualValues(t, 10, x.Int32())
+	require.EqualValues(t, 10, x.ToInt32())
 
 }

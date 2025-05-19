@@ -6,16 +6,20 @@ package quickjs
 import "C"
 import (
 	"errors"
+	"fmt"
 	"math/big"
 	"unsafe"
 )
 
 type Error struct {
-	Cause string
-	Stack string
+	Name       string // Error name
+	Message    string // Error message
+	Cause      string // Error cause
+	Stack      string // Stack trace
+	JSONString string // Serialized JSON string
 }
 
-func (err Error) Error() string { return err.Cause }
+func (err Error) Error() string { return fmt.Sprintf("%s: %s", err.Name, err.Message) }
 
 // Object property names and some strings are stored as Atoms (unique strings) to save memory and allow fast comparison. Atoms are represented as a 32 bit integer. Half of the atom range is reserved for immediate integer literals from 0 to 2^{31}-1.
 type Atom struct {
@@ -65,13 +69,24 @@ func (v Value) Context() *Context {
 	return v.ctx
 }
 
-// Bool returns the boolean value of the value.
+// Deprecated: Use ToBool instead.
 func (v Value) Bool() bool {
+	return v.ToBool()
+}
+
+// ToBool returns the boolean value of the value.
+func (v Value) ToBool() bool {
 	return C.JS_ToBool(v.ctx.ref, v.ref) == 1
 }
 
 // String returns the string representation of the value.
+// This method implements the fmt.Stringer interface.
 func (v Value) String() string {
+	return v.ToString()
+}
+
+// ToString returns the string representation of the value.
+func (v Value) ToString() string {
 	ptr := C.JS_ToCString(v.ctx.ref, v.ref)
 	defer C.JS_FreeCString(v.ctx.ref, ptr)
 	return C.GoString(ptr)
@@ -96,39 +111,64 @@ func (v Value) ToByteArray(size uint) ([]byte, error) {
 
 // IsByteArray return true if the value is array buffer
 func (v Value) IsByteArray() bool {
-	return v.IsObject() && v.globalInstanceof("ArrayBuffer") || v.String() == "[object ArrayBuffer]"
+	return v.IsObject() && v.GlobalInstanceof("ArrayBuffer") || v.String() == "[object ArrayBuffer]"
 }
 
-// Int64 returns the int64 value of the value.
+// Deprecated: Use ToInt64 instead.
 func (v Value) Int64() int64 {
+	return v.ToInt64()
+}
+
+// ToInt64 returns the int64 value of the value.
+func (v Value) ToInt64() int64 {
 	val := C.int64_t(0)
 	C.JS_ToInt64(v.ctx.ref, &val, v.ref)
 	return int64(val)
 }
 
-// Int32 returns the int32 value of the value.
+// Deprecated: Use ToInt32 instead.
 func (v Value) Int32() int32 {
+	return v.ToInt32()
+}
+
+// ToInt32 returns the int32 value of the value.
+func (v Value) ToInt32() int32 {
 	val := C.int32_t(0)
 	C.JS_ToInt32(v.ctx.ref, &val, v.ref)
 	return int32(val)
 }
 
-// Uint32 returns the uint32 value of the value.
+// Deprecated: Use ToUint32 instead.
 func (v Value) Uint32() uint32 {
+	return v.ToUint32()
+}
+
+// ToUint32 returns the uint32 value of the value.
+func (v Value) ToUint32() uint32 {
 	val := C.uint32_t(0)
 	C.JS_ToUint32(v.ctx.ref, &val, v.ref)
 	return uint32(val)
 }
 
-// Float64 returns the float64 value of the value.
+// Deprecated: Use ToFloat64 instead.
 func (v Value) Float64() float64 {
+	return v.ToFloat64()
+}
+
+// ToFloat64 returns the float64 value of the value.
+func (v Value) ToFloat64() float64 {
 	val := C.double(0)
 	C.JS_ToFloat64(v.ctx.ref, &val, v.ref)
 	return float64(val)
 }
 
-// BigInt returns the big.Int value of the value.
+// Deprecated: Use ToBigInt instead.
 func (v Value) BigInt() *big.Int {
+	return v.ToBigInt()
+}
+
+// ToBigInt returns the big.Int value of the value.
+func (v Value) ToBigInt() *big.Int {
 	if !v.IsBigInt() {
 		return nil
 	}
@@ -177,12 +217,12 @@ func (v Value) ToSet() *Set {
 
 // IsMap return true if the value is a map
 func (v Value) IsMap() bool {
-	return v.IsObject() && v.globalInstanceof("Map") || v.String() == "[object Map]"
+	return v.IsObject() && v.GlobalInstanceof("Map") || v.String() == "[object Map]"
 }
 
 // IsSet return true if the value is a set
 func (v Value) IsSet() bool {
-	return v.IsObject() && v.globalInstanceof("Set") || v.String() == "[object Set]"
+	return v.IsObject() && v.GlobalInstanceof("Set") || v.String() == "[object Set]"
 }
 
 // Len returns the length of the array.
@@ -242,6 +282,22 @@ func (v Value) Call(fname string, args ...Value) Value {
 	return Value{ctx: v.ctx, ref: C.JS_Call(v.ctx.ref, fn.ref, v.ref, C.int(len(cargs)), &cargs[0])}
 }
 
+// Execute the function with the given arguments.
+func (v Value) Execute(this Value, args ...Value) Value {
+	if !v.IsFunction() {
+		return v.ctx.Error(errors.New("Value not a function"))
+	}
+
+	cargs := []C.JSValue{}
+	for _, x := range args {
+		cargs = append(cargs, x.ref)
+	}
+	if len(cargs) == 0 {
+		return Value{ctx: v.ctx, ref: C.JS_Call(v.ctx.ref, v.ref, this.ref, C.int(0), nil)}
+	}
+	return Value{ctx: v.ctx, ref: C.JS_Call(v.ctx.ref, v.ref, this.ref, C.int(len(cargs)), &cargs[0])}
+}
+
 // Call Class Constructor
 func (v Value) New(args ...Value) Value {
 	return v.CallConstructor(args...)
@@ -263,20 +319,49 @@ func (v Value) CallConstructor(args ...Value) Value {
 	return Value{ctx: v.ctx, ref: C.JS_CallConstructor(v.ctx.ref, v.ref, C.int(len(cargs)), &cargs[0])}
 }
 
-// Error returns the error value of the value.
+// Deprecated: Use ToError() instead.
 func (v Value) Error() error {
+	return v.ToError()
+}
+
+// Error returns the error value of the value.
+func (v Value) ToError() error {
 	if !v.IsError() {
 		return nil
 	}
-	cause := v.String()
+
+	err := &Error{}
+
+	name := v.Get("name")
+	defer name.Free()
+	if !name.IsUndefined() {
+		err.Name = name.String()
+	}
+
+	message := v.Get("message")
+	defer message.Free()
+	if !message.IsUndefined() {
+		err.Message = message.String()
+	}
+
+	cause := v.Get("cause")
+	defer cause.Free()
+	if !cause.IsUndefined() {
+		err.Cause = cause.String()
+	}
 
 	stack := v.Get("stack")
 	defer stack.Free()
-
-	if stack.IsUndefined() {
-		return &Error{Cause: cause}
+	if !stack.IsUndefined() {
+		err.Stack = stack.String()
 	}
-	return &Error{Cause: cause, Stack: stack.String()}
+
+	jsonString := v.JSONStringify()
+	if jsonString != "" {
+		err.JSONString = jsonString
+	}
+
+	return err
 }
 
 // propertyEnum is a wrapper around JSValue.
@@ -341,7 +426,7 @@ func (v Value) DeleteIdx(idx int64) bool {
 }
 
 // globalInstanceof checks if the value is an instance of the given global constructor
-func (v Value) globalInstanceof(name string) bool {
+func (v Value) GlobalInstanceof(name string) bool {
 	ctor := v.ctx.Globals().Get(name)
 	defer ctor.Free()
 	if ctor.IsUndefined() {
