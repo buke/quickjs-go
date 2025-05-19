@@ -262,9 +262,6 @@ func TestValue(t *testing.T) {
 
 	require.EqualValues(t, big.NewInt(1), ctx.BigInt64(1).BigInt())
 	require.EqualValues(t, big.NewInt(1), ctx.BigUint64(1).BigInt())
-
-	require.EqualValues(t, false, ctx.Float64(0.1).IsBigDecimal())
-	require.EqualValues(t, false, ctx.Float64(0.1).IsBigFloat())
 	require.EqualValues(t, false, ctx.Float64(0.1).IsBigInt())
 
 	a := ctx.Array()

@@ -139,18 +139,6 @@ func (v Value) BigInt() *big.Int {
 	return val
 }
 
-// BigFloat returns the big.Float value of the value.
-func (v Value) BigFloat() *big.Float {
-	if !v.IsBigDecimal() && !v.IsBigFloat() {
-		return nil
-	}
-	val, ok := new(big.Float).SetString(v.String())
-	if !ok {
-		return nil
-	}
-	return val
-}
-
 // ToArray
 //
 //	@Description: return array object
@@ -364,8 +352,6 @@ func (v Value) globalInstanceof(name string) bool {
 
 func (v Value) IsNumber() bool        { return C.JS_IsNumber(v.ref) == 1 }
 func (v Value) IsBigInt() bool        { return C.JS_IsBigInt(v.ctx.ref, v.ref) == 1 }
-func (v Value) IsBigFloat() bool      { return C.JS_IsBigFloat(v.ref) == 1 }
-func (v Value) IsBigDecimal() bool    { return C.JS_IsBigDecimal(v.ref) == 1 }
 func (v Value) IsBool() bool          { return C.JS_IsBool(v.ref) == 1 }
 func (v Value) IsNull() bool          { return C.JS_IsNull(v.ref) == 1 }
 func (v Value) IsUndefined() bool     { return C.JS_IsUndefined(v.ref) == 1 }
