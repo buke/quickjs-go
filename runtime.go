@@ -25,6 +25,7 @@ type Options struct {
 	maxStackSize uint64
 	canBlock     bool
 	moduleImport bool
+	strip        int
 }
 
 type Option func(*Options)
@@ -70,6 +71,12 @@ func WithModuleImport(moduleImport bool) Option {
 	}
 }
 
+func WithStripInfo(strip int) Option {
+	return func(o *Options) {
+		o.strip = strip
+	}
+}
+
 // NewRuntime creates a new quickjs runtime.
 func NewRuntime(opts ...Option) Runtime {
 	runtime.LockOSThread() // prevent multiple quickjs runtime from being created
@@ -81,6 +88,7 @@ func NewRuntime(opts ...Option) Runtime {
 		maxStackSize: 0,
 		canBlock:     true,
 		moduleImport: false,
+		strip:        0,
 	}
 	for _, opt := range opts {
 		opt(options)
@@ -102,6 +110,9 @@ func NewRuntime(opts ...Option) Runtime {
 	}
 	if rt.options.canBlock {
 		C.JS_SetCanBlock(rt.ref, C.int(1))
+	}
+	if rt.options.strip > 0 {
+		rt.SetStripInfo(rt.options.strip)
 	}
 	return rt
 }
@@ -144,6 +155,10 @@ func (r Runtime) SetMaxStackSize(stack_size uint64) {
 // SetExecuteTimeout will set the runtime's execute timeout; default is 0
 func (r Runtime) SetExecuteTimeout(timeout uint64) {
 	C.SetExecuteTimeout(r.ref, C.time_t(timeout))
+}
+
+func (r Runtime) SetStripInfo(strip int) {
+	C.JS_SetStripInfo(r.ref, C.int(strip))
 }
 
 // SetInterruptHandler sets a interrupt handler.

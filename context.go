@@ -247,7 +247,6 @@ type EvalOptions struct {
 	js_eval_type_global       bool
 	js_eval_type_module       bool
 	js_eval_flag_strict       bool
-	js_eval_flag_strip        bool
 	js_eval_flag_compile_only bool
 	filename                  string
 	await                     bool
@@ -270,12 +269,6 @@ func EvalFlagModule(module bool) EvalOption {
 func EvalFlagStrict(strict bool) EvalOption {
 	return func(flags *EvalOptions) {
 		flags.js_eval_flag_strict = strict
-	}
-}
-
-func EvalFlagStrip(strip bool) EvalOption {
-	return func(flags *EvalOptions) {
-		flags.js_eval_flag_strip = strip
 	}
 }
 
@@ -319,9 +312,6 @@ func (ctx *Context) Eval(code string, opts ...EvalOption) (Value, error) {
 	}
 	if options.js_eval_flag_strict {
 		cFlag |= C.JS_EVAL_FLAG_STRICT
-	}
-	if options.js_eval_flag_strip {
-		cFlag |= C.JS_EVAL_FLAG_STRIP
 	}
 	if options.js_eval_flag_compile_only {
 		cFlag |= C.JS_EVAL_FLAG_COMPILE_ONLY
