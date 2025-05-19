@@ -29,10 +29,11 @@ we prebuilt quickjs static library for the following platforms:
 
 | quickjs-go | QuickJS     |
 | ---------- | ----------- |
-| v0.1.x     | v2021-03-27 |
-| v0.2.x     | v2023-12-09 |
-| v0.3.x     | v2024-01-13 |
+| v0.5.x     | v2025-04-26 |
 | v0.4.x     | v2024-02-14 |
+| v0.3.x     | v2024-01-13 |
+| v0.2.x     | v2023-12-09 |
+| v0.1.x     | v2021-03-27 |
 
 ## Features
 
