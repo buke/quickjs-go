@@ -696,7 +696,7 @@ func TestAsyncFunction(t *testing.T) {
 	require.EqualValues(t, "Hello Async", ret3.String())
 }
 
-func TestSetInterruptHandler(t *testing.T) {
+func TestSetInterruptHandlerContext(t *testing.T) {
 	rt := quickjs.NewRuntime()
 	defer rt.Close()
 
@@ -712,6 +712,57 @@ func TestSetInterruptHandler(t *testing.T) {
 		return 0
 	})
 
+	ret, err := ctx.Eval(`while(true){}`)
+	defer ret.Free()
+
+	assert.Error(t, err, "expected interrupted by quickjs")
+	require.Equal(t, "InternalError: interrupted", err.Error())
+}
+
+// This test shows how the interrupt handler is not specific to the context.
+// So it is cleaner to set it on the runtime instead.
+func TestSetInterruptHandlerContextIsSetToRuntime(t *testing.T) {
+	rt := quickjs.NewRuntime()
+	defer rt.Close()
+
+	ctx1 := rt.NewContext()
+	defer ctx1.Close()
+	ctx2 := rt.NewContext()
+	defer ctx2.Close()
+
+	startTime := time.Now().Unix()
+
+	// Set it to context 1
+	ctx1.SetInterruptHandler(func() int {
+		if time.Now().Unix()-startTime > 1 {
+			return 1
+		}
+		return 0
+	})
+
+	// use it in context 2
+	ret, err := ctx2.Eval(`while(true){}`)
+	defer ret.Free()
+
+	assert.Error(t, err, "expected interrupted by quickjs")
+	require.Equal(t, "InternalError: interrupted", err.Error())
+}
+
+func TestSetInterruptHandlerRuntime(t *testing.T) {
+	rt := quickjs.NewRuntime()
+	defer rt.Close()
+
+	startTime := time.Now().Unix()
+
+	rt.SetInterruptHandler(func() int {
+		if time.Now().Unix()-startTime > 1 {
+			return 1
+		}
+		return 0
+	})
+
+	ctx := rt.NewContext()
+	defer ctx.Close()
 	ret, err := ctx.Eval(`while(true){}`)
 	defer ret.Free()
 
