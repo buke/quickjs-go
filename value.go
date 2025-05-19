@@ -282,6 +282,22 @@ func (v Value) Call(fname string, args ...Value) Value {
 	return Value{ctx: v.ctx, ref: C.JS_Call(v.ctx.ref, fn.ref, v.ref, C.int(len(cargs)), &cargs[0])}
 }
 
+// Execute the function with the given arguments.
+func (v Value) Execute(this Value, args ...Value) Value {
+	if !v.IsFunction() {
+		return v.ctx.Error(errors.New("Value not a function"))
+	}
+
+	cargs := []C.JSValue{}
+	for _, x := range args {
+		cargs = append(cargs, x.ref)
+	}
+	if len(cargs) == 0 {
+		return Value{ctx: v.ctx, ref: C.JS_Call(v.ctx.ref, v.ref, this.ref, C.int(0), nil)}
+	}
+	return Value{ctx: v.ctx, ref: C.JS_Call(v.ctx.ref, v.ref, this.ref, C.int(len(cargs)), &cargs[0])}
+}
+
 // Call Class Constructor
 func (v Value) New(args ...Value) Value {
 	return v.CallConstructor(args...)

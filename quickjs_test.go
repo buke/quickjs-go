@@ -485,16 +485,20 @@ func TestObject(t *testing.T) {
 		return ctx.Int32(arg_x * arg_y)
 	}))
 
+	// invoke js function by go
+	f_func := test.Get("F")
+	defer f_func.Free()
+
+	ret_execute := f_func.Execute(ctx.Null(), ctx.Int32(3), ctx.Int32(3))
+	require.True(t, ret_execute.IsNumber() && ret_execute.ToInt32() == 9)
+
+	ret_invoke := ctx.Invoke(f_func, ctx.Null(), ctx.Int32(2), ctx.Int32(3))
+	require.True(t, ret_invoke.IsNumber() && ret_invoke.ToInt32() == 6)
+
 	// call js function by go
 	F_ret := test.Call("F", ctx.Int32(2), ctx.Int32(3))
 	defer F_ret.Free()
 	require.True(t, F_ret.IsNumber() && F_ret.ToInt32() == 6)
-
-	// invoke js function by go
-	f_func := test.Get("F")
-	defer f_func.Free()
-	ret := ctx.Invoke(f_func, ctx.Null(), ctx.Int32(2), ctx.Int32(3))
-	require.True(t, ret.IsNumber() && ret.ToInt32() == 6)
 
 	// test error call
 	F_ret_err := test.Call("A", ctx.Int32(2), ctx.Int32(3))
