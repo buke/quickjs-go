@@ -29,7 +29,7 @@ func NewQjsArray(value Value, ctx *Context) *Array {
 func (a Array) Push(elements ...Value) int64 {
 	ret := a.arrayValue.Call("push", elements...)
 	//defer ret.Free()
-	return ret.Int64()
+	return ret.ToInt64()
 }
 
 // Get
@@ -163,7 +163,7 @@ func (m Map) Delete(key Value) {
 func (m Map) Has(key Value) bool {
 	boolValue := m.mapValue.Call("has", key)
 	defer boolValue.Free()
-	return boolValue.Bool()
+	return boolValue.ToBool()
 }
 
 // ForEach
@@ -239,7 +239,7 @@ func (s Set) Delete(value Value) {
 //	@return bool
 func (s Set) Has(value Value) bool {
 	v := s.setValue.Call("has", value)
-	return v.Bool()
+	return v.ToBool()
 }
 
 // ForEach

@@ -65,13 +65,24 @@ func (v Value) Context() *Context {
 	return v.ctx
 }
 
-// Bool returns the boolean value of the value.
+// Deprecated: Use ToBool instead.
 func (v Value) Bool() bool {
+	return v.ToBool()
+}
+
+// ToBool returns the boolean value of the value.
+func (v Value) ToBool() bool {
 	return C.JS_ToBool(v.ctx.ref, v.ref) == 1
 }
 
 // String returns the string representation of the value.
+// This method implements the fmt.Stringer interface.
 func (v Value) String() string {
+	return v.ToString()
+}
+
+// ToString returns the string representation of the value.
+func (v Value) ToString() string {
 	ptr := C.JS_ToCString(v.ctx.ref, v.ref)
 	defer C.JS_FreeCString(v.ctx.ref, ptr)
 	return C.GoString(ptr)
@@ -99,36 +110,61 @@ func (v Value) IsByteArray() bool {
 	return v.IsObject() && v.globalInstanceof("ArrayBuffer") || v.String() == "[object ArrayBuffer]"
 }
 
-// Int64 returns the int64 value of the value.
+// Deprecated: Use ToInt64 instead.
 func (v Value) Int64() int64 {
+	return v.ToInt64()
+}
+
+// ToInt64 returns the int64 value of the value.
+func (v Value) ToInt64() int64 {
 	val := C.int64_t(0)
 	C.JS_ToInt64(v.ctx.ref, &val, v.ref)
 	return int64(val)
 }
 
-// Int32 returns the int32 value of the value.
+// Deprecated: Use ToInt32 instead.
 func (v Value) Int32() int32 {
+	return v.ToInt32()
+}
+
+// ToInt32 returns the int32 value of the value.
+func (v Value) ToInt32() int32 {
 	val := C.int32_t(0)
 	C.JS_ToInt32(v.ctx.ref, &val, v.ref)
 	return int32(val)
 }
 
-// Uint32 returns the uint32 value of the value.
+// Deprecated: Use ToUint32 instead.
 func (v Value) Uint32() uint32 {
+	return v.ToUint32()
+}
+
+// ToUint32 returns the uint32 value of the value.
+func (v Value) ToUint32() uint32 {
 	val := C.uint32_t(0)
 	C.JS_ToUint32(v.ctx.ref, &val, v.ref)
 	return uint32(val)
 }
 
-// Float64 returns the float64 value of the value.
+// Deprecated: Use ToFloat64 instead.
 func (v Value) Float64() float64 {
+	return v.ToFloat64()
+}
+
+// ToFloat64 returns the float64 value of the value.
+func (v Value) ToFloat64() float64 {
 	val := C.double(0)
 	C.JS_ToFloat64(v.ctx.ref, &val, v.ref)
 	return float64(val)
 }
 
-// BigInt returns the big.Int value of the value.
+// Deprecated: Use ToBigInt instead.
 func (v Value) BigInt() *big.Int {
+	return v.ToBigInt()
+}
+
+// ToBigInt returns the big.Int value of the value.
+func (v Value) ToBigInt() *big.Int {
 	if !v.IsBigInt() {
 		return nil
 	}
