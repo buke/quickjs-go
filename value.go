@@ -6,16 +6,20 @@ package quickjs
 import "C"
 import (
 	"errors"
+	"fmt"
 	"math/big"
 	"unsafe"
 )
 
 type Error struct {
-	Cause string
-	Stack string
+	Name       string // Error name
+	Message    string // Error message
+	Cause      string // Error cause
+	Stack      string // Stack trace
+	JSONString string // Serialized JSON string
 }
 
-func (err Error) Error() string { return err.Cause }
+func (err Error) Error() string { return fmt.Sprintf("%s: %s", err.Name, err.Message) }
 
 // Object property names and some strings are stored as Atoms (unique strings) to save memory and allow fast comparison. Atoms are represented as a 32 bit integer. Half of the atom range is reserved for immediate integer literals from 0 to 2^{31}-1.
 type Atom struct {
@@ -299,20 +303,49 @@ func (v Value) CallConstructor(args ...Value) Value {
 	return Value{ctx: v.ctx, ref: C.JS_CallConstructor(v.ctx.ref, v.ref, C.int(len(cargs)), &cargs[0])}
 }
 
-// Error returns the error value of the value.
+// Deprecated: Use ToError() instead.
 func (v Value) Error() error {
+	return v.ToError()
+}
+
+// Error returns the error value of the value.
+func (v Value) ToError() error {
 	if !v.IsError() {
 		return nil
 	}
-	cause := v.String()
+
+	err := &Error{}
+
+	name := v.Get("name")
+	defer name.Free()
+	if !name.IsUndefined() {
+		err.Name = name.String()
+	}
+
+	message := v.Get("message")
+	defer message.Free()
+	if !message.IsUndefined() {
+		err.Message = message.String()
+	}
+
+	cause := v.Get("cause")
+	defer cause.Free()
+	if !cause.IsUndefined() {
+		err.Cause = cause.String()
+	}
 
 	stack := v.Get("stack")
 	defer stack.Free()
-
-	if stack.IsUndefined() {
-		return &Error{Cause: cause}
+	if !stack.IsUndefined() {
+		err.Stack = stack.String()
 	}
-	return &Error{Cause: cause, Stack: stack.String()}
+
+	jsonString := v.JSONStringify()
+	if jsonString != "" {
+		err.JSONString = jsonString
+	}
+
+	return err
 }
 
 // propertyEnum is a wrapper around JSValue.
