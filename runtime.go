@@ -182,11 +182,6 @@ func (r Runtime) NewContext() *Context {
 	// create a new context (heap, global object and context stack
 	ctx_ref := C.JS_NewContext(r.ref)
 
-	C.JS_AddIntrinsicBigFloat(ctx_ref)
-	C.JS_AddIntrinsicBigDecimal(ctx_ref)
-	C.JS_AddIntrinsicOperators(ctx_ref)
-	C.JS_EnableBignumExt(ctx_ref, C.int(1))
-
 	// set the module loader for support dynamic import
 	if r.options.moduleImport {
 		C.JS_SetModuleLoaderFunc(r.ref, (*C.JSModuleNormalizeFunc)(unsafe.Pointer(nil)), (*C.JSModuleLoaderFunc)(C.js_module_loader), unsafe.Pointer(nil))
