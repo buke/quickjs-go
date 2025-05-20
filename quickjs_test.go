@@ -23,6 +23,7 @@ func Example() {
 		quickjs.WithGCThreshold(256*1024),
 		quickjs.WithMaxStackSize(65534),
 		quickjs.WithCanBlock(true),
+		quickjs.WithStripInfo(1),
 	)
 	defer rt.Close()
 

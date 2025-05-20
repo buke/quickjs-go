@@ -149,12 +149,12 @@ func (r Runtime) SetGCThreshold(threshold int64) {
 	C.JS_SetGCThreshold(r.ref, C.size_t(threshold))
 }
 
-// SetMaxStackSize will set max runtime's stack size; default is 255
+// SetMaxStackSize will set max runtime's stack size;
 func (r Runtime) SetMaxStackSize(stack_size uint64) {
 	C.JS_SetMaxStackSize(r.ref, C.size_t(stack_size))
 }
 
-// SetExecuteTimeout will set the runtime's execute timeout; default is 0
+// SetExecuteTimeout will set the runtime's execute timeout;
 func (r Runtime) SetExecuteTimeout(timeout uint64) {
 	C.SetExecuteTimeout(r.ref, C.time_t(timeout))
 }
