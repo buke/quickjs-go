@@ -186,7 +186,7 @@ func (r Runtime) NewContext() *Context {
 
 	// set the module loader for support dynamic import
 	if r.options.moduleImport {
-		C.JS_SetModuleLoaderFunc(r.ref, (*C.JSModuleNormalizeFunc)(unsafe.Pointer(nil)), (*C.JSModuleLoaderFunc)(C.js_module_loader), unsafe.Pointer(nil))
+		C.JS_SetModuleLoaderFunc2(r.ref, (*C.JSModuleNormalizeFunc)(unsafe.Pointer(nil)), (*C.JSModuleLoaderFunc2)(C.js_module_loader), (*C.JSModuleCheckSupportedImportAttributes)(C.js_module_check_attributes), unsafe.Pointer(nil))
 	}
 
 	// import the 'std' and 'os' modules
