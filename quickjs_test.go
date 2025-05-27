@@ -253,7 +253,6 @@ func TestValue(t *testing.T) {
 	ctx := rt.NewContext()
 	defer ctx.Close()
 
-	// require.EqualValues(t, big.NewInt(1), ctx.BigUint64(uint64(1)).)
 	require.EqualValues(t, true, ctx.Bool(true).IsBool())
 	require.EqualValues(t, true, ctx.Bool(true).ToBool())
 	require.EqualValues(t, float64(0.1), ctx.Float64(0.1).ToFloat64())
@@ -265,9 +264,10 @@ func TestValue(t *testing.T) {
 	require.EqualValues(t, big.NewInt(1), ctx.BigUint64(1).ToBigInt())
 	require.EqualValues(t, false, ctx.Float64(0.1).IsBigInt())
 
-	a := ctx.Array()
+	// Test array using Eval
+	a, _ := ctx.Eval("[]")
 	defer a.Free()
-	//require.True(t, a.IsArray())
+	require.True(t, a.IsArray())
 
 	o := ctx.Object()
 	defer o.Free()
@@ -331,7 +331,7 @@ func TestEvalBytecode(t *testing.T) {
             return fib(n - 1) + fib(n - 2);
     }
     fib(10)
-	`
+    `
 	buf, err := ctx.Compile(jsStr)
 	require.NoError(t, err)
 
@@ -384,7 +384,6 @@ func TestArrayBuffer(t *testing.T) {
 	for i := 1; i <= len(binaryData); i++ {
 		data, err := value.ToByteArray(uint(i))
 		assert.NoError(t, err)
-		//fmt.Println(data)
 		assert.EqualValues(t, data, binaryData[:i])
 	}
 	_, err := value.ToByteArray(uint(len(binaryData)) + 1)
@@ -519,130 +518,6 @@ func TestObject(t *testing.T) {
 	pNames, _ = test.PropertyNames()
 	require.True(t, strings.Join(pNames[:], ",") == "A,B,F")
 
-}
-
-func TestArray(t *testing.T) {
-	rt := quickjs.NewRuntime()
-	defer rt.Close()
-
-	ctx := rt.NewContext()
-	defer ctx.Close()
-
-	test := ctx.Array()
-	for i := int64(0); i < 3; i++ {
-		test.Push(ctx.String(fmt.Sprintf("test %d", i)))
-		require.True(t, test.HasIdx(i))
-	}
-	require.EqualValues(t, 3, test.Len())
-
-	for i := int64(0); int64(i) < test.Len(); i++ {
-		require.EqualValues(t, fmt.Sprintf("test %d", i), test.ToValue().GetIdx(i).String())
-	}
-
-	ctx.Globals().Set("test", test.ToValue())
-
-	result, err := ctx.Eval(`test.map(v => v.toUpperCase())`)
-	require.NoError(t, err)
-	defer result.Free()
-	require.EqualValues(t, `TEST 0,TEST 1,TEST 2`, result.String())
-
-	dFlag, _ := test.Delete(0)
-	require.True(t, dFlag)
-	result, err = ctx.Eval(`test.map(v => v.toUpperCase())`)
-	require.NoError(t, err)
-	defer result.Free()
-	require.EqualValues(t, `TEST 1,TEST 2`, result.String())
-
-	first, err := test.Get(0)
-	if err != nil {
-		fmt.Println(err)
-	}
-	require.EqualValues(t, first.String(), "test 1")
-
-	test.Push([]quickjs.Value{ctx.Int32(34), ctx.Bool(false), ctx.String("445")}...)
-
-	require.Equal(t, int(test.Len()), 5)
-
-	err = test.Set(test.Len()-1, ctx.Int32(2))
-	require.NoError(t, err)
-
-	require.EqualValues(t, test.ToValue().String(), "test 1,test 2,34,false,2")
-
-}
-
-func TestMap(t *testing.T) {
-	rt := quickjs.NewRuntime()
-	defer rt.Close()
-
-	ctx := rt.NewContext()
-	defer ctx.Close()
-
-	test := ctx.Map()
-	defer test.Free()
-	require.True(t, test.ToValue().IsMap())
-
-	for i := int64(0); i < 3; i++ {
-		test.Put(ctx.Int64(i), ctx.String(fmt.Sprintf("test %d", i)))
-		require.True(t, test.Has(ctx.Int64(i)))
-		testValue := test.Get(ctx.Int64(i))
-		require.EqualValues(t, testValue.String(), fmt.Sprintf("test %d", i))
-		//testValue.Free()
-	}
-
-	count := 0
-	test.ForEach(func(key quickjs.Value, value quickjs.Value) {
-		count++
-		fmt.Printf("key:%s value:%s\n", key.String(), value.String())
-	})
-	require.EqualValues(t, count, 3)
-
-	test.Put(ctx.Int64(3), ctx.Int64(4))
-	fmt.Println("\nput after the content inside")
-	count = 0
-	test.ForEach(func(key quickjs.Value, value quickjs.Value) {
-		count++
-		fmt.Printf("key:%s value:%s\n", key.String(), value.String())
-	})
-	require.EqualValues(t, count, 4)
-
-	count = 0
-	test.Delete(ctx.Int64(3))
-	fmt.Println("\ndelete after the content inside")
-	test.ForEach(func(key quickjs.Value, value quickjs.Value) {
-		if key.String() == "3" {
-			panic(errors.New("map did not delete the key"))
-		}
-		count++
-		fmt.Printf("key:%s value:%s\n", key.String(), value.String())
-	})
-	require.EqualValues(t, count, 3)
-}
-
-func TestSet(t *testing.T) {
-	rt := quickjs.NewRuntime()
-	defer rt.Close()
-
-	ctx := rt.NewContext()
-	defer ctx.Close()
-
-	test := ctx.Set()
-	defer test.Free()
-	require.True(t, test.ToValue().IsSet())
-
-	for i := int64(0); i < 3; i++ {
-		test.Add(ctx.Int64(i))
-		require.True(t, test.Has(ctx.Int64(i)))
-	}
-
-	count := 0
-	test.ForEach(func(key quickjs.Value) {
-		count++
-		fmt.Printf("value:%s\n", key.String())
-	})
-	require.EqualValues(t, count, 3)
-
-	test.Delete(ctx.Int64(0))
-	require.True(t, !test.Has(ctx.Int64(0)))
 }
 
 func TestFunction(t *testing.T) {

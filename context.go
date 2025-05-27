@@ -136,26 +136,6 @@ func (ctx *Context) ParseJSON(v string) Value {
 	return Value{ctx: ctx, ref: C.JS_ParseJSON(ctx.ref, ptr, C.size_t(len(v)), filenamePtr)}
 }
 
-// Array returns a new array value.
-func (ctx *Context) Array() *Array {
-	val := Value{ctx: ctx, ref: C.JS_NewArray(ctx.ref)}
-	return NewQjsArray(val, ctx)
-}
-
-func (ctx *Context) Map() *Map {
-	ctor := ctx.Globals().Get("Map")
-	defer ctor.Free()
-	val := Value{ctx: ctx, ref: C.JS_CallConstructor(ctx.ref, ctor.ref, 0, nil)}
-	return NewQjsMap(val, ctx)
-}
-
-func (ctx *Context) Set() *Set {
-	ctor := ctx.Globals().Get("Set")
-	defer ctor.Free()
-	val := Value{ctx: ctx, ref: C.JS_CallConstructor(ctx.ref, ctor.ref, 0, nil)}
-	return NewQjsSet(val, ctx)
-}
-
 // Function returns a js function value with given function template.
 func (ctx *Context) Function(fn func(ctx *Context, this Value, args []Value) Value) Value {
 	if ctx.proxy == nil {

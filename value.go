@@ -179,52 +179,6 @@ func (v Value) ToBigInt() *big.Int {
 	return val
 }
 
-// ToArray
-//
-//	@Description: return array object
-//	@receiver v :
-//	@return *Array
-func (v Value) ToArray() *Array {
-	if !v.IsArray() {
-		return nil
-	}
-	return NewQjsArray(v, v.ctx)
-}
-
-// ToMap
-//
-//	@Description: return map object
-//	@receiver v :
-//	@return *Map
-func (v Value) ToMap() *Map {
-	if !v.IsMap() {
-		return nil
-	}
-	return NewQjsMap(v, v.ctx)
-}
-
-// ToSet
-//
-//	@Description: return set object
-//	@receiver v :
-//	@return *Set
-func (v Value) ToSet() *Set {
-	if v.IsSet() {
-		return nil
-	}
-	return NewQjsSet(v, v.ctx)
-}
-
-// IsMap return true if the value is a map
-func (v Value) IsMap() bool {
-	return v.IsObject() && v.GlobalInstanceof("Map") || v.String() == "[object Map]"
-}
-
-// IsSet return true if the value is a set
-func (v Value) IsSet() bool {
-	return v.IsObject() && v.GlobalInstanceof("Set") || v.String() == "[object Set]"
-}
-
 // Len returns the length of the array.
 func (v Value) Len() int64 {
 	return v.Get("length").Int64()
