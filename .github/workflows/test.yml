@@ -33,6 +33,7 @@ jobs:
     - name: Codecov
       uses: codecov/codecov-action@v5.4.3
       env:
+        CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
         OS: ${{ matrix.os }}
         GO: ${{ matrix.go }}
       with:
