@@ -917,8 +917,11 @@ func TestModuleDifferentSizes(t *testing.T) {
 		"ten":   10,
 		"1k":    1000,
 		"2k":    2000,
-		// Uncomment to crash
+		// Uncomment for failures
 		// "5k": 5000,
+		// "6k": 6000,
+		// "7k": 7000,
+		// "8k": 8000,
 	}
 
 	for name, locs := range specs {
