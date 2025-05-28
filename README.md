@@ -35,6 +35,46 @@ we prebuilt quickjs static library for the following platforms:
 | v0.2.x     | v2023-12-09 |
 | v0.1.x     | v2021-03-27 |
 
+## Breaking Changes
+
+### v0.5.x
+
+**Collection API Removal**: The main goal of this project is to provide bindings for the QuickJS C API, therefore collection-related APIs have been removed. The following methods are no longer available:
+
+- `ctx.Array()` - Use `ctx.Eval("[]")` or `ctx.Object()` instead
+- `ctx.Map()` - Use `ctx.Eval("new Map()")` instead  
+- `ctx.Set()` - Use `ctx.Eval("new Set()")` instead
+- `value.ToArray()` - Use direct `Value` operations instead
+- `value.ToMap()` - Use direct `Value` operations instead
+- `value.ToSet()` - Use direct `Value` operations instead
+- `value.IsMap()` - Use `value.GlobalInstanceof("Map")` instead
+- `value.IsSet()` - Use `value.GlobalInstanceof("Set")` instead
+
+**Migration Guide:**
+
+```go
+// Before (v0.4.x and earlier)
+arr := ctx.Array()
+arr.Set("0", ctx.String("item"))
+
+mapObj := ctx.Map()
+mapObj.Set("key", ctx.String("value"))
+
+setObj := ctx.Set()
+setObj.Add(ctx.String("item"))
+
+// After (v0.5.x)
+arr, _ := ctx.Eval("[]")
+arr.Set("0", ctx.String("item"))
+arr.Set("length", ctx.Int32(1))
+
+mapObj, _ := ctx.Eval("new Map()")
+mapObj.Call("set", ctx.String("key"), ctx.String("value"))
+
+setObj, _ := ctx.Eval("new Set()")
+setObj.Call("add", ctx.String("item"))
+```
+
 ## Features
 
 - Evaluate script

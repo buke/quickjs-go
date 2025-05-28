@@ -35,6 +35,47 @@ Go 语言的 QuickJS 绑定库：快速、小型、可嵌入的 ES2020 JavaScrip
 | v0.2.x     | v2023-12-09 |
 | v0.1.x     | v2021-03-27 |
 
+## 破坏性变更
+
+### v0.5.x
+
+**移除 Collection API**：本项目的主要目标是提供 QuickJS C API 的绑定，因此 collection 相关的 API 将会被移除。以下方法不再可用：
+
+- `ctx.Array()` - 请使用 `ctx.Eval("[]")` 或 `ctx.Object()` 替代
+- `ctx.Map()` - 请使用 `ctx.Eval("new Map()")` 替代
+- `ctx.Set()` - 请使用 `ctx.Eval("new Set()")` 替代
+- `value.ToArray()` - 请直接使用 `Value` 操作替代
+- `value.ToMap()` - 请直接使用 `Value` 操作替代
+- `value.ToSet()` - 请直接使用 `Value` 操作替代
+- `value.IsMap()` - 请使用 `value.GlobalInstanceof("Map")` 替代
+- `value.IsSet()` - 请使用 `value.GlobalInstanceof("Set")` 替代
+
+**迁移指南：**
+
+```go
+// 之前的版本 (v0.4.x 及更早)
+arr := ctx.Array()
+arr.Set("0", ctx.String("item"))
+
+mapObj := ctx.Map()
+mapObj.Set("key", ctx.String("value"))
+
+setObj := ctx.Set()
+setObj.Add(ctx.String("item"))
+
+// 新版本 (v0.5.x)
+arr, _ := ctx.Eval("[]")
+arr.Set("0", ctx.String("item"))
+arr.Set("length", ctx.Int32(1))
+
+mapObj, _ := ctx.Eval("new Map()")
+mapObj.Call("set", ctx.String("key"), ctx.String("value"))
+
+setObj, _ := ctx.Eval("new Set()")
+setObj.Call("add", ctx.String("item"))
+```
+
+
 ## 功能
 
 - 执行 javascript 脚本
