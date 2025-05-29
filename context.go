@@ -364,6 +364,13 @@ func (ctx *Context) LoadModule(code string, moduleName string) (Value, error) {
 
 	cFlag := C.JS_EVAL_TYPE_MODULE | C.JS_EVAL_FLAG_COMPILE_ONLY
 	cVal := C.JS_Eval(ctx.ref, codePtr, C.size_t(len(code)), filenamePtr, C.int(cFlag))
+	if C.JS_IsException(cVal) == 1 {
+		if exc := ctx.Exception(); exc != nil {
+			return ctx.Null(), exc
+		} else {
+			return ctx.Null(), fmt.Errorf("unknown exception while loading module")
+		}
+	}
 	if C.ValueGetTag(cVal) != C.JS_TAG_MODULE {
 		return ctx.Null(), fmt.Errorf("not a module")
 	}
@@ -398,7 +405,11 @@ func (ctx *Context) LoadModuleBytecode(buf []byte) (Value, error) {
 	cVal := C.JS_ReadObject(ctx.ref, (*C.uint8_t)(cbuf), C.size_t(len(buf)), C.JS_READ_OBJ_BYTECODE)
 	defer C.js_free(ctx.ref, unsafe.Pointer(cbuf))
 	if C.JS_IsException(cVal) == 1 {
-		return ctx.Null(), ctx.Exception()
+		if exc := ctx.Exception(); exc != nil {
+			return ctx.Null(), exc
+		} else {
+			return ctx.Null(), fmt.Errorf("unknown exception while loading module")
+		}
 	}
 	if C.ValueGetTag(cVal) != C.JS_TAG_MODULE {
 		return ctx.Null(), fmt.Errorf("not a module")
