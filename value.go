@@ -6,52 +6,9 @@ package quickjs
 import "C"
 import (
 	"errors"
-	"fmt"
 	"math/big"
 	"unsafe"
 )
-
-type Error struct {
-	Name       string // Error name
-	Message    string // Error message
-	Cause      string // Error cause
-	Stack      string // Stack trace
-	JSONString string // Serialized JSON string
-}
-
-func (err Error) Error() string { return fmt.Sprintf("%s: %s", err.Name, err.Message) }
-
-// Object property names and some strings are stored as Atoms (unique strings) to save memory and allow fast comparison. Atoms are represented as a 32 bit integer. Half of the atom range is reserved for immediate integer literals from 0 to 2^{31}-1.
-type Atom struct {
-	ctx *Context
-	ref C.JSAtom
-}
-
-// Free the value.
-func (a Atom) Free() {
-	C.JS_FreeAtom(a.ctx.ref, a.ref)
-}
-
-// String returns the string representation of the value.
-func (a Atom) String() string {
-	ptr := C.JS_AtomToCString(a.ctx.ref, a.ref)
-	defer C.JS_FreeCString(a.ctx.ref, ptr)
-	return C.GoString(ptr)
-}
-
-// Value returns the value of the Atom object.
-func (a Atom) Value() Value {
-	return Value{ctx: a.ctx, ref: C.JS_AtomToValue(a.ctx.ref, a.ref)}
-}
-
-// propertyEnum is a wrapper around JSAtom.
-type propertyEnum struct {
-	IsEnumerable bool
-	atom         Atom
-}
-
-// String returns the atom string representation of the value.
-func (p propertyEnum) String() string { return p.atom.String() }
 
 // JSValue represents a Javascript value which can be a primitive type or an object. Reference counting is used, so it is important to explicitly duplicate (JS_DupValue(), increment the reference count) or free (JS_FreeValue(), decrement the reference count) JSValues.
 type Value struct {
@@ -361,7 +318,7 @@ func (v Value) Has(name string) bool {
 }
 
 // HasIdx returns true if the value has the property with the given index.
-func (v Value) HasIdx(idx int64) bool {
+func (v Value) HasIdx(idx uint32) bool {
 	prop := v.ctx.AtomIdx(idx)
 	defer prop.Free()
 	return C.JS_HasProperty(v.ctx.ref, v.ref, prop.ref) == 1
@@ -369,13 +326,19 @@ func (v Value) HasIdx(idx int64) bool {
 
 // Delete deletes the property with the given name.
 func (v Value) Delete(name string) bool {
+	if !v.Has(name) {
+		return false // Property does not exist, nothing to delete
+	}
 	prop := v.ctx.Atom(name)
 	defer prop.Free()
 	return C.JS_DeleteProperty(v.ctx.ref, v.ref, prop.ref, C.int(1)) == 1
 }
 
 // DeleteIdx deletes the property with the given index.
-func (v Value) DeleteIdx(idx int64) bool {
+func (v Value) DeleteIdx(idx uint32) bool {
+	if !v.HasIdx(idx) {
+		return false // Property does not exist, nothing to delete
+	}
 	return C.JS_DeletePropertyInt64(v.ctx.ref, v.ref, C.int64_t(idx), C.int(1)) == 1
 }
 

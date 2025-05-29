@@ -210,7 +210,7 @@ func (ctx *Context) Atom(v string) Atom {
 }
 
 // Atom returns a new Atom value with given idx.
-func (ctx *Context) AtomIdx(idx int64) Atom {
+func (ctx *Context) AtomIdx(idx uint32) Atom {
 	return Atom{ctx: ctx, ref: C.JS_NewAtomUInt32(ctx.ref, C.uint32_t(idx))}
 }
 
