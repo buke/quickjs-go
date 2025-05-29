@@ -347,24 +347,32 @@ func TestValueFunctionCalls(t *testing.T) {
 	// Test Call method
 	result := obj.Call("add", ctx.Int32(3), ctx.Int32(4))
 	defer result.Free()
+	require.False(t, result.IsError())
 	require.EqualValues(t, 7, result.ToInt32())
 
 	// Test Call with different method
 	result2 := obj.Call("multiply", ctx.Int32(3), ctx.Int32(4))
 	defer result2.Free()
+	require.False(t, result2.IsError())
 	require.EqualValues(t, 12, result2.ToInt32())
 
-	// Test Call with non-existent method
+	// Test Call with non-existent method - QuickJS will handle the error
 	errorResult := obj.Call("nonexistent", ctx.Int32(1))
 	defer errorResult.Free()
 	require.True(t, errorResult.IsError())
 
-	// Test Call on non-object
-	str := ctx.String("test")
-	defer str.Free()
-	errorResult2 := str.Call("method")
+	// Test Call with non-function property
+	obj.Set("notAFunction", ctx.String("I am not a function"))
+	errorResult2 := obj.Call("notAFunction")
 	defer errorResult2.Free()
 	require.True(t, errorResult2.IsError())
+
+	// Test Call on non-object - QuickJS will handle the error
+	str := ctx.String("test")
+	defer str.Free()
+	errorResult3 := str.Call("method")
+	defer errorResult3.Free()
+	require.True(t, errorResult3.IsError())
 
 	// Test Execute method
 	addFunc := obj.Get("add")
@@ -372,9 +380,10 @@ func TestValueFunctionCalls(t *testing.T) {
 
 	execResult := addFunc.Execute(ctx.Null(), ctx.Int32(5), ctx.Int32(6))
 	defer execResult.Free()
+	require.False(t, execResult.IsError())
 	require.EqualValues(t, 11, execResult.ToInt32())
 
-	// Test Execute on non-function
+	// Test Execute on non-function - QuickJS will handle the error
 	nonFunc := ctx.String("not a function")
 	defer nonFunc.Free()
 	execError := nonFunc.Execute(ctx.Null())
@@ -406,6 +415,7 @@ func TestValueConstructor(t *testing.T) {
 	// Test CallConstructor
 	instance := result.CallConstructor(ctx.String("test_value"))
 	defer instance.Free()
+	require.False(t, instance.IsError())
 	require.True(t, instance.IsObject())
 
 	valueProperty := instance.Get("value")
@@ -415,13 +425,14 @@ func TestValueConstructor(t *testing.T) {
 	// Test New (alias for CallConstructor)
 	instance2 := result.New(ctx.String("test_value2"))
 	defer instance2.Free()
+	require.False(t, instance2.IsError())
 	require.True(t, instance2.IsObject())
 
 	valueProperty2 := instance2.Get("value")
 	defer valueProperty2.Free()
 	require.EqualValues(t, "test_value2", valueProperty2.String())
 
-	// Test CallConstructor on non-constructor
+	// Test CallConstructor on non-constructor - QuickJS will handle the error
 	nonConstructor := ctx.String("not a constructor")
 	defer nonConstructor.Free()
 	errorResult := nonConstructor.CallConstructor()
@@ -653,7 +664,7 @@ func TestValueEdgeCases(t *testing.T) {
 	require.InDelta(t, -3.14, negativeFloat.ToFloat64(), 0.001)
 
 	// Test large numbers
-	largeInt := ctx.Int64(1234567890123456) // Close to max int64 but safe for JS
+	largeInt := ctx.Int64(1234567890123456)
 	defer largeInt.Free()
 	require.EqualValues(t, 1234567890123456, largeInt.ToInt64())
 
@@ -696,6 +707,7 @@ func TestValueEdgeCases(t *testing.T) {
 
 	noArgsResult := obj.Call("noArgsFunc")
 	defer noArgsResult.Free()
+	require.False(t, noArgsResult.IsError())
 	require.EqualValues(t, "no args called", noArgsResult.String())
 }
 
@@ -756,6 +768,8 @@ func TestValueComplexOperations(t *testing.T) {
 		ctx.Bool(true))
 	defer funcResult.Free()
 
+	require.False(t, funcResult.IsError())
+
 	argCount := funcResult.Get("argCount")
 	defer argCount.Free()
 	require.EqualValues(t, 3, argCount.ToInt32())
@@ -804,4 +818,424 @@ func TestValueMemoryManagement(t *testing.T) {
 	final := ctx.String("final test")
 	defer final.Free()
 	require.EqualValues(t, "final test", final.String())
+}
+
+// TestValueToBigIntCases tests ToBigInt with various value types.
+func TestValueToBigIntCases(t *testing.T) {
+	rt := quickjs.NewRuntime()
+	defer rt.Close()
+
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	// Test ToBigInt with non-BigInt values (should return nil)
+	testCases := []quickjs.Value{
+		ctx.String("not a number"),
+		ctx.String("123abc"),
+		ctx.String(""),
+		ctx.Int32(42),
+		ctx.Float64(3.14),
+		ctx.Bool(true),
+		ctx.Null(),
+		ctx.Undefined(),
+		ctx.Object(),
+	}
+
+	for _, val := range testCases {
+		result := val.ToBigInt()
+		require.Nil(t, result, "Non-BigInt value should return nil from ToBigInt")
+		val.Free()
+	}
+
+	// Test with valid BigInt values
+	validBigInts := []int64{
+		123456789,
+		-987654321,
+		0,
+		9223372036854775807,  // Max int64
+		-9223372036854775808, // Min int64
+	}
+
+	for _, testVal := range validBigInts {
+		bigIntVal := ctx.BigInt64(testVal)
+		defer bigIntVal.Free()
+		result := bigIntVal.ToBigInt()
+		require.NotNil(t, result)
+		require.Equal(t, testVal, result.Int64())
+	}
+}
+
+// TestValuePropertyEnumeration tests property enumeration functionality.
+func TestValuePropertyEnumeration(t *testing.T) {
+	rt := quickjs.NewRuntime()
+	defer rt.Close()
+
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	// Test with object containing various properties
+	obj, err := ctx.Eval(`
+        var obj = {};
+        obj.enumerable1 = "value1";
+        obj.enumerable2 = "value2";
+        Object.defineProperty(obj, "nonEnumerable", {
+            value: "hidden",
+            enumerable: false,
+            writable: true,
+            configurable: true
+        });
+        obj;
+    `)
+	require.NoError(t, err)
+	defer obj.Free()
+
+	// Test PropertyNames
+	names, err := obj.PropertyNames()
+	require.NoError(t, err)
+
+	// Should contain enumerable properties
+	require.Contains(t, names, "enumerable1")
+	require.Contains(t, names, "enumerable2")
+
+	// Test with array (has numeric indices)
+	arr, err := ctx.Eval(`[1, 2, 3]`)
+	require.NoError(t, err)
+	defer arr.Free()
+
+	arrNames, err := arr.PropertyNames()
+	require.NoError(t, err)
+	require.Contains(t, arrNames, "0")
+	require.Contains(t, arrNames, "1")
+	require.Contains(t, arrNames, "2")
+	require.Contains(t, arrNames, "length")
+
+	// Test with empty object
+	emptyObj := ctx.Object()
+	defer emptyObj.Free()
+
+	emptyNames, err := emptyObj.PropertyNames()
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, len(emptyNames), 0)
+
+	// Test PropertyNames error case with non-object
+	str := ctx.String("not an object")
+	defer str.Free()
+
+	_, err = str.PropertyNames()
+	require.Error(t, err)
+}
+
+// TestValueJSONEdgeCases tests JSON stringify edge cases.
+func TestValueJSONEdgeCases(t *testing.T) {
+	rt := quickjs.NewRuntime()
+	defer rt.Close()
+
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	// Test JSON stringify with circular reference
+	obj := ctx.Object()
+	defer obj.Free()
+	obj.Set("name", ctx.String("test"))
+	obj.Set("self", obj) // Create circular reference
+
+	jsonStr := obj.JSONStringify()
+	if ctx.HasException() {
+		exception := ctx.Exception()
+		require.Contains(t, exception.Error(), "circular reference")
+	} else {
+		require.NotEmpty(t, jsonStr)
+	}
+
+	// Test JSON stringify with function (should be omitted)
+	objWithFunc := ctx.Object()
+	defer objWithFunc.Free()
+
+	funcVal := ctx.Function(func(ctx *quickjs.Context, this quickjs.Value, args []quickjs.Value) quickjs.Value {
+		return ctx.String("test")
+	})
+
+	objWithFunc.Set("func", funcVal)
+	objWithFunc.Set("data", ctx.String("value"))
+
+	jsonStr2 := objWithFunc.JSONStringify()
+	require.Contains(t, jsonStr2, "data")
+	require.Contains(t, jsonStr2, "value")
+
+	// Test JSON stringify with undefined values
+	objWithUndefined := ctx.Object()
+	defer objWithUndefined.Free()
+	objWithUndefined.Set("defined", ctx.String("value"))
+	objWithUndefined.Set("undefined", ctx.Undefined())
+
+	jsonStr3 := objWithUndefined.JSONStringify()
+	require.Contains(t, jsonStr3, "defined")
+
+	// Test special values
+	specialVals := []struct {
+		name string
+		val  quickjs.Value
+	}{
+		{"null", ctx.Null()},
+		{"boolean true", ctx.Bool(true)},
+		{"boolean false", ctx.Bool(false)},
+		{"number", ctx.Int32(42)},
+		{"string", ctx.String("test")},
+	}
+
+	for _, sv := range specialVals {
+		defer sv.val.Free()
+		jsonResult := sv.val.JSONStringify()
+		require.NotEmpty(t, jsonResult, "JSON stringify should not return empty for "+sv.name)
+	}
+}
+
+// TestValueDeleteOperations tests Delete and DeleteIdx operations.
+func TestValueDeleteOperations(t *testing.T) {
+	rt := quickjs.NewRuntime()
+	defer rt.Close()
+
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	obj := ctx.Object()
+	defer obj.Free()
+
+	// Test deleting non-existent property
+	require.False(t, obj.Delete("nonexistent"))
+	require.False(t, obj.DeleteIdx(999))
+
+	// Test deleting existing property
+	obj.Set("test", ctx.String("value"))
+	require.True(t, obj.Has("test"))
+	require.True(t, obj.Delete("test"))
+	require.False(t, obj.Has("test"))
+
+	// Test deleting existing index
+	obj.SetIdx(0, ctx.String("index0"))
+	require.True(t, obj.HasIdx(0))
+	require.True(t, obj.DeleteIdx(0))
+	require.False(t, obj.HasIdx(0))
+
+	// Test Delete/DeleteIdx on non-configurable properties
+	arr, err := ctx.Eval(`[1, 2, 3]`)
+	require.NoError(t, err)
+	defer arr.Free()
+
+	// Array length is typically non-configurable
+	require.True(t, arr.Has("length"))
+	// Trying to delete length should fail
+	require.False(t, arr.Delete("length"))
+	require.True(t, arr.Has("length")) // Should still exist
+}
+
+// TestValueGlobalInstanceofEdgeCases tests GlobalInstanceof edge cases.
+func TestValueGlobalInstanceofEdgeCases(t *testing.T) {
+	rt := quickjs.NewRuntime()
+	defer rt.Close()
+
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	// Test with undefined constructor
+	str := ctx.String("test")
+	defer str.Free()
+	require.False(t, str.GlobalInstanceof("NonExistentConstructor"))
+
+	// Test with empty constructor name
+	require.False(t, str.GlobalInstanceof(""))
+
+	// Test with valid constructors
+	obj, err := ctx.Eval(`({})`)
+	require.NoError(t, err)
+	defer obj.Free()
+	require.True(t, obj.GlobalInstanceof("Object"))
+
+	arr, err := ctx.Eval(`[]`)
+	require.NoError(t, err)
+	defer arr.Free()
+	require.True(t, arr.GlobalInstanceof("Array"))
+	require.True(t, arr.GlobalInstanceof("Object")) // Arrays are objects
+
+	// Test with primitive values
+	num := ctx.Int32(42)
+	defer num.Free()
+	require.False(t, num.GlobalInstanceof("Number")) // Primitive, not object
+
+	// Test with custom constructor
+	result, err := ctx.Eval(`
+        function CustomClass() {}
+        globalThis.CustomClass = CustomClass;
+        globalThis.customInstance = new CustomClass();
+        customInstance;
+    `)
+	require.NoError(t, err)
+	defer result.Free()
+	require.True(t, result.GlobalInstanceof("CustomClass"))
+}
+
+// TestValueComprehensiveTypeChecking tests all Is* methods comprehensively.
+func TestValueComprehensiveTypeChecking(t *testing.T) {
+	rt := quickjs.NewRuntime()
+	defer rt.Close()
+
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	// Test each type against all Is* methods to ensure proper isolation
+	testCases := []struct {
+		name     string
+		value    quickjs.Value
+		expected map[string]bool
+	}{
+		{
+			name:  "number",
+			value: ctx.Int32(42),
+			expected: map[string]bool{
+				"IsNumber": true, "IsBigInt": false, "IsBool": false, "IsNull": false,
+				"IsUndefined": false, "IsString": false, "IsObject": false, "IsArray": false,
+				"IsSymbol": false, "IsError": false, "IsFunction": false, "IsConstructor": false,
+				"IsPromise": false, "IsUninitialized": false,
+			},
+		},
+		{
+			name:  "string",
+			value: ctx.String("test"),
+			expected: map[string]bool{
+				"IsNumber": false, "IsBigInt": false, "IsBool": false, "IsNull": false,
+				"IsUndefined": false, "IsString": true, "IsObject": false, "IsArray": false,
+				"IsSymbol": false, "IsError": false, "IsFunction": false, "IsConstructor": false,
+				"IsPromise": false, "IsUninitialized": false,
+			},
+		},
+		{
+			name:  "boolean",
+			value: ctx.Bool(true),
+			expected: map[string]bool{
+				"IsNumber": false, "IsBigInt": false, "IsBool": true, "IsNull": false,
+				"IsUndefined": false, "IsString": false, "IsObject": false, "IsArray": false,
+				"IsSymbol": false, "IsError": false, "IsFunction": false, "IsConstructor": false,
+				"IsPromise": false, "IsUninitialized": false,
+			},
+		},
+		{
+			name:  "null",
+			value: ctx.Null(),
+			expected: map[string]bool{
+				"IsNumber": false, "IsBigInt": false, "IsBool": false, "IsNull": true,
+				"IsUndefined": false, "IsString": false, "IsObject": false, "IsArray": false,
+				"IsSymbol": false, "IsError": false, "IsFunction": false, "IsConstructor": false,
+				"IsPromise": false, "IsUninitialized": false,
+			},
+		},
+		{
+			name:  "undefined",
+			value: ctx.Undefined(),
+			expected: map[string]bool{
+				"IsNumber": false, "IsBigInt": false, "IsBool": false, "IsNull": false,
+				"IsUndefined": true, "IsString": false, "IsObject": false, "IsArray": false,
+				"IsSymbol": false, "IsError": false, "IsFunction": false, "IsConstructor": false,
+				"IsPromise": false, "IsUninitialized": false,
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			defer tc.value.Free()
+
+			require.Equal(t, tc.expected["IsNumber"], tc.value.IsNumber())
+			require.Equal(t, tc.expected["IsBigInt"], tc.value.IsBigInt())
+			require.Equal(t, tc.expected["IsBool"], tc.value.IsBool())
+			require.Equal(t, tc.expected["IsNull"], tc.value.IsNull())
+			require.Equal(t, tc.expected["IsUndefined"], tc.value.IsUndefined())
+			require.Equal(t, tc.expected["IsString"], tc.value.IsString())
+			require.Equal(t, tc.expected["IsObject"], tc.value.IsObject())
+			require.Equal(t, tc.expected["IsSymbol"], tc.value.IsSymbol())
+			require.Equal(t, tc.expected["IsError"], tc.value.IsError())
+			require.Equal(t, tc.expected["IsFunction"], tc.value.IsFunction())
+			require.Equal(t, tc.expected["IsConstructor"], tc.value.IsConstructor())
+			require.Equal(t, tc.expected["IsPromise"], tc.value.IsPromise())
+			require.Equal(t, tc.expected["IsUninitialized"], tc.value.IsUninitialized())
+		})
+	}
+
+	// Test special object types
+	t.Run("object types", func(t *testing.T) {
+		obj := ctx.Object()
+		defer obj.Free()
+		require.True(t, obj.IsObject())
+		require.False(t, obj.IsArray())
+
+		arr, err := ctx.Eval(`[1,2,3]`)
+		require.NoError(t, err)
+		defer arr.Free()
+		require.True(t, arr.IsArray())
+		require.True(t, arr.IsObject()) // Arrays are objects
+
+		sym, err := ctx.Eval(`Symbol('test')`)
+		require.NoError(t, err)
+		defer sym.Free()
+		require.True(t, sym.IsSymbol())
+
+		promise, err := ctx.Eval(`new Promise(r => r())`)
+		require.NoError(t, err)
+		defer promise.Free()
+		require.True(t, promise.IsPromise())
+		require.True(t, promise.IsObject()) // Promises are objects
+	})
+}
+
+// TestContextInvokeMethod tests the Context.Invoke method.
+func TestContextInvokeMethod(t *testing.T) {
+	rt := quickjs.NewRuntime()
+	defer rt.Close()
+
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	// Test Invoke on a valid function
+	funcVal := ctx.Function(func(ctx *quickjs.Context, this quickjs.Value, args []quickjs.Value) quickjs.Value {
+		if len(args) > 0 {
+			return ctx.String("invoked with: " + args[0].String())
+		}
+		return ctx.String("invoked with no args")
+	})
+	defer funcVal.Free()
+
+	// Test successful invoke
+	result := ctx.Invoke(funcVal, ctx.Null(), ctx.String("test"))
+	defer result.Free()
+	require.False(t, result.IsError())
+	require.EqualValues(t, "invoked with: test", result.String())
+
+	// Test invoke with no arguments
+	result2 := ctx.Invoke(funcVal, ctx.Null())
+	defer result2.Free()
+	require.False(t, result2.IsError())
+	require.EqualValues(t, "invoked with no args", result2.String())
+
+	// Test Invoke on non-function values - QuickJS will handle the error
+	testCases := []struct {
+		name  string
+		value quickjs.Value
+	}{
+		{"string", ctx.String("not a function")},
+		{"number", ctx.Int32(42)},
+		{"boolean", ctx.Bool(true)},
+		{"null", ctx.Null()},
+		{"undefined", ctx.Undefined()},
+		{"object", ctx.Object()},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			defer tc.value.Free()
+
+			result := ctx.Invoke(tc.value, ctx.Null())
+			defer result.Free()
+
+			require.True(t, result.IsError())
+		})
+	}
 }
