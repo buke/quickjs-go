@@ -64,7 +64,7 @@ func TestWithExecuteTimeout(t *testing.T) {
 
 // TestWithMemoryLimit tests the memory limit option.
 func TestWithMemoryLimit(t *testing.T) {
-	rt := quickjs.NewRuntime(quickjs.WithMemoryLimit(64 * 1024)) // 64KB limit
+	rt := quickjs.NewRuntime(quickjs.WithMemoryLimit(512 * 1024)) // 512KB limit
 	defer rt.Close()
 
 	ctx := rt.NewContext()
@@ -230,7 +230,7 @@ func TestRuntimeSetMemoryLimit(t *testing.T) {
 	defer rt.Close()
 
 	// Set a restrictive memory limit
-	rt.SetMemoryLimit(64 * 1024) // 64KB
+	rt.SetMemoryLimit(512 * 1024) // 512KB
 
 	ctx := rt.NewContext()
 	defer ctx.Close()
