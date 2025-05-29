@@ -129,10 +129,7 @@ func (v Value) ToBigInt() *big.Int {
 	if !v.IsBigInt() {
 		return nil
 	}
-	val, ok := new(big.Int).SetString(v.String(), 10)
-	if !ok {
-		return nil
-	}
+	val, _ := new(big.Int).SetString(v.String(), 10)
 	return val
 }
 
@@ -172,41 +169,46 @@ func (v Value) GetIdx(idx int64) Value {
 
 // Call calls the function with the given arguments.
 func (v Value) Call(fname string, args ...Value) Value {
-	if !v.IsObject() {
-		return v.ctx.Error(errors.New("Object not a object"))
-	}
-
 	fn := v.Get(fname) // get the function by name
 	defer fn.Free()
-
-	if !fn.IsFunction() {
-		return v.ctx.Error(errors.New("Object not a function"))
-	}
 
 	cargs := []C.JSValue{}
 	for _, x := range args {
 		cargs = append(cargs, x.ref)
 	}
+	var val Value
 	if len(cargs) == 0 {
-		return Value{ctx: v.ctx, ref: C.JS_Call(v.ctx.ref, fn.ref, v.ref, C.int(0), nil)}
+		val = Value{ctx: v.ctx, ref: C.JS_Call(v.ctx.ref, fn.ref, v.ref, C.int(0), nil)}
+	} else {
+		val = Value{ctx: v.ctx, ref: C.JS_Call(v.ctx.ref, fn.ref, v.ref, C.int(len(cargs)), &cargs[0])}
 	}
-	return Value{ctx: v.ctx, ref: C.JS_Call(v.ctx.ref, fn.ref, v.ref, C.int(len(cargs)), &cargs[0])}
+
+	if v.ctx.HasException() {
+		return Value{ctx: v.ctx, ref: C.JS_GetException(v.ctx.ref)}
+	}
+
+	return val
+
 }
 
 // Execute the function with the given arguments.
 func (v Value) Execute(this Value, args ...Value) Value {
-	if !v.IsFunction() {
-		return v.ctx.Error(errors.New("Value not a function"))
-	}
-
 	cargs := []C.JSValue{}
 	for _, x := range args {
 		cargs = append(cargs, x.ref)
 	}
+	var val Value
 	if len(cargs) == 0 {
-		return Value{ctx: v.ctx, ref: C.JS_Call(v.ctx.ref, v.ref, this.ref, C.int(0), nil)}
+		val = Value{ctx: v.ctx, ref: C.JS_Call(v.ctx.ref, v.ref, this.ref, C.int(0), nil)}
+	} else {
+		val = Value{ctx: v.ctx, ref: C.JS_Call(v.ctx.ref, v.ref, this.ref, C.int(len(cargs)), &cargs[0])}
 	}
-	return Value{ctx: v.ctx, ref: C.JS_Call(v.ctx.ref, v.ref, this.ref, C.int(len(cargs)), &cargs[0])}
+
+	if v.ctx.HasException() {
+		return Value{ctx: v.ctx, ref: C.JS_GetException(v.ctx.ref)}
+	}
+
+	return val
 }
 
 // Call Class Constructor
@@ -216,18 +218,21 @@ func (v Value) New(args ...Value) Value {
 
 // Call calls the constructor with the given arguments.
 func (v Value) CallConstructor(args ...Value) Value {
-	if !v.IsConstructor() {
-		return v.ctx.Error(errors.New("Object not a constructor"))
-	}
-
 	cargs := []C.JSValue{}
 	for _, x := range args {
 		cargs = append(cargs, x.ref)
 	}
+	var val Value
 	if len(cargs) == 0 {
-		return Value{ctx: v.ctx, ref: C.JS_CallConstructor(v.ctx.ref, v.ref, C.int(0), nil)}
+		val = Value{ctx: v.ctx, ref: C.JS_CallConstructor(v.ctx.ref, v.ref, C.int(0), nil)}
+	} else {
+		val = Value{ctx: v.ctx, ref: C.JS_CallConstructor(v.ctx.ref, v.ref, C.int(len(cargs)), &cargs[0])}
 	}
-	return Value{ctx: v.ctx, ref: C.JS_CallConstructor(v.ctx.ref, v.ref, C.int(len(cargs)), &cargs[0])}
+
+	if v.ctx.HasException() {
+		return Value{ctx: v.ctx, ref: C.JS_GetException(v.ctx.ref)}
+	}
+	return val
 }
 
 // Deprecated: Use ToError() instead.

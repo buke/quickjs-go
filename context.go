@@ -149,11 +149,8 @@ func (ctx *Context) Function(fn func(ctx *Context, this Value, args []Value) Val
 	ctxHandler := ctx.Int64(int64(cgo.NewHandle(ctx)))
 	args := []C.JSValue{ctx.proxy.ref, fnHandler.ref, ctxHandler.ref}
 
-	val, err := ctx.Eval(`(proxy, fnHandler, ctx) => function() { return proxy.call(this, fnHandler, ctx, ...arguments); }`)
+	val, _ := ctx.Eval(`(proxy, fnHandler, ctx) => function() { return proxy.call(this, fnHandler, ctx, ...arguments); }`)
 	defer val.Free()
-	if err != nil {
-		panic(err)
-	}
 
 	return Value{ctx: ctx, ref: C.JS_Call(ctx.ref, val.ref, ctx.Null().ref, C.int(len(args)), &args[0])}
 }
@@ -171,7 +168,7 @@ func (ctx *Context) AsyncFunction(asyncFn func(ctx *Context, this Value, promise
 	ctxHandler := ctx.Int64(int64(cgo.NewHandle(ctx)))
 	args := []C.JSValue{ctx.asyncProxy.ref, fnHandler.ref, ctxHandler.ref}
 
-	val, err := ctx.Eval(`(proxy, fnHandler, ctx) => async function(...arguments) {
+	val, _ := ctx.Eval(`(proxy, fnHandler, ctx) => async function(...arguments) {
 		let resolve, reject;
 		const promise = new Promise((resolve_, reject_) => {
 		  resolve = resolve_;
@@ -184,9 +181,6 @@ func (ctx *Context) AsyncFunction(asyncFn func(ctx *Context, this Value, promise
 		return await promise;
 	}`)
 	defer val.Free()
-	if err != nil {
-		panic(err)
-	}
 
 	return Value{ctx: ctx, ref: C.JS_Call(ctx.ref, val.ref, ctx.Null().ref, C.int(len(args)), &args[0])}
 }
@@ -220,10 +214,16 @@ func (ctx *Context) Invoke(fn Value, this Value, args ...Value) Value {
 	for _, x := range args {
 		cargs = append(cargs, x.ref)
 	}
+	var val Value
 	if len(cargs) == 0 {
-		return Value{ctx: ctx, ref: C.JS_Call(ctx.ref, fn.ref, this.ref, 0, nil)}
+		val = Value{ctx: ctx, ref: C.JS_Call(ctx.ref, fn.ref, this.ref, 0, nil)}
+	} else {
+		val = Value{ctx: ctx, ref: C.JS_Call(ctx.ref, fn.ref, this.ref, C.int(len(cargs)), &cargs[0])}
 	}
-	return Value{ctx: ctx, ref: C.JS_Call(ctx.ref, fn.ref, this.ref, C.int(len(cargs)), &cargs[0])}
+	if ctx.HasException() {
+		return Value{ctx: ctx, ref: C.JS_GetException(ctx.ref)}
+	}
+	return val
 }
 
 type EvalOptions struct {
@@ -521,6 +521,12 @@ func (ctx *Context) ThrowInternalError(format string, args ...interface{}) Value
 	causePtr := C.CString(cause)
 	defer C.free(unsafe.Pointer(causePtr))
 	return Value{ctx: ctx, ref: C.ThrowInternalError(ctx.ref, causePtr)}
+}
+
+// HasException checks if the context has an exception set.
+func (ctx *Context) HasException() bool {
+	// Check if the context has an exception set
+	return C.JS_HasException(ctx.ref) == 1
 }
 
 // Exception returns a context's exception value.
