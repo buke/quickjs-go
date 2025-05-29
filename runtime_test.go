@@ -71,8 +71,10 @@ func TestWithMemoryLimit(t *testing.T) {
 	defer ctx.Close()
 
 	// Try to allocate more memory than the limit
-	_, err := ctx.Eval(`var array = []; for(let i = 0; i < 100000; i++) { array.push(new Array(1000).fill(0)); }`)
+	result, err := ctx.Eval(`var array = []; while (true) { array.push(null) }`)
+	defer result.Free()
 	require.Error(t, err)
+
 	require.Contains(t, err.Error(), "out of memory")
 }
 
@@ -234,9 +236,11 @@ func TestRuntimeSetMemoryLimit(t *testing.T) {
 	defer ctx.Close()
 
 	// Try to allocate more memory than the limit
-	_, err := ctx.Eval(`var array = []; for(let i = 0; i < 100000; i++) { array.push(new Array(1000).fill(0)); }`)
+	result, err := ctx.Eval(`var array = []; while (true) { array.push(null) }`)
+	defer result.Free()
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "out of memory")
+
 }
 
 // TestRuntimeSetGCThreshold tests setting GC threshold after runtime creation.
