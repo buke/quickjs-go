@@ -348,9 +348,6 @@ func (ctx *Context) LoadModule(code string, moduleName string) (Value, error) {
 			return ctx.Null(), fmt.Errorf("unknown exception while loading module")
 		}
 	}
-	if C.ValueGetTag(cVal) != C.JS_TAG_MODULE {
-		return ctx.Null(), fmt.Errorf("not a module")
-	}
 	if C.JS_ResolveModule(ctx.ref, cVal) != 0 {
 		C.JS_FreeValue(ctx.ref, cVal)
 		return ctx.Null(), fmt.Errorf("resolve module failed")
@@ -387,9 +384,6 @@ func (ctx *Context) LoadModuleBytecode(buf []byte) (Value, error) {
 		} else {
 			return ctx.Null(), fmt.Errorf("unknown exception while loading module")
 		}
-	}
-	if C.ValueGetTag(cVal) != C.JS_TAG_MODULE {
-		return ctx.Null(), fmt.Errorf("not a module")
 	}
 	if C.JS_ResolveModule(ctx.ref, cVal) != 0 {
 		C.JS_FreeValue(ctx.ref, cVal)
