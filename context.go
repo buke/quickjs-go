@@ -220,9 +220,6 @@ func (ctx *Context) Invoke(fn Value, this Value, args ...Value) Value {
 	} else {
 		val = Value{ctx: ctx, ref: C.JS_Call(ctx.ref, fn.ref, this.ref, C.int(len(cargs)), &cargs[0])}
 	}
-	if ctx.HasException() {
-		return Value{ctx: ctx, ref: C.JS_GetException(ctx.ref)}
-	}
 	return val
 }
 

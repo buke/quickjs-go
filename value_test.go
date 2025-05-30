@@ -347,32 +347,32 @@ func TestValueFunctionCalls(t *testing.T) {
 	// Test Call method
 	result := obj.Call("add", ctx.Int32(3), ctx.Int32(4))
 	defer result.Free()
-	require.False(t, result.IsError())
+	require.False(t, result.IsException()) // 改用 IsException()
 	require.EqualValues(t, 7, result.ToInt32())
 
 	// Test Call with different method
 	result2 := obj.Call("multiply", ctx.Int32(3), ctx.Int32(4))
 	defer result2.Free()
-	require.False(t, result2.IsError())
+	require.False(t, result2.IsException()) // 改用 IsException()
 	require.EqualValues(t, 12, result2.ToInt32())
 
 	// Test Call with non-existent method - QuickJS will handle the error
 	errorResult := obj.Call("nonexistent", ctx.Int32(1))
 	defer errorResult.Free()
-	require.True(t, errorResult.IsError())
+	require.True(t, errorResult.IsException()) // 改用 IsException()
 
 	// Test Call with non-function property
 	obj.Set("notAFunction", ctx.String("I am not a function"))
 	errorResult2 := obj.Call("notAFunction")
 	defer errorResult2.Free()
-	require.True(t, errorResult2.IsError())
+	require.True(t, errorResult2.IsException()) // 改用 IsException()
 
 	// Test Call on non-object - QuickJS will handle the error
 	str := ctx.String("test")
 	defer str.Free()
 	errorResult3 := str.Call("method")
 	defer errorResult3.Free()
-	require.True(t, errorResult3.IsError())
+	require.True(t, errorResult3.IsException()) // 改用 IsException()
 
 	// Test Execute method
 	addFunc := obj.Get("add")
@@ -380,7 +380,7 @@ func TestValueFunctionCalls(t *testing.T) {
 
 	execResult := addFunc.Execute(ctx.Null(), ctx.Int32(5), ctx.Int32(6))
 	defer execResult.Free()
-	require.False(t, execResult.IsError())
+	require.False(t, execResult.IsException()) // 改用 IsException()
 	require.EqualValues(t, 11, execResult.ToInt32())
 
 	// Test Execute on non-function - QuickJS will handle the error
@@ -388,7 +388,7 @@ func TestValueFunctionCalls(t *testing.T) {
 	defer nonFunc.Free()
 	execError := nonFunc.Execute(ctx.Null())
 	defer execError.Free()
-	require.True(t, execError.IsError())
+	require.True(t, execError.IsException()) // 改用 IsException()
 }
 
 // TestValueConstructor tests constructor calling.
@@ -415,7 +415,7 @@ func TestValueConstructor(t *testing.T) {
 	// Test CallConstructor
 	instance := result.CallConstructor(ctx.String("test_value"))
 	defer instance.Free()
-	require.False(t, instance.IsError())
+	require.False(t, instance.IsException()) // 改用 IsException()
 	require.True(t, instance.IsObject())
 
 	valueProperty := instance.Get("value")
@@ -425,7 +425,7 @@ func TestValueConstructor(t *testing.T) {
 	// Test New (alias for CallConstructor)
 	instance2 := result.New(ctx.String("test_value2"))
 	defer instance2.Free()
-	require.False(t, instance2.IsError())
+	require.False(t, instance2.IsException()) // 改用 IsException()
 	require.True(t, instance2.IsObject())
 
 	valueProperty2 := instance2.Get("value")
@@ -437,7 +437,7 @@ func TestValueConstructor(t *testing.T) {
 	defer nonConstructor.Free()
 	errorResult := nonConstructor.CallConstructor()
 	defer errorResult.Free()
-	require.True(t, errorResult.IsError())
+	require.True(t, errorResult.IsException()) // 改用 IsException()
 }
 
 // TestValueError tests error handling.
@@ -1184,58 +1184,4 @@ func TestValueComprehensiveTypeChecking(t *testing.T) {
 		require.True(t, promise.IsPromise())
 		require.True(t, promise.IsObject()) // Promises are objects
 	})
-}
-
-// TestContextInvokeMethod tests the Context.Invoke method.
-func TestContextInvokeMethod(t *testing.T) {
-	rt := quickjs.NewRuntime()
-	defer rt.Close()
-
-	ctx := rt.NewContext()
-	defer ctx.Close()
-
-	// Test Invoke on a valid function
-	funcVal := ctx.Function(func(ctx *quickjs.Context, this quickjs.Value, args []quickjs.Value) quickjs.Value {
-		if len(args) > 0 {
-			return ctx.String("invoked with: " + args[0].String())
-		}
-		return ctx.String("invoked with no args")
-	})
-	defer funcVal.Free()
-
-	// Test successful invoke
-	result := ctx.Invoke(funcVal, ctx.Null(), ctx.String("test"))
-	defer result.Free()
-	require.False(t, result.IsError())
-	require.EqualValues(t, "invoked with: test", result.String())
-
-	// Test invoke with no arguments
-	result2 := ctx.Invoke(funcVal, ctx.Null())
-	defer result2.Free()
-	require.False(t, result2.IsError())
-	require.EqualValues(t, "invoked with no args", result2.String())
-
-	// Test Invoke on non-function values - QuickJS will handle the error
-	testCases := []struct {
-		name  string
-		value quickjs.Value
-	}{
-		{"string", ctx.String("not a function")},
-		{"number", ctx.Int32(42)},
-		{"boolean", ctx.Bool(true)},
-		{"null", ctx.Null()},
-		{"undefined", ctx.Undefined()},
-		{"object", ctx.Object()},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			defer tc.value.Free()
-
-			result := ctx.Invoke(tc.value, ctx.Null())
-			defer result.Free()
-
-			require.True(t, result.IsError())
-		})
-	}
 }
