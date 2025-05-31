@@ -220,9 +220,6 @@ func (ctx *Context) Invoke(fn Value, this Value, args ...Value) Value {
 	} else {
 		val = Value{ctx: ctx, ref: C.JS_Call(ctx.ref, fn.ref, this.ref, C.int(len(cargs)), &cargs[0])}
 	}
-	if ctx.HasException() {
-		return Value{ctx: ctx, ref: C.JS_GetException(ctx.ref)}
-	}
 	return val
 }
 
@@ -351,9 +348,6 @@ func (ctx *Context) LoadModule(code string, moduleName string) (Value, error) {
 			return ctx.Null(), fmt.Errorf("unknown exception while loading module")
 		}
 	}
-	if C.ValueGetTag(cVal) != C.JS_TAG_MODULE {
-		return ctx.Null(), fmt.Errorf("not a module")
-	}
 	if C.JS_ResolveModule(ctx.ref, cVal) != 0 {
 		C.JS_FreeValue(ctx.ref, cVal)
 		return ctx.Null(), fmt.Errorf("resolve module failed")
@@ -390,9 +384,6 @@ func (ctx *Context) LoadModuleBytecode(buf []byte) (Value, error) {
 		} else {
 			return ctx.Null(), fmt.Errorf("unknown exception while loading module")
 		}
-	}
-	if C.ValueGetTag(cVal) != C.JS_TAG_MODULE {
-		return ctx.Null(), fmt.Errorf("not a module")
 	}
 	if C.JS_ResolveModule(ctx.ref, cVal) != 0 {
 		C.JS_FreeValue(ctx.ref, cVal)

@@ -349,6 +349,60 @@ func TestContextInvoke(t *testing.T) {
 	require.EqualValues(t, 6, result2.ToInt32())
 }
 
+// TestContextInvokeMethod tests the Context.Invoke method.
+func TestContextInvokeMethod(t *testing.T) {
+	rt := quickjs.NewRuntime()
+	defer rt.Close()
+
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	// Test Invoke on a valid function
+	funcVal := ctx.Function(func(ctx *quickjs.Context, this quickjs.Value, args []quickjs.Value) quickjs.Value {
+		if len(args) > 0 {
+			return ctx.String("invoked with: " + args[0].String())
+		}
+		return ctx.String("invoked with no args")
+	})
+	defer funcVal.Free()
+
+	// Test successful invoke
+	result := ctx.Invoke(funcVal, ctx.Null(), ctx.String("test"))
+	defer result.Free()
+	require.False(t, result.IsException()) // 改用 IsException()
+	require.EqualValues(t, "invoked with: test", result.String())
+
+	// Test invoke with no arguments
+	result2 := ctx.Invoke(funcVal, ctx.Null())
+	defer result2.Free()
+	require.False(t, result2.IsException()) // 改用 IsException()
+	require.EqualValues(t, "invoked with no args", result2.String())
+
+	// Test Invoke on non-function values - QuickJS will handle the error
+	testCases := []struct {
+		name  string
+		value quickjs.Value
+	}{
+		{"string", ctx.String("not a function")},
+		{"number", ctx.Int32(42)},
+		{"boolean", ctx.Bool(true)},
+		{"null", ctx.Null()},
+		{"undefined", ctx.Undefined()},
+		{"object", ctx.Object()},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			defer tc.value.Free()
+
+			result := ctx.Invoke(tc.value, ctx.Null())
+			defer result.Free()
+
+			require.True(t, result.IsException()) // 改用 IsException()
+		})
+	}
+}
+
 // TestContextEval tests code evaluation with various options.
 func TestContextEval(t *testing.T) {
 	rt := quickjs.NewRuntime()

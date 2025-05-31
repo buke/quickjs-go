@@ -183,12 +183,7 @@ func (v Value) Call(fname string, args ...Value) Value {
 		val = Value{ctx: v.ctx, ref: C.JS_Call(v.ctx.ref, fn.ref, v.ref, C.int(len(cargs)), &cargs[0])}
 	}
 
-	if v.ctx.HasException() {
-		return Value{ctx: v.ctx, ref: C.JS_GetException(v.ctx.ref)}
-	}
-
 	return val
-
 }
 
 // Execute the function with the given arguments.
@@ -202,10 +197,6 @@ func (v Value) Execute(this Value, args ...Value) Value {
 		val = Value{ctx: v.ctx, ref: C.JS_Call(v.ctx.ref, v.ref, this.ref, C.int(0), nil)}
 	} else {
 		val = Value{ctx: v.ctx, ref: C.JS_Call(v.ctx.ref, v.ref, this.ref, C.int(len(cargs)), &cargs[0])}
-	}
-
-	if v.ctx.HasException() {
-		return Value{ctx: v.ctx, ref: C.JS_GetException(v.ctx.ref)}
 	}
 
 	return val
@@ -229,9 +220,6 @@ func (v Value) CallConstructor(args ...Value) Value {
 		val = Value{ctx: v.ctx, ref: C.JS_CallConstructor(v.ctx.ref, v.ref, C.int(len(cargs)), &cargs[0])}
 	}
 
-	if v.ctx.HasException() {
-		return Value{ctx: v.ctx, ref: C.JS_GetException(v.ctx.ref)}
-	}
 	return val
 }
 
