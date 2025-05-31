@@ -26,9 +26,25 @@ jobs:
     - name: Build
       run: go build -v ./...
 
-    - name: Test with coverage
+    # Linux and macOS test step
+    - name: Test with coverage (Unix)
+      if: runner.os != 'Windows'
       run: |
         go test -v -race -coverprofile=coverage.out -covermode=atomic ./...
+
+    # Windows test step (separate to handle PowerShell issues)
+    - name: Test with coverage (Windows)
+      if: runner.os == 'Windows'
+      run: |
+        go test -v -race -coverprofile=coverage.out -covermode=atomic ./...
+      shell: cmd
+
+    # Alternative Windows approach using PowerShell with proper escaping
+    # - name: Test with coverage (Windows PowerShell)
+    #   if: runner.os == 'Windows'
+    #   run: |
+    #     go test -v -race "-coverprofile=coverage.out" "-covermode=atomic" ./...
+    #   shell: pwsh
         
     - name: Upload coverage to Codecov
       uses: codecov/codecov-action@v5.4.3
@@ -40,3 +56,19 @@ jobs:
         name: codecov-${{ matrix.os }}-go${{ matrix.go }}
         fail_ci_if_error: true
         verbose: true
+
+    # Optional: Display coverage summary
+    - name: Display coverage summary
+      if: runner.os != 'Windows'
+      run: |
+        if [ -f coverage.out ]; then
+          go tool cover -func=coverage.out
+        fi
+
+    - name: Display coverage summary (Windows)
+      if: runner.os == 'Windows'
+      run: |
+        if (Test-Path coverage.out) {
+          go tool cover -func=coverage.out
+        }
+      shell: pwsh
