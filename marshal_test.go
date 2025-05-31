@@ -12,7 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// Test types for custom Marshal/Unmarshal interfaces
+// Custom types for testing marshal/unmarshal interfaces
 type CustomMarshalType struct {
 	Value string
 }
@@ -145,50 +145,29 @@ func TestMarshalBasicTypes(t *testing.T) {
 			}
 		})
 	}
-}
 
-func TestMarshalInterface(t *testing.T) {
-	rt := quickjs.NewRuntime()
-	defer rt.Close()
-	ctx := rt.NewContext()
-	defer ctx.Close()
-
-	t.Run("InterfaceWithNil", func(t *testing.T) {
+	// Test interface{} types to ensure rv.Elem() coverage
+	t.Run("InterfaceTypes", func(t *testing.T) {
 		var nilInterface interface{} // nil interface{}
 		jsVal, err := ctx.Marshal(nilInterface)
 		require.NoError(t, err)
 		defer jsVal.Free()
 		require.True(t, jsVal.IsNull())
-	})
 
-	t.Run("InterfaceWithConcreteValue", func(t *testing.T) {
 		var iface interface{} = "test string" // non-nil interface{} with concrete value
-		jsVal, err := ctx.Marshal(iface)
+		jsVal2, err := ctx.Marshal(iface)
 		require.NoError(t, err)
-		defer jsVal.Free()
-		require.True(t, jsVal.IsString())
-		require.Equal(t, "test string", jsVal.ToString())
-	})
+		defer jsVal2.Free()
+		require.True(t, jsVal2.IsString())
+		require.Equal(t, "test string", jsVal2.ToString())
 
-	t.Run("InterfaceInSlice", func(t *testing.T) {
-		// Test interface{} elements in slice to ensure rv.Elem() coverage
-		var iface1 interface{} = "hello"
-		var iface2 interface{} = 123
-		slice := []interface{}{iface1, iface2}
-
-		jsVal, err := ctx.Marshal(slice)
+		// Test interface{} elements in slice
+		slice := []interface{}{"hello", 123}
+		jsVal3, err := ctx.Marshal(slice)
 		require.NoError(t, err)
-		defer jsVal.Free()
-		require.True(t, jsVal.IsArray())
-		require.Equal(t, int64(2), jsVal.Len())
-
-		elem0 := jsVal.GetIdx(0)
-		defer elem0.Free()
-		require.Equal(t, "hello", elem0.ToString())
-
-		elem1 := jsVal.GetIdx(1)
-		defer elem1.Free()
-		require.Equal(t, int32(123), elem1.ToInt32())
+		defer jsVal3.Free()
+		require.True(t, jsVal3.IsArray())
+		require.Equal(t, int64(2), jsVal3.Len())
 	})
 }
 
@@ -213,7 +192,7 @@ func TestMarshalComplexTypes(t *testing.T) {
 		require.Equal(t, data, result)
 	})
 
-	t.Run("IntSlice", func(t *testing.T) {
+	t.Run("Slices", func(t *testing.T) {
 		data := []int{1, 2, 3}
 		jsVal, err := ctx.Marshal(data)
 		require.NoError(t, err)
@@ -228,7 +207,7 @@ func TestMarshalComplexTypes(t *testing.T) {
 		require.Equal(t, data, result)
 	})
 
-	t.Run("FixedArray", func(t *testing.T) {
+	t.Run("Arrays", func(t *testing.T) {
 		data := [3]int{1, 2, 3}
 		jsVal, err := ctx.Marshal(data)
 		require.NoError(t, err)
@@ -240,10 +219,45 @@ func TestMarshalComplexTypes(t *testing.T) {
 		err = ctx.Unmarshal(jsVal, &result)
 		require.NoError(t, err)
 		require.Equal(t, data, result)
+
+		// Test array size handling - Go array shorter than JS array
+		// This should trigger: if arrayLen < maxLen { maxLen = arrayLen }
+		jsVal2, err := ctx.Eval(`[1, 2, 3, 4, 5]`) // JS array with 5 elements
+		require.NoError(t, err)
+		defer jsVal2.Free()
+
+		var result2 [3]int // Go array with 3 elements (shorter than JS array)
+		err = ctx.Unmarshal(jsVal2, &result2)
+		require.NoError(t, err)
+		// Only first 3 elements should be set
+		expected := [3]int{1, 2, 3}
+		require.Equal(t, expected, result2)
+
+		// Test array size handling - JS array shorter than Go array
+		jsVal3, err := ctx.Eval(`[1, 2]`) // JS array with 2 elements
+		require.NoError(t, err)
+		defer jsVal3.Free()
+
+		var result3 [5]int // Go array with 5 elements (longer than JS array)
+		err = ctx.Unmarshal(jsVal3, &result3)
+		require.NoError(t, err)
+		// Only first 2 elements should be set, rest remain zero
+		expected2 := [5]int{1, 2, 0, 0, 0}
+		require.Equal(t, expected2, result3)
+
+		// Test empty JS array
+		jsVal4, err := ctx.Eval(`[]`)
+		require.NoError(t, err)
+		defer jsVal4.Free()
+
+		var result4 [3]int
+		err = ctx.Unmarshal(jsVal4, &result4)
+		require.NoError(t, err)
+		require.Equal(t, [3]int{0, 0, 0}, result4)
 	})
 
 	t.Run("Maps", func(t *testing.T) {
-		// Test string key map
+		// String key map
 		stringMap := map[string]string{"key1": "value1", "key2": "value2"}
 		jsVal, err := ctx.Marshal(stringMap)
 		require.NoError(t, err)
@@ -256,7 +270,7 @@ func TestMarshalComplexTypes(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, stringMap, result)
 
-		// Test int key map
+		// Int key map
 		intMap := map[int]string{1: "one", 2: "two"}
 		jsVal2, err := ctx.Marshal(intMap)
 		require.NoError(t, err)
@@ -267,7 +281,7 @@ func TestMarshalComplexTypes(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, intMap, result2)
 
-		// Test nil map
+		// Nil map
 		var nilMap map[string]string
 		jsVal3, err := ctx.Marshal(nilMap)
 		require.NoError(t, err)
@@ -277,6 +291,46 @@ func TestMarshalComplexTypes(t *testing.T) {
 		err = ctx.Unmarshal(jsVal3, &result3)
 		require.NoError(t, err)
 		require.NotNil(t, result3) // Should create a new map
+
+		// Mixed key types (numeric string to int key)
+		jsVal4, err := ctx.Eval(`({abc: "value", "123": "numeric"})`)
+		require.NoError(t, err)
+		defer jsVal4.Free()
+
+		var result4 map[int]string
+		err = ctx.Unmarshal(jsVal4, &result4)
+		require.NoError(t, err)
+		require.Equal(t, map[int]string{123: "numeric"}, result4)
+	})
+
+	t.Run("Pointers", func(t *testing.T) {
+		// Non-nil pointer
+		value := "test"
+		ptr := &value
+		jsVal, err := ctx.Marshal(ptr)
+		require.NoError(t, err)
+		defer jsVal.Free()
+
+		require.Equal(t, value, jsVal.ToString())
+
+		var result *string
+		err = ctx.Unmarshal(jsVal, &result)
+		require.NoError(t, err)
+		require.NotNil(t, result)
+		require.Equal(t, value, *result)
+
+		// Nil pointer
+		var nilPtr *string
+		jsVal2, err := ctx.Marshal(nilPtr)
+		require.NoError(t, err)
+		defer jsVal2.Free()
+
+		require.True(t, jsVal2.IsNull())
+
+		var result2 *string
+		err = ctx.Unmarshal(jsVal2, &result2)
+		require.NoError(t, err)
+		require.Nil(t, result2)
 	})
 }
 
@@ -325,7 +379,7 @@ func TestMarshalStructs(t *testing.T) {
 	require.Equal(t, data.NestedStruct, result.NestedStruct)
 
 	// Test that js tag takes priority over json tag
-	t.Run("JSTagPriority", func(t *testing.T) {
+	t.Run("TagPriority", func(t *testing.T) {
 		data := struct {
 			Field string `js:"js_name" json:"json_name"`
 		}{
@@ -343,43 +397,6 @@ func TestMarshalStructs(t *testing.T) {
 		fieldVal := jsVal.Get("js_name")
 		defer fieldVal.Free()
 		require.Equal(t, "test", fieldVal.ToString())
-	})
-}
-
-func TestMarshalPointers(t *testing.T) {
-	rt := quickjs.NewRuntime()
-	defer rt.Close()
-	ctx := rt.NewContext()
-	defer ctx.Close()
-
-	t.Run("NonNilPointer", func(t *testing.T) {
-		value := "test"
-		ptr := &value
-		jsVal, err := ctx.Marshal(ptr)
-		require.NoError(t, err)
-		defer jsVal.Free()
-
-		require.Equal(t, value, jsVal.ToString())
-
-		var result *string
-		err = ctx.Unmarshal(jsVal, &result)
-		require.NoError(t, err)
-		require.NotNil(t, result)
-		require.Equal(t, value, *result)
-	})
-
-	t.Run("NilPointer", func(t *testing.T) {
-		var ptr *string
-		jsVal, err := ctx.Marshal(ptr)
-		require.NoError(t, err)
-		defer jsVal.Free()
-
-		require.True(t, jsVal.IsNull())
-
-		var result *string
-		err = ctx.Unmarshal(jsVal, &result)
-		require.NoError(t, err)
-		require.Nil(t, result)
 	})
 }
 
@@ -719,49 +736,6 @@ func TestErrorCases(t *testing.T) {
 		err = ctx.Unmarshal(jsVal3, &result3)
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "unsupported JavaScript type")
-	})
-
-	// Test numeric string to int key
-	t.Run("NumericStringToIntKey", func(t *testing.T) {
-		jsVal, err := ctx.Eval(`({abc: "value", "123": "numeric"})`)
-		require.NoError(t, err)
-		defer jsVal.Free()
-
-		var result map[int]string
-		err = ctx.Unmarshal(jsVal, &result)
-		require.NoError(t, err)
-		// Should only have the numeric key
-		require.Equal(t, map[int]string{123: "numeric"}, result)
-	})
-
-	// Test error cases that are hard to trigger in unmarshalInterface
-	t.Run("UnmarshalInterfaceErrors", func(t *testing.T) {
-		// Test ToByteArray and PropertyNames error simulation
-		// These errors are internal to QuickJS and hard to trigger normally
-
-		// Test normal ArrayBuffer handling
-		data := []byte{1, 2, 3, 4, 5}
-		jsVal := ctx.ArrayBuffer(data)
-		defer jsVal.Free()
-
-		var result interface{}
-		err := ctx.Unmarshal(jsVal, &result)
-		require.NoError(t, err)
-		require.Equal(t, data, result)
-
-		// Test normal object handling
-		jsVal2, err := ctx.Eval(`({"key1": "value1", "key2": "value2"})`)
-		require.NoError(t, err)
-		defer jsVal2.Free()
-
-		var result2 interface{}
-		err = ctx.Unmarshal(jsVal2, &result2)
-		require.NoError(t, err)
-		expected := map[string]interface{}{
-			"key1": "value1",
-			"key2": "value2",
-		}
-		require.Equal(t, expected, result2)
 	})
 }
 

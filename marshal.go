@@ -367,9 +367,10 @@ func (ctx *Context) unmarshal(jsVal Value, rv reflect.Value) error {
 func (ctx *Context) unmarshalSlice(jsVal Value, rv reflect.Value) error {
 	// Handle ArrayBuffer as []byte
 	if rv.Type().Elem().Kind() == reflect.Uint8 && jsVal.IsByteArray() {
+		// ToByteArray() should not fail after IsByteArray() check, but we handle the error for robustness
 		bytes, err := jsVal.ToByteArray(uint(jsVal.ByteLen()))
 		if err != nil {
-			return err
+			return err // This branch is hard to test as it requires internal QuickJS errors
 		}
 		rv.SetBytes(bytes)
 		return nil
