@@ -1,0 +1,44 @@
+# Codecov configuration for quickjs-go
+# Documentation: https://docs.codecov.com/docs/codecov-yaml
+
+coverage:
+  # Coverage target settings
+  status:
+    project:
+      default:
+        target: 90%          # Overall project coverage target
+        threshold: 1%        # Allow 1% drop from target
+        if_ci_failed: error  # Fail if CI fails
+    patch:
+      default:
+        target: 85%          # New code coverage target
+        threshold: 5%        # Allow 5% variance for patches
+
+  # Precision settings
+  precision: 2               # Round coverage to 2 decimal places
+  round: down               # Round down coverage values
+  range: 70..100            # Coverage range (70% minimum)
+
+# Ignore certain files/directories
+ignore:
+  - "test/**/*"             # Ignore test helper files
+  - "example/**/*"          # Ignore example files
+  - "deps/**/*"             # Ignore dependency files
+  - "*.pb.go"               # Ignore protobuf generated files
+  - "**/*_test.go"          # Don't include test files in coverage
+  - "vendor/**/*"           # Ignore vendor directory
+
+# Comment configuration
+comment:
+  layout: "header, diff, files, footer"
+  behavior: default
+  require_changes: false    # Comment on all commits
+
+# Pull request comments
+github_checks:
+  annotations: false        # Disable inline annotations for cleaner PRs
+
+# Notification settings
+notify:
+  # Disable email notifications
+  email: false

@@ -7,7 +7,6 @@ on:
   workflow_dispatch:
 
 jobs:
-
   build:
     name: ${{ matrix.os }} @ Go ${{ matrix.go }}
     strategy:
@@ -27,15 +26,35 @@ jobs:
     - name: Build
       run: go build -v ./...
 
-    - name: Test
-      run: go test -v -coverprofile c.out ./...
+    # Linux and macOS test step
+    - name: Test with coverage (Unix)
+      if: runner.os != 'Windows'
+      run: |
+        go test -v -race -coverprofile=coverage.out -covermode=atomic ./...
 
-    - name: Codecov
+    # Windows test step (separate to handle PowerShell issues)
+    - name: Test with coverage (Windows)
+      if: runner.os == 'Windows'
+      run: |
+        go test -v -race -coverprofile=coverage.out -covermode=atomic ./...
+      shell: cmd
+
+    # Alternative Windows approach using PowerShell with proper escaping
+    # - name: Test with coverage (Windows PowerShell)
+    #   if: runner.os == 'Windows'
+    #   run: |
+    #     go test -v -race "-coverprofile=coverage.out" "-covermode=atomic" ./...
+    #   shell: pwsh
+        
+    - name: Upload coverage to Codecov
       uses: codecov/codecov-action@v5.4.3
       env:
         CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
-        OS: ${{ matrix.os }}
-        GO: ${{ matrix.go }}
       with:
-        files: ./c.out
-        env_vars: OS,GO
+        files: ./coverage.out
+        flags: ${{ matrix.os }}-go${{ matrix.go }}
+        name: codecov-${{ matrix.os }}-go${{ matrix.go }}
+        fail_ci_if_error: true
+        verbose: true
+
+
