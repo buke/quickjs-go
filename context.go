@@ -230,6 +230,7 @@ type EvalOptions struct {
 	js_eval_flag_compile_only bool
 	filename                  string
 	await                     bool
+	load_only                 bool
 }
 
 type EvalOption func(*EvalOptions)
@@ -267,6 +268,12 @@ func EvalFileName(filename string) EvalOption {
 func EvalAwait(await bool) EvalOption {
 	return func(flags *EvalOptions) {
 		flags.await = await
+	}
+}
+
+func EvalLoadOnly(loadOnly bool) EvalOption {
+	return func(flags *EvalOptions) {
+		flags.load_only = loadOnly
 	}
 }
 
@@ -332,30 +339,28 @@ func (ctx *Context) EvalFile(filePath string, opts ...EvalOption) (Value, error)
 }
 
 // LoadModule returns a js value with given code and module name.
-func (ctx *Context) LoadModule(code string, moduleName string) (Value, error) {
+func (ctx *Context) LoadModule(code string, moduleName string, opts ...EvalOption) (Value, error) {
+	options := EvalOptions{
+		load_only: false,
+	}
+	for _, fn := range opts {
+		fn(&options)
+	}
+
 	codePtr := C.CString(code)
 	defer C.free(unsafe.Pointer(codePtr))
 
-	filenamePtr := C.CString(moduleName)
-	defer C.free(unsafe.Pointer(filenamePtr))
-
-	cFlag := C.JS_EVAL_TYPE_MODULE | C.JS_EVAL_FLAG_COMPILE_ONLY
-	cVal := C.JS_Eval(ctx.ref, codePtr, C.size_t(len(code)), filenamePtr, C.int(cFlag))
-	if C.JS_IsException(cVal) == 1 {
-		if exc := ctx.Exception(); exc != nil {
-			return ctx.Null(), exc
-		} else {
-			return ctx.Null(), fmt.Errorf("unknown exception while loading module")
-		}
+	if C.JS_DetectModule(codePtr, C.size_t(len(code))) == 0 {
+		return ctx.Null(), fmt.Errorf("not a module")
 	}
-	if C.JS_ResolveModule(ctx.ref, cVal) != 0 {
-		C.JS_FreeValue(ctx.ref, cVal)
-		return ctx.Null(), fmt.Errorf("resolve module failed")
-	}
-	C.js_module_set_import_meta(ctx.ref, cVal, 0, 1)
-	cVal = C.js_std_await(ctx.ref, cVal)
 
-	return Value{ctx: ctx, ref: cVal}, nil
+	codeByte, err := ctx.Compile(code, EvalFlagModule(true), EvalFlagCompileOnly(true), EvalFileName(moduleName))
+	if err != nil {
+		return ctx.Null(), err
+	}
+
+	return ctx.LoadModuleBytecode(codeByte, EvalLoadOnly(options.load_only))
+
 }
 
 // LoadModuleFile returns a js value with given file path and module name.
@@ -374,23 +379,27 @@ func (ctx *Context) CompileModule(filePath string, moduleName string, opts ...Ev
 }
 
 // LoadModuleByteCode returns a js value with given bytecode and module name.
-func (ctx *Context) LoadModuleBytecode(buf []byte) (Value, error) {
-	cbuf := C.CBytes(buf)
-	cVal := C.JS_ReadObject(ctx.ref, (*C.uint8_t)(cbuf), C.size_t(len(buf)), C.JS_READ_OBJ_BYTECODE)
-	defer C.js_free(ctx.ref, unsafe.Pointer(cbuf))
+func (ctx *Context) LoadModuleBytecode(buf []byte, opts ...EvalOption) (Value, error) {
+	if len(buf) == 0 {
+		return ctx.Null(), fmt.Errorf("empty bytecode")
+	}
+
+	options := EvalOptions{}
+	for _, fn := range opts {
+		fn(&options)
+	}
+
+	var cLoadOnlyFlag C.int = 0
+	if options.load_only {
+		cLoadOnlyFlag = 1
+	}
+
+	// Use our custom LoadModuleBytecode function instead of js_std_eval_binary
+	cVal := C.LoadModuleBytecode(ctx.ref, (*C.uint8_t)(unsafe.Pointer(&buf[0])), C.size_t(len(buf)), cLoadOnlyFlag)
+
 	if C.JS_IsException(cVal) == 1 {
-		if exc := ctx.Exception(); exc != nil {
-			return ctx.Null(), exc
-		} else {
-			return ctx.Null(), fmt.Errorf("unknown exception while loading module")
-		}
+		return ctx.Null(), ctx.Exception()
 	}
-	if C.JS_ResolveModule(ctx.ref, cVal) != 0 {
-		C.JS_FreeValue(ctx.ref, cVal)
-		return ctx.Null(), fmt.Errorf("resolve module failed")
-	}
-	C.js_module_set_import_meta(ctx.ref, cVal, 0, 1)
-	cVal = C.js_std_await(ctx.ref, cVal)
 
 	return Value{ctx: ctx, ref: cVal}, nil
 }
@@ -422,15 +431,19 @@ func (ctx *Context) Compile(code string, opts ...EvalOption) ([]byte, error) {
 	}
 	defer val.Free()
 
-	var kSize C.size_t
+	var kSize C.size_t = 0
 	ptr := C.JS_WriteObject(ctx.ref, &kSize, val.ref, C.JS_WRITE_OBJ_BYTECODE)
-	defer C.js_free(ctx.ref, unsafe.Pointer(ptr))
-	if C.int(kSize) <= 0 {
+
+	if ptr == nil {
 		return nil, ctx.Exception()
 	}
 
+	defer C.js_free(ctx.ref, unsafe.Pointer(ptr))
+
 	ret := make([]byte, C.int(kSize))
-	copy(ret, C.GoBytes(unsafe.Pointer(ptr), C.int(kSize)))
+	if kSize > 0 {
+		copy(ret, C.GoBytes(unsafe.Pointer(ptr), C.int(kSize)))
+	}
 
 	return ret, nil
 }

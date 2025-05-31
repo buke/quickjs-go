@@ -20,6 +20,8 @@ extern JSValue InvokeAsyncProxy(JSContext *ctx, JSValueConst this_val, int argc,
 
 extern int ValueGetTag(JSValueConst v);
 
+extern JSValue LoadModuleBytecode(JSContext *ctx, const uint8_t *buf, size_t buf_len, int load_only);
+
 typedef struct {
     uintptr_t fn;
 } handlerArgs;
