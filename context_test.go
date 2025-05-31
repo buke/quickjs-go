@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"strings"
 	"testing"
 
 	"github.com/buke/quickjs-go"
@@ -461,37 +460,36 @@ func TestContextCompilationErrors(t *testing.T) {
 	ctx := rt.NewContext()
 	defer ctx.Close()
 
-	// Test large code that might trigger compilation serialization error (line 437-439)
-	var largeCode strings.Builder
-	largeCode.WriteString("var obj = {\n")
-	for i := 0; i < 30000; i++ {
-		largeCode.WriteString(fmt.Sprintf("  prop_%d: function() { return %d; },\n", i, i))
-	}
-	largeCode.WriteString("  final: 'end'\n}; obj;")
+	// Test basic compilation errors
+	_, err := ctx.Compile(`invalid syntax {`)
+	require.Error(t, err)
 
-	_, err := ctx.Compile(largeCode.String())
-	if err != nil {
-		t.Logf("Successfully triggered compilation serialization error: %v", err)
-		// This covers the uncovered line 437-439 where ptr == nil
-	} else {
-		t.Logf("Large code compiled successfully")
-	}
+	// Test compilation with invalid module syntax
+	_, err = ctx.Compile(`export { unclosed`, quickjs.EvalFlagModule(true))
+	require.Error(t, err)
 
-	// Test very deep nesting
-	deepCode := "var obj = "
-	for i := 0; i < 1500; i++ {
-		deepCode += "{ nested: "
-	}
-	deepCode += "42"
-	for i := 0; i < 1500; i++ {
-		deepCode += " }"
-	}
-	deepCode += "; obj;"
+	// Test empty code compilation
+	bytecode, err := ctx.Compile(``)
+	require.NoError(t, err)
+	require.NotEmpty(t, bytecode)
 
-	_, err = ctx.Compile(deepCode)
-	if err != nil {
-		t.Logf("Successfully triggered error with deep nesting: %v", err)
-	}
+	// Test normal compilation to ensure basic functionality works
+	normalCode := `(function() { return 42; })` // Function expression returns the function object
+	// Alternative: normalCode := `() => { return 42; }` // Arrow function
+
+	r, e := ctx.Eval(normalCode)
+	defer r.Free()
+	require.NoError(t, e)
+
+	bytecode, err = ctx.Compile(normalCode)
+	require.NoError(t, err)
+	require.NotEmpty(t, bytecode)
+
+	// Verify the compiled code can be executed
+	result, err := ctx.EvalBytecode(bytecode)
+	require.NoError(t, err)
+	defer result.Free()
+	require.True(t, result.IsFunction())
 }
 
 // Most aggressive approach to trigger JS_WriteObject failure
