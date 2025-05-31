@@ -82,6 +82,7 @@ setObj.Call("add", ctx.String("item"))
 - Operate JavaScript values and objects in Go
 - Bind Go function to JavaScript async/sync function
 - Simple exception throwing and catching
+- **Marshal/Unmarshal Go values to/from JavaScript values**
 
 ## Guidelines
 
@@ -259,6 +260,227 @@ func main() {
 }
 ```
 
+### Marshal/Unmarshal Go Values
+
+QuickJS-Go provides seamless conversion between Go and JavaScript values through the `Marshal` and `Unmarshal` methods.
+
+#### Basic Types
+
+```go
+package main
+
+import (
+    "fmt"
+    "github.com/buke/quickjs-go"
+)
+
+func main() {
+    rt := quickjs.NewRuntime()
+    defer rt.Close()
+    ctx := rt.NewContext()
+    defer ctx.Close()
+
+    // Marshal Go values to JavaScript
+    data := map[string]interface{}{
+        "name":    "John Doe",
+        "age":     30,
+        "active":  true,
+        "scores":  []int{85, 92, 78},
+        "address": map[string]string{
+            "city":    "New York",
+            "country": "USA",
+        },
+    }
+
+    jsVal, err := ctx.Marshal(data)
+    if err != nil {
+        panic(err)
+    }
+    defer jsVal.Free()
+
+    // Use the marshaled value in JavaScript
+    ctx.Globals().Set("user", jsVal)
+    result, _ := ctx.Eval(`
+        user.name + " is " + user.age + " years old, scores: " + user.scores.join(", ")
+    `)
+    defer result.Free()
+    fmt.Println(result.String())
+
+    // Unmarshal JavaScript values back to Go
+    var userData map[string]interface{}
+    err = ctx.Unmarshal(jsVal, &userData)
+    if err != nil {
+        panic(err)
+    }
+    fmt.Printf("%+v\n", userData)
+}
+```
+
+#### Struct Marshaling with Tags
+
+```go
+package main
+
+import (
+    "fmt"
+    "time"
+    "github.com/buke/quickjs-go"
+)
+
+type User struct {
+    ID        int64     `js:"id"`
+    Name      string    `js:"name"`
+    Email     string    `json:"email_address"`
+    CreatedAt time.Time `js:"created_at"`
+    IsActive  bool      `js:"is_active"`
+    Tags      []string  `js:"tags"`
+    // unexported fields are ignored
+    password  string
+    // Fields with "-" tag are skipped
+    Secret    string `js:"-"`
+}
+
+func main() {
+    rt := quickjs.NewRuntime()
+    defer rt.Close()
+    ctx := rt.NewContext()
+    defer ctx.Close()
+
+    user := User{
+        ID:        123,
+        Name:      "Alice",
+        Email:     "alice@example.com",
+        CreatedAt: time.Now(),
+        IsActive:  true,
+        Tags:      []string{"admin", "user"},
+        password:  "secret123",
+        Secret:    "top-secret",
+    }
+
+    // Marshal struct to JavaScript
+    jsVal, err := ctx.Marshal(user)
+    if err != nil {
+        panic(err)
+    }
+    defer jsVal.Free()
+
+    // Modify in JavaScript
+    ctx.Globals().Set("user", jsVal)
+    result, _ := ctx.Eval(`
+        user.name = "Alice Smith";
+        user.tags.push("moderator");
+        user;
+    `)
+    defer result.Free()
+
+    // Unmarshal back to Go struct
+    var updatedUser User
+    err = ctx.Unmarshal(result, &updatedUser)
+    if err != nil {
+        panic(err)
+    }
+
+    fmt.Printf("Updated user: %+v\n", updatedUser)
+    // Note: password and Secret fields remain unchanged (not serialized)
+}
+```
+
+#### Custom Marshal/Unmarshal
+
+```go
+package main
+
+import (
+    "fmt"
+    "strings"
+    "github.com/buke/quickjs-go"
+)
+
+type CustomType struct {
+    Value string
+}
+
+// Implement Marshaler interface
+func (c CustomType) MarshalJS(ctx *quickjs.Context) (quickjs.Value, error) {
+    return ctx.String("custom:" + c.Value), nil
+}
+
+// Implement Unmarshaler interface
+func (c *CustomType) UnmarshalJS(ctx *quickjs.Context, val quickjs.Value) error {
+    if val.IsString() {
+        str := val.ToString()
+        if strings.HasPrefix(str, "custom:") {
+            c.Value = str[7:] // Remove "custom:" prefix
+        } else {
+            c.Value = str
+        }
+    }
+    return nil
+}
+
+func main() {
+    rt := quickjs.NewRuntime()
+    defer rt.Close()
+    ctx := rt.NewContext()
+    defer ctx.Close()
+
+    // Marshal custom type
+    custom := CustomType{Value: "hello"}
+    jsVal, err := ctx.Marshal(custom)
+    if err != nil {
+        panic(err)
+    }
+    defer jsVal.Free()
+
+    fmt.Println("Marshaled:", jsVal.String()) // Output: custom:hello
+
+    // Unmarshal back
+    var result CustomType
+    err = ctx.Unmarshal(jsVal, &result)
+    if err != nil {
+        panic(err)
+    }
+    fmt.Printf("Unmarshaled: %+v\n", result) // Output: {Value:hello}
+}
+```
+
+#### Type Mappings
+
+**Go to JavaScript:**
+- `bool` → JavaScript boolean
+- `int`, `int8`, `int16`, `int32` → JavaScript number (32-bit)
+- `int64` → JavaScript number (64-bit)
+- `uint`, `uint8`, `uint16`, `uint32` → JavaScript number (32-bit unsigned)
+- `uint64` → JavaScript BigInt
+- `float32`, `float64` → JavaScript number
+- `string` → JavaScript string
+- `[]byte` → JavaScript ArrayBuffer
+- `slice/array` → JavaScript Array
+- `map` → JavaScript Object
+- `struct` → JavaScript Object
+- `pointer` → recursively marshal pointed value (nil becomes null)
+
+**JavaScript to Go:**
+- JavaScript null/undefined → Go nil pointer or zero value
+- JavaScript boolean → Go bool
+- JavaScript number → Go numeric types (with appropriate conversion)
+- JavaScript BigInt → Go `uint64`/`int64`/`*big.Int`
+- JavaScript string → Go string
+- JavaScript Array → Go slice/array
+- JavaScript Object → Go map/struct
+- JavaScript ArrayBuffer → Go `[]byte`
+
+When unmarshaling into `interface{}`, the following types are used:
+- `nil` for null/undefined
+- `bool` for boolean
+- `int64` for integer numbers
+- `float64` for floating-point numbers
+- `string` for string
+- `[]interface{}` for Array
+- `map[string]interface{}` for Object
+- `*big.Int` for BigInt
+- `[]byte` for ArrayBuffer
+
 ### Bytecode Compiler
 
 ```go
@@ -266,9 +488,9 @@ func main() {
 package main
 
 import (
-	"fmt"
+    "fmt"
 
-	"github.com/buke/quickjs-go"
+    "github.com/buke/quickjs-go"
 )
 
 func main() {
@@ -314,9 +536,9 @@ func main() {
 package main
 
 import (
-	"fmt"
+    "fmt"
 
-	"github.com/buke/quickjs-go"
+    "github.com/buke/quickjs-go"
 )
 
 func main() {
@@ -347,39 +569,39 @@ func main() {
 package main
 
 import (
-	"fmt"
+    "fmt"
 
-	"github.com/buke/quickjs-go"
+    "github.com/buke/quickjs-go"
 )
 
 func main() {
 // enable module import
-	rt := quickjs.NewRuntime(quickjs.WithModuleImport(true))
-	defer rt.Close()
+    rt := quickjs.NewRuntime(quickjs.WithModuleImport(true))
+    defer rt.Close()
 
-	ctx := rt.NewContext()
-	defer ctx.Close()
+    ctx := rt.NewContext()
+    defer ctx.Close()
 
-	// eval module
-	r1, err := ctx.EvalFile("./test/hello_module.js")
-	defer r1.Free()
-	require.NoError(t, err)
-	require.EqualValues(t, 55, ctx.Globals().Get("result").Int32())
+    // eval module
+    r1, err := ctx.EvalFile("./test/hello_module.js")
+    defer r1.Free()
+    require.NoError(t, err)
+    require.EqualValues(t, 55, ctx.Globals().Get("result").Int32())
 
-	// load module
-	r2, err := ctx.LoadModuleFile("./test/fib_module.js", "fib_foo")
-	defer r2.Free()
-	require.NoError(t, err)
+    // load module
+    r2, err := ctx.LoadModuleFile("./test/fib_module.js", "fib_foo")
+    defer r2.Free()
+    require.NoError(t, err)
 
-	// call module
-	r3, err := ctx.Eval(`
-	import {fib} from 'fib_foo';
-	globalThis.result = fib(9);
-	`)
-	defer r3.Free()
-	require.NoError(t, err)
+    // call module
+    r3, err := ctx.Eval(`
+    import {fib} from 'fib_foo';
+    globalThis.result = fib(9);
+    `)
+    defer r3.Free()
+    require.NoError(t, err)
 
-	require.EqualValues(t, 34, ctx.Globals().Get("result").Int32())
+    require.EqualValues(t, 34, ctx.Globals().Get("result").Int32())
 }
 
 ```
