@@ -1,5 +1,7 @@
 #include "_cgo_export.h"
 #include "quickjs.h"
+#include "quickjs-libc.h"
+#include "cutils.h" 
 #include <time.h>
 
 
@@ -60,4 +62,41 @@ void SetExecuteTimeout(JSRuntime *rt, time_t timeout){
     ts->start = time(NULL);
     ts->timeout = timeout;
     JS_SetInterruptHandler(rt, &timeoutHandler, ts);
+}
+
+
+// Implementation of LoadModuleBytecode function, based on js_std_eval_binary
+JSValue LoadModuleBytecode(JSContext *ctx, const uint8_t *buf, size_t buf_len, int load_only) {
+    JSValue obj, val;
+    
+    obj = JS_ReadObject(ctx, buf, buf_len, JS_READ_OBJ_BYTECODE);
+    if (JS_IsException(obj)) {
+        return obj;
+    }
+    
+    if (load_only) {
+        if (JS_VALUE_GET_TAG(obj) == JS_TAG_MODULE) {
+            js_module_set_import_meta(ctx, obj, FALSE, FALSE);
+        }
+        return obj;
+    } else {
+        if (JS_VALUE_GET_TAG(obj) == JS_TAG_MODULE) {
+            if (JS_ResolveModule(ctx, obj) < 0) {
+                JS_FreeValue(ctx, obj);
+                return JS_EXCEPTION;
+            }
+            js_module_set_import_meta(ctx, obj, FALSE, TRUE);
+            val = JS_EvalFunction(ctx, obj);
+            val = js_std_await(ctx, val);
+        } else {
+            val = JS_EvalFunction(ctx, obj);
+        }
+        
+        if (JS_IsException(val)) {
+            JS_FreeValue(ctx, obj);
+            return val;
+        }
+        
+        return val;
+    }
 }
