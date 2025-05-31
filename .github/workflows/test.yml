@@ -57,18 +57,4 @@ jobs:
         fail_ci_if_error: true
         verbose: true
 
-    # Optional: Display coverage summary
-    - name: Display coverage summary
-      if: runner.os != 'Windows'
-      run: |
-        if [ -f coverage.out ]; then
-          go tool cover -func=coverage.out
-        fi
 
-    - name: Display coverage summary (Windows)
-      if: runner.os == 'Windows'
-      run: |
-        if (Test-Path coverage.out) {
-          go tool cover -func=coverage.out
-        }
-      shell: pwsh
