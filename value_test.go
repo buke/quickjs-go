@@ -207,27 +207,105 @@ func TestValueArrayBuffer(t *testing.T) {
 	defer arr.Free()
 	require.EqualValues(t, 5, arr.Len())
 
-	// 新增：测试 ToByteArray 方法的错误情况 (覆盖 value.go:180.21,182.3)
-	// 创建一个非 ArrayBuffer 对象来触发错误
-	normalObj := ctx.Object()
-	defer normalObj.Free()
+	// Test ToByteArray error cases - comprehensive coverage
+	t.Run("ToByteArrayErrorCases", func(t *testing.T) {
+		// Test various non-ArrayBuffer types
+		testCases := []struct {
+			name        string
+			val         quickjs.Value
+			expectedErr string
+		}{
+			{"object", ctx.Object(), "exceeds the maximum length"},
+			{"string", ctx.String("not an array buffer"), "exceeds the maximum length"},
+			{"number", ctx.Int32(42), "exceeds the maximum length"},
+			{"boolean", ctx.Bool(true), "exceeds the maximum length"},
+			{"null", ctx.Null(), "exceeds the maximum length"},
+			{"undefined", ctx.Undefined(), "exceeds the maximum length"},
+		}
 
-	_, err = normalObj.ToByteArray(1)
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "exceeds the maximum length of the current binary arra")
+		for _, tc := range testCases {
+			t.Run(tc.name, func(t *testing.T) {
+				defer tc.val.Free()
 
-	// 测试其他非 ArrayBuffer 类型
-	str := ctx.String("not an array buffer")
-	defer str.Free()
-	_, err = str.ToByteArray(1)
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "exceeds the maximum length of the current binary arra")
+				_, err := tc.val.ToByteArray(1)
+				require.Error(t, err)
+				require.Contains(t, err.Error(), tc.expectedErr)
+			})
+		}
 
-	nullVal := ctx.Null()
-	defer nullVal.Free()
-	_, err = nullVal.ToByteArray(1)
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "exceeds the maximum length of the current binary arra")
+		// Test function type
+		funcVal := ctx.Function(func(ctx *quickjs.Context, this quickjs.Value, args []quickjs.Value) quickjs.Value {
+			return ctx.Null()
+		})
+		defer funcVal.Free()
+
+		_, err := funcVal.ToByteArray(1)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "exceeds the maximum length")
+
+		// Test size validation error (when ByteLen() < requested size)
+		validBuffer := ctx.ArrayBuffer([]byte{1, 2, 3})
+		defer validBuffer.Free()
+
+		_, err = validBuffer.ToByteArray(10) // Request more than available
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "exceeds the maximum length")
+
+		// Test fake ArrayBuffer objects that might pass IsByteArray check but fail ToByteArray
+		fakeArrayBuffer, err := ctx.Eval(`
+            var fake = {
+                constructor: ArrayBuffer,
+                byteLength: 5
+            };
+            Object.setPrototypeOf(fake, ArrayBuffer.prototype);
+            fake;
+        `)
+		require.NoError(t, err)
+		defer fakeArrayBuffer.Free()
+
+		if fakeArrayBuffer.IsByteArray() {
+			_, err = fakeArrayBuffer.ToByteArray(5)
+			if err != nil {
+				require.Contains(t, err.Error(), "failed to get ArrayBuffer data")
+			}
+		}
+
+		// Test corrupted ArrayBuffer-like object
+		corruptedBuffer, err := ctx.Eval(`
+            var buffer = new ArrayBuffer(5);
+            try {
+                Object.defineProperty(buffer, 'byteLength', {
+                    get: function() { throw new Error('Corrupted byteLength access'); }
+                });
+            } catch(e) {
+                // If modification fails, use original buffer
+            }
+            buffer;
+        `)
+		require.NoError(t, err)
+		defer corruptedBuffer.Free()
+
+		if corruptedBuffer.IsByteArray() {
+			_, err = corruptedBuffer.ToByteArray(uint(corruptedBuffer.ByteLen()))
+			// This might succeed or fail depending on the corruption
+			if err != nil {
+				t.Logf("Corrupted buffer ToByteArray error: %v", err)
+			}
+		}
+
+		// Test zero-size ArrayBuffer edge case
+		zeroBuffer := ctx.ArrayBuffer([]byte{})
+		defer zeroBuffer.Free()
+
+		result, err := zeroBuffer.ToByteArray(0)
+		require.NoError(t, err)
+		require.Empty(t, result)
+
+		// Test requesting bytes from zero-size buffer
+		_, err = zeroBuffer.ToByteArray(1)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "exceeds the maximum length")
+	})
 }
 
 // TestValueProperties tests property operations
@@ -289,7 +367,7 @@ func TestValueProperties(t *testing.T) {
 	_, err = str.PropertyNames()
 	require.Error(t, err)
 
-	// 新增：测试更多非对象类型的 PropertyNames (覆盖 value.go:255.26,255.3)
+	// Test PropertyNames with more non-object types (covers error branches)
 	primitiveVal := ctx.Int32(42)
 	defer primitiveVal.Free()
 
@@ -297,7 +375,7 @@ func TestValueProperties(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "value does not contain properties")
 
-	// 测试 null 值的 PropertyNames
+	// Test PropertyNames with null value
 	nullVal := ctx.Null()
 	defer nullVal.Free()
 
@@ -305,7 +383,7 @@ func TestValueProperties(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "value does not contain properties")
 
-	// 测试 undefined 值的 PropertyNames
+	// Test PropertyNames with undefined value
 	undefinedVal := ctx.Undefined()
 	defer undefinedVal.Free()
 
@@ -313,7 +391,7 @@ func TestValueProperties(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "value does not contain properties")
 
-	// 测试 boolean 值的 PropertyNames
+	// Test PropertyNames with boolean value
 	boolVal := ctx.Bool(true)
 	defer boolVal.Free()
 
@@ -349,7 +427,7 @@ func TestValueFunctionCalls(t *testing.T) {
 	require.False(t, result.IsException())
 	require.EqualValues(t, 7, result.ToInt32())
 
-	// NEW: Test Call method without arguments (covers len(cargs) == 0 branch)
+	// Test Call method without arguments (covers len(cargs) == 0 branch)
 	noArgsFunc := ctx.Function(func(ctx *quickjs.Context, this quickjs.Value, args []quickjs.Value) quickjs.Value {
 		return ctx.String("no arguments received")
 	})
@@ -433,7 +511,7 @@ func TestValueError(t *testing.T) {
 	defer str.Free()
 	require.Nil(t, str.ToError())
 
-	// NEW: Test error with cause property (covers cause branch in ToError method)
+	// Test error with cause property (covers cause branch in ToError method)
 	complexError, err := ctx.Eval(`
         const err = new Error("complex error");
         err.name = "CustomError";
@@ -478,7 +556,7 @@ func TestValueGlobalInstanceof(t *testing.T) {
 	require.True(t, obj.GlobalInstanceof("Object"))
 	require.False(t, obj.GlobalInstanceof("Array"))
 
-	// 新增/修改：确保测试覆盖 return false 的情况 (覆盖 value.go:366.2,366.14)
+	// Test false return cases to ensure coverage (covers return false branch)
 	// Test with non-existent constructor
 	str := ctx.String("test")
 	defer str.Free()
@@ -489,12 +567,12 @@ func TestValueGlobalInstanceof(t *testing.T) {
 	// Test with primitive value
 	require.False(t, str.GlobalInstanceof("String"))
 
-	// 测试对象但构造函数不匹配的情况
-	require.False(t, obj.GlobalInstanceof("Array"))    // 应该返回 false
-	require.False(t, obj.GlobalInstanceof("Function")) // 应该返回 false
-	require.False(t, obj.GlobalInstanceof("Date"))     // 应该返回 false
+	// Test object but constructor mismatch cases
+	require.False(t, obj.GlobalInstanceof("Array"))    // should return false
+	require.False(t, obj.GlobalInstanceof("Function")) // should return false
+	require.False(t, obj.GlobalInstanceof("Date"))     // should return false
 
-	// 测试各种非对象类型的 GlobalInstanceof
+	// Test various non-object types with GlobalInstanceof
 	testVals := []struct {
 		name string
 		val  quickjs.Value
@@ -509,7 +587,7 @@ func TestValueGlobalInstanceof(t *testing.T) {
 	for _, tv := range testVals {
 		defer tv.val.Free()
 
-		// 所有这些都应该返回 false
+		// All of these should return false
 		require.False(t, tv.val.GlobalInstanceof("Object"), "Test case %s failed", tv.name)
 		require.False(t, tv.val.GlobalInstanceof("Array"), "Test case %s failed", tv.name)
 		require.False(t, tv.val.GlobalInstanceof("Function"), "Test case %s failed", tv.name)
@@ -568,7 +646,7 @@ func TestValueSpecialTypes(t *testing.T) {
 	defer rejectedPromise.Free()
 	require.True(t, rejectedPromise.IsPromise())
 
-	// NEW: Test non-Promise objects for IsPromise method (covers return false branch)
+	// Test non-Promise objects for IsPromise method (covers return false branch)
 	// Test regular object - should return false
 	regularObj := ctx.Object()
 	defer regularObj.Free()

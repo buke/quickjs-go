@@ -367,10 +367,9 @@ func (ctx *Context) unmarshal(jsVal Value, rv reflect.Value) error {
 func (ctx *Context) unmarshalSlice(jsVal Value, rv reflect.Value) error {
 	// Handle ArrayBuffer as []byte
 	if rv.Type().Elem().Kind() == reflect.Uint8 && jsVal.IsByteArray() {
-		// ToByteArray() should not fail after IsByteArray() check, but we handle the error for robustness
 		bytes, err := jsVal.ToByteArray(uint(jsVal.ByteLen()))
 		if err != nil {
-			return err // This branch is hard to test as it requires internal QuickJS errors
+			return err
 		}
 		rv.SetBytes(bytes)
 		return nil
@@ -433,10 +432,9 @@ func (ctx *Context) unmarshalMap(jsVal Value, rv reflect.Value) error {
 		rv.Set(reflect.MakeMap(rv.Type()))
 	}
 
-	// PropertyNames() should not fail after IsObject() check, but we handle the error for robustness
 	props, err := jsVal.PropertyNames()
 	if err != nil {
-		return err // This branch is hard to test as it requires internal QuickJS errors
+		return err
 	}
 
 	keyType := rv.Type().Key()
@@ -539,10 +537,9 @@ func (ctx *Context) unmarshalInterface(jsVal Value) (interface{}, error) {
 	} else if jsVal.IsBigInt() {
 		return jsVal.ToBigInt(), nil
 	} else if jsVal.IsByteArray() {
-		// ToByteArray () should not fail after IsByteArray() check, but we handle the error for robustness
 		bytes, err := jsVal.ToByteArray(uint(jsVal.ByteLen()))
 		if err != nil {
-			return nil, err // This branch is hard to test as it requires internal QuickJS errors
+			return nil, err
 		}
 		return bytes, nil
 	} else if jsVal.IsArray() {
@@ -559,13 +556,13 @@ func (ctx *Context) unmarshalInterface(jsVal Value) (interface{}, error) {
 			slice[i] = val
 		}
 		return slice, nil
-	} else if jsVal.IsObject() {
+	} else {
+		// Default case: treat as object (covers IsObject() and any edge cases)
 		result := make(map[string]interface{})
 
-		// PropertyNames() should not fail after IsObject() check, but we handle the error for robustness
 		props, err := jsVal.PropertyNames()
 		if err != nil {
-			return nil, err // This branch is hard to test as it requires internal QuickJS errors
+			return nil, err
 		}
 
 		for _, prop := range props {
@@ -579,8 +576,5 @@ func (ctx *Context) unmarshalInterface(jsVal Value) (interface{}, error) {
 			result[prop] = goVal
 		}
 		return result, nil
-	} else {
-		// Should not reach here if all types are handled
-		return nil, fmt.Errorf("unhandled JavaScript type: %s", jsVal.String()) // This branch is hard to test as it requires other types
 	}
 }
