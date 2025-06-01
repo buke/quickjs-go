@@ -63,6 +63,11 @@ func (v Value) ToByteArray(size uint) ([]byte, error) {
 	}
 	cSize := C.size_t(size)
 	outBuf := C.JS_GetArrayBuffer(v.ctx.ref, &cSize, v.ref)
+
+	if outBuf == nil {
+		return nil, errors.New("failed to get ArrayBuffer data")
+	}
+
 	return C.GoBytes(unsafe.Pointer(outBuf), C.int(size)), nil
 }
 
