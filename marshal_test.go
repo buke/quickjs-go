@@ -620,6 +620,32 @@ func TestErrorCases(t *testing.T) {
 		}
 	})
 
+	// Add PropertyNames error test here
+	t.Run("PropertyNamesError", func(t *testing.T) {
+		// Create a proxy that throws in ownKeys trap to trigger PropertyNames() error
+		jsVal, err := ctx.Eval(`
+            new Proxy({}, {
+                ownKeys: function(target) {
+                    throw new Error("PropertyNames test error");
+                }
+            });
+        `)
+		require.NoError(t, err)
+		defer jsVal.Free()
+
+		// Test unmarshalMap error path
+		var mapResult map[string]interface{}
+		err = ctx.Unmarshal(jsVal, &mapResult)
+		require.Error(t, err)
+		t.Logf("Covered unmarshalMap PropertyNames error: %v", err)
+
+		// Test unmarshalInterface error path
+		var interfaceResult interface{}
+		err = ctx.Unmarshal(jsVal, &interfaceResult)
+		require.Error(t, err)
+		t.Logf("Covered unmarshalInterface PropertyNames error: %v", err)
+	})
+
 	// Test BigInt edge cases
 	t.Run("BigIntErrors", func(t *testing.T) {
 		// BigInt too large for int64

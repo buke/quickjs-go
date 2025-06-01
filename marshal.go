@@ -433,10 +433,9 @@ func (ctx *Context) unmarshalMap(jsVal Value, rv reflect.Value) error {
 		rv.Set(reflect.MakeMap(rv.Type()))
 	}
 
-	// PropertyNames() should not fail after IsObject() check, but we handle the error for robustness
 	props, err := jsVal.PropertyNames()
 	if err != nil {
-		return err // This branch is hard to test as it requires internal QuickJS errors
+		return err
 	}
 
 	keyType := rv.Type().Key()
@@ -562,10 +561,9 @@ func (ctx *Context) unmarshalInterface(jsVal Value) (interface{}, error) {
 	} else if jsVal.IsObject() {
 		result := make(map[string]interface{})
 
-		// PropertyNames() should not fail after IsObject() check, but we handle the error for robustness
 		props, err := jsVal.PropertyNames()
 		if err != nil {
-			return nil, err // This branch is hard to test as it requires internal QuickJS errors
+			return nil, err
 		}
 
 		for _, prop := range props {
