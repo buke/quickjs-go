@@ -556,7 +556,8 @@ func (ctx *Context) unmarshalInterface(jsVal Value) (interface{}, error) {
 			slice[i] = val
 		}
 		return slice, nil
-	} else if jsVal.IsObject() {
+	} else {
+		// Default case: treat as object (covers IsObject() and any edge cases)
 		result := make(map[string]interface{})
 
 		props, err := jsVal.PropertyNames()
@@ -575,8 +576,5 @@ func (ctx *Context) unmarshalInterface(jsVal Value) (interface{}, error) {
 			result[prop] = goVal
 		}
 		return result, nil
-	} else {
-		// Should not reach here if all types are handled
-		return nil, fmt.Errorf("unhandled JavaScript type: %s", jsVal.String())
 	}
 }
