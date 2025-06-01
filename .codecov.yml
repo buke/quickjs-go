@@ -37,8 +37,3 @@ comment:
 # Pull request comments
 github_checks:
   annotations: false        # Disable inline annotations for cleaner PRs
-
-# Notification settings
-notify:
-  # Disable email notifications
-  email: false
