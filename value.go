@@ -5,7 +5,9 @@ package quickjs
 */
 import "C"
 import (
+	"encoding/binary"
 	"errors"
+	"math"
 	"math/big"
 	"unsafe"
 )
@@ -49,7 +51,7 @@ func (v Value) ToString() string {
 	return C.GoString(ptr)
 }
 
-// JSONString returns the JSON string representation of the value.
+// JSONStringify returns the JSON string representation of the value.
 func (v Value) JSONStringify() string {
 	ref := C.JS_JSONStringify(v.ctx.ref, v.ref, C.JS_NewNull(), C.JS_NewNull())
 	ptr := C.JS_ToCString(v.ctx.ref, ref)
@@ -233,7 +235,7 @@ func (v Value) Error() error {
 	return v.ToError()
 }
 
-// Error returns the error value of the value.
+// ToError returns the error value of the value.
 func (v Value) ToError() error {
 	if !v.IsError() {
 		return nil
@@ -340,7 +342,7 @@ func (v Value) DeleteIdx(idx uint32) bool {
 	return C.JS_DeletePropertyInt64(v.ctx.ref, v.ref, C.int64_t(idx), C.int(1)) == 1
 }
 
-// globalInstanceof checks if the value is an instance of the given global constructor
+// GlobalInstanceof checks if the value is an instance of the given global constructor
 func (v Value) GlobalInstanceof(name string) bool {
 	ctor := v.ctx.Globals().Get(name)
 	defer ctor.Free()
@@ -348,6 +350,270 @@ func (v Value) GlobalInstanceof(name string) bool {
 		return false
 	}
 	return C.JS_IsInstanceOf(v.ctx.ref, v.ref, ctor.ref) == 1
+}
+
+// TypedArray detection methods
+func (v Value) IsTypedArray() bool {
+	typedArrayTypes := []string{
+		"Int8Array", "Uint8Array", "Uint8ClampedArray",
+		"Int16Array", "Uint16Array", "Int32Array", "Uint32Array",
+		"Float32Array", "Float64Array", "BigInt64Array", "BigUint64Array",
+	}
+
+	for _, typeName := range typedArrayTypes {
+		if v.GlobalInstanceof(typeName) {
+			return true
+		}
+	}
+	return false
+}
+
+func (v Value) IsInt8Array() bool         { return v.GlobalInstanceof("Int8Array") }
+func (v Value) IsUint8Array() bool        { return v.GlobalInstanceof("Uint8Array") }
+func (v Value) IsUint8ClampedArray() bool { return v.GlobalInstanceof("Uint8ClampedArray") }
+func (v Value) IsInt16Array() bool        { return v.GlobalInstanceof("Int16Array") }
+func (v Value) IsUint16Array() bool       { return v.GlobalInstanceof("Uint16Array") }
+func (v Value) IsInt32Array() bool        { return v.GlobalInstanceof("Int32Array") }
+func (v Value) IsUint32Array() bool       { return v.GlobalInstanceof("Uint32Array") }
+func (v Value) IsFloat32Array() bool      { return v.GlobalInstanceof("Float32Array") }
+func (v Value) IsFloat64Array() bool      { return v.GlobalInstanceof("Float64Array") }
+func (v Value) IsBigInt64Array() bool     { return v.GlobalInstanceof("BigInt64Array") }
+func (v Value) IsBigUint64Array() bool    { return v.GlobalInstanceof("BigUint64Array") }
+
+// getTypedArrayInfo is a helper function to extract TypedArray information using C API
+func (v Value) getTypedArrayInfo() (buffer Value, byteOffset, byteLength, bytesPerElement int) {
+	var cByteOffset, cByteLength, cBytesPerElement C.size_t
+	bufferRef := C.JS_GetTypedArrayBuffer(v.ctx.ref, v.ref, &cByteOffset, &cByteLength, &cBytesPerElement)
+
+	return Value{ctx: v.ctx, ref: bufferRef},
+		int(cByteOffset), int(cByteLength), int(cBytesPerElement)
+}
+
+// ToInt8Array converts the value to int8 slice if it's an Int8Array.
+func (v Value) ToInt8Array() ([]int8, error) {
+	if !v.IsInt8Array() {
+		return nil, errors.New("value is not an Int8Array")
+	}
+
+	buffer, byteOffset, byteLength, _ := v.getTypedArrayInfo()
+	defer buffer.Free()
+
+	totalSize := uint(byteOffset + byteLength)
+	bytes, err := buffer.ToByteArray(totalSize)
+	if err != nil {
+		return nil, err
+	}
+
+	data := bytes[byteOffset : byteOffset+byteLength]
+	result := make([]int8, len(data))
+	for i, b := range data {
+		result[i] = int8(b)
+	}
+	return result, nil
+}
+
+// ToUint8Array converts the value to uint8 slice if it's a Uint8Array or Uint8ClampedArray.
+func (v Value) ToUint8Array() ([]uint8, error) {
+	if !v.IsUint8Array() && !v.IsUint8ClampedArray() {
+		return nil, errors.New("value is not a Uint8Array or Uint8ClampedArray")
+	}
+
+	buffer, byteOffset, byteLength, _ := v.getTypedArrayInfo()
+	defer buffer.Free()
+
+	totalSize := uint(byteOffset + byteLength)
+	bytes, err := buffer.ToByteArray(totalSize)
+	if err != nil {
+		return nil, err
+	}
+
+	return bytes[byteOffset : byteOffset+byteLength], nil
+}
+
+// ToInt16Array converts the value to int16 slice if it's an Int16Array.
+func (v Value) ToInt16Array() ([]int16, error) {
+	if !v.IsInt16Array() {
+		return nil, errors.New("value is not an Int16Array")
+	}
+
+	buffer, byteOffset, byteLength, _ := v.getTypedArrayInfo()
+	defer buffer.Free()
+
+	totalSize := uint(byteOffset + byteLength)
+	bytes, err := buffer.ToByteArray(totalSize)
+	if err != nil {
+		return nil, err
+	}
+
+	data := bytes[byteOffset : byteOffset+byteLength]
+	result := make([]int16, len(data)/2)
+	for i := 0; i < len(result); i++ {
+		result[i] = int16(binary.LittleEndian.Uint16(data[i*2:]))
+	}
+	return result, nil
+}
+
+// ToUint16Array converts the value to uint16 slice if it's a Uint16Array.
+func (v Value) ToUint16Array() ([]uint16, error) {
+	if !v.IsUint16Array() {
+		return nil, errors.New("value is not a Uint16Array")
+	}
+
+	buffer, byteOffset, byteLength, _ := v.getTypedArrayInfo()
+	defer buffer.Free()
+
+	totalSize := uint(byteOffset + byteLength)
+	bytes, err := buffer.ToByteArray(totalSize)
+	if err != nil {
+		return nil, err
+	}
+
+	data := bytes[byteOffset : byteOffset+byteLength]
+	result := make([]uint16, len(data)/2)
+	for i := 0; i < len(result); i++ {
+		result[i] = binary.LittleEndian.Uint16(data[i*2:])
+	}
+	return result, nil
+}
+
+// ToInt32Array converts the value to int32 slice if it's an Int32Array.
+func (v Value) ToInt32Array() ([]int32, error) {
+	if !v.IsInt32Array() {
+		return nil, errors.New("value is not an Int32Array")
+	}
+
+	buffer, byteOffset, byteLength, _ := v.getTypedArrayInfo()
+	defer buffer.Free()
+
+	totalSize := uint(byteOffset + byteLength)
+	bytes, err := buffer.ToByteArray(totalSize)
+	if err != nil {
+		return nil, err
+	}
+
+	data := bytes[byteOffset : byteOffset+byteLength]
+	result := make([]int32, len(data)/4)
+	for i := 0; i < len(result); i++ {
+		result[i] = int32(binary.LittleEndian.Uint32(data[i*4:]))
+	}
+	return result, nil
+}
+
+// ToUint32Array converts the value to uint32 slice if it's a Uint32Array.
+func (v Value) ToUint32Array() ([]uint32, error) {
+	if !v.IsUint32Array() {
+		return nil, errors.New("value is not a Uint32Array")
+	}
+
+	buffer, byteOffset, byteLength, _ := v.getTypedArrayInfo()
+	defer buffer.Free()
+
+	totalSize := uint(byteOffset + byteLength)
+	bytes, err := buffer.ToByteArray(totalSize)
+	if err != nil {
+		return nil, err
+	}
+
+	data := bytes[byteOffset : byteOffset+byteLength]
+	result := make([]uint32, len(data)/4)
+	for i := 0; i < len(result); i++ {
+		result[i] = binary.LittleEndian.Uint32(data[i*4:])
+	}
+	return result, nil
+}
+
+// ToFloat32Array converts the value to float32 slice if it's a Float32Array.
+func (v Value) ToFloat32Array() ([]float32, error) {
+	if !v.IsFloat32Array() {
+		return nil, errors.New("value is not a Float32Array")
+	}
+
+	buffer, byteOffset, byteLength, _ := v.getTypedArrayInfo()
+	defer buffer.Free()
+
+	totalSize := uint(byteOffset + byteLength)
+	bytes, err := buffer.ToByteArray(totalSize)
+	if err != nil {
+		return nil, err
+	}
+
+	data := bytes[byteOffset : byteOffset+byteLength]
+	result := make([]float32, len(data)/4)
+	for i := 0; i < len(result); i++ {
+		bits := binary.LittleEndian.Uint32(data[i*4:])
+		result[i] = math.Float32frombits(bits)
+	}
+	return result, nil
+}
+
+// ToFloat64Array converts the value to float64 slice if it's a Float64Array.
+func (v Value) ToFloat64Array() ([]float64, error) {
+	if !v.IsFloat64Array() {
+		return nil, errors.New("value is not a Float64Array")
+	}
+
+	buffer, byteOffset, byteLength, _ := v.getTypedArrayInfo()
+	defer buffer.Free()
+
+	totalSize := uint(byteOffset + byteLength)
+	bytes, err := buffer.ToByteArray(totalSize)
+	if err != nil {
+		return nil, err
+	}
+
+	data := bytes[byteOffset : byteOffset+byteLength]
+	result := make([]float64, len(data)/8)
+	for i := 0; i < len(result); i++ {
+		bits := binary.LittleEndian.Uint64(data[i*8:])
+		result[i] = math.Float64frombits(bits)
+	}
+	return result, nil
+}
+
+// ToBigInt64Array converts the value to int64 slice if it's a BigInt64Array.
+func (v Value) ToBigInt64Array() ([]int64, error) {
+	if !v.IsBigInt64Array() {
+		return nil, errors.New("value is not a BigInt64Array")
+	}
+
+	buffer, byteOffset, byteLength, _ := v.getTypedArrayInfo()
+	defer buffer.Free()
+
+	totalSize := uint(byteOffset + byteLength)
+	bytes, err := buffer.ToByteArray(totalSize)
+	if err != nil {
+		return nil, err
+	}
+
+	data := bytes[byteOffset : byteOffset+byteLength]
+	result := make([]int64, len(data)/8)
+	for i := 0; i < len(result); i++ {
+		result[i] = int64(binary.LittleEndian.Uint64(data[i*8:]))
+	}
+	return result, nil
+}
+
+// ToBigUint64Array converts the value to uint64 slice if it's a BigUint64Array.
+func (v Value) ToBigUint64Array() ([]uint64, error) {
+	if !v.IsBigUint64Array() {
+		return nil, errors.New("value is not a BigUint64Array")
+	}
+
+	buffer, byteOffset, byteLength, _ := v.getTypedArrayInfo()
+	defer buffer.Free()
+
+	totalSize := uint(byteOffset + byteLength)
+	bytes, err := buffer.ToByteArray(totalSize)
+	if err != nil {
+		return nil, err
+	}
+
+	data := bytes[byteOffset : byteOffset+byteLength]
+	result := make([]uint64, len(data)/8)
+	for i := 0; i < len(result); i++ {
+		result[i] = binary.LittleEndian.Uint64(data[i*8:])
+	}
+	return result, nil
 }
 
 func (v Value) IsNumber() bool        { return C.JS_IsNumber(v.ref) == 1 }

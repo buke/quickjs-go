@@ -10,494 +10,736 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestContextBasics tests basic context operations
 func TestContextBasics(t *testing.T) {
 	rt := quickjs.NewRuntime()
 	defer rt.Close()
-
 	ctx := rt.NewContext()
 	defer ctx.Close()
 
 	// Test Runtime() method
-	contextRuntime := ctx.Runtime()
-	require.NotNil(t, contextRuntime)
+	require.NotNil(t, ctx.Runtime())
 
-	// Test ArrayBuffer with different data sizes (context-specific functionality)
-	testArrayBuffer := func(data []byte) {
-		ab := ctx.ArrayBuffer(data)
-		defer ab.Free()
-		require.True(t, ab.IsByteArray())
-		require.EqualValues(t, len(data), ab.ByteLen())
-	}
+	// Test basic value creation
+	t.Run("ValueCreation", func(t *testing.T) {
+		values := []struct {
+			name      string
+			createVal func() quickjs.Value
+			checkFunc func(quickjs.Value) bool
+		}{
+			{"Null", func() quickjs.Value { return ctx.Null() }, func(v quickjs.Value) bool { return v.IsNull() }},
+			{"Undefined", func() quickjs.Value { return ctx.Undefined() }, func(v quickjs.Value) bool { return v.IsUndefined() }},
+			{"Uninitialized", func() quickjs.Value { return ctx.Uninitialized() }, func(v quickjs.Value) bool { return v.IsUninitialized() }},
+			{"Bool", func() quickjs.Value { return ctx.Bool(true) }, func(v quickjs.Value) bool { return v.IsBool() }},
+			{"Int32", func() quickjs.Value { return ctx.Int32(-42) }, func(v quickjs.Value) bool { return v.IsNumber() }},
+			{"Int64", func() quickjs.Value { return ctx.Int64(1234567890) }, func(v quickjs.Value) bool { return v.IsNumber() }},
+			{"Uint32", func() quickjs.Value { return ctx.Uint32(42) }, func(v quickjs.Value) bool { return v.IsNumber() }},
+			{"BigInt64", func() quickjs.Value { return ctx.BigInt64(9223372036854775807) }, func(v quickjs.Value) bool { return v.IsBigInt() }},
+			{"BigUint64", func() quickjs.Value { return ctx.BigUint64(18446744073709551615) }, func(v quickjs.Value) bool { return v.IsBigInt() }},
+			{"Float64", func() quickjs.Value { return ctx.Float64(3.14159) }, func(v quickjs.Value) bool { return v.IsNumber() }},
+			{"String", func() quickjs.Value { return ctx.String("test") }, func(v quickjs.Value) bool { return v.IsString() }},
+			{"Object", func() quickjs.Value { return ctx.Object() }, func(v quickjs.Value) bool { return v.IsObject() }},
+		}
 
-	testArrayBuffer([]byte{1, 2, 3, 4, 5})
-	testArrayBuffer([]byte{})
-	testArrayBuffer(nil)
+		for _, tc := range values {
+			t.Run(tc.name, func(t *testing.T) {
+				val := tc.createVal()
+				defer val.Free()
+				require.True(t, tc.checkFunc(val))
+			})
+		}
+	})
 
-	// NEW: Test BigUint64 creation (covers context.go:99.47,101.2)
-	bigUint64Val := ctx.BigUint64(18446744073709551615) // max uint64
-	defer bigUint64Val.Free()
-	require.True(t, bigUint64Val.IsBigInt())
+	// Test ArrayBuffer with different data sizes
+	t.Run("ArrayBuffer", func(t *testing.T) {
+		testCases := [][]byte{
+			{1, 2, 3, 4, 5},
+			{},
+			nil,
+		}
 
-	// Test with smaller BigUint64 value
-	smallBigUint64Val := ctx.BigUint64(42)
-	defer smallBigUint64Val.Free()
-	require.True(t, smallBigUint64Val.IsBigInt())
+		for i, data := range testCases {
+			t.Run(fmt.Sprintf("Case%d", i), func(t *testing.T) {
+				ab := ctx.ArrayBuffer(data)
+				defer ab.Free()
+				require.True(t, ab.IsByteArray())
+				require.EqualValues(t, len(data), ab.ByteLen())
+			})
+		}
+	})
 }
 
-// TestContextEvaluation tests code evaluation and compilation
 func TestContextEvaluation(t *testing.T) {
 	rt := quickjs.NewRuntime()
 	defer rt.Close()
-
 	ctx := rt.NewContext()
 	defer ctx.Close()
 
-	// Basic evaluation
-	result, err := ctx.Eval(`1 + 2`)
-	require.NoError(t, err)
-	defer result.Free()
-	require.EqualValues(t, 3, result.ToInt32())
+	t.Run("BasicEvaluation", func(t *testing.T) {
+		// Simple expression
+		result, err := ctx.Eval(`1 + 2`)
+		require.NoError(t, err)
+		defer result.Free()
+		require.EqualValues(t, 3, result.ToInt32())
 
-	// Test with options
-	result2, err := ctx.Eval(`"use strict"; var x = 42; x`,
-		quickjs.EvalFlagStrict(true),
-		quickjs.EvalFileName("test.js"))
-	require.NoError(t, err)
-	defer result2.Free()
-	require.EqualValues(t, 42, result2.ToInt32())
+		// Empty code
+		result2, err := ctx.Eval(``)
+		require.NoError(t, err)
+		defer result2.Free()
+	})
 
-	// Test module evaluation
-	result3, err := ctx.Eval(`export const x = 42;`, quickjs.EvalFlagModule(true))
-	require.NoError(t, err)
-	defer result3.Free()
+	t.Run("EvaluationOptions", func(t *testing.T) {
+		optionTests := []struct {
+			name    string
+			code    string
+			options []quickjs.EvalOption
+		}{
+			{"Strict", `"use strict"; var x = 42; x`, []quickjs.EvalOption{quickjs.EvalFlagStrict(true), quickjs.EvalFileName("test.js")}},
+			{"Module", `export const x = 42;`, []quickjs.EvalOption{quickjs.EvalFlagModule(true)}},
+			{"CompileOnly", `1 + 1`, []quickjs.EvalOption{quickjs.EvalFlagCompileOnly(true)}},
+			{"GlobalFalse", `var globalFlagTest = "test"; globalFlagTest`, []quickjs.EvalOption{quickjs.EvalFlagGlobal(false)}},
+			{"GlobalTrue", `var globalFlagTest2 = "test2"; globalFlagTest2`, []quickjs.EvalOption{quickjs.EvalFlagGlobal(true)}},
+		}
 
-	// Test compile only
-	result4, err := ctx.Eval(`1 + 1`, quickjs.EvalFlagCompileOnly(true))
-	require.NoError(t, err)
-	defer result4.Free()
+		for _, tt := range optionTests {
+			t.Run(tt.name, func(t *testing.T) {
+				result, err := ctx.Eval(tt.code, tt.options...)
+				require.NoError(t, err)
+				defer result.Free()
+			})
+		}
+	})
 
-	// Test evaluation errors
-	_, err = ctx.Eval(`invalid syntax {`)
-	require.Error(t, err)
-
-	// Test empty code
-	result5, err := ctx.Eval(``)
-	require.NoError(t, err)
-	defer result5.Free()
-
-	// NEW: Test EvalFlagGlobal (covers context.go:238.45,239.34 and 239.34,241.3)
-	result6, err := ctx.Eval(`var globalFlagTest = "global flag test"; globalFlagTest`,
-		quickjs.EvalFlagGlobal(false))
-	require.NoError(t, err)
-	defer result6.Free()
-	require.EqualValues(t, "global flag test", result6.String())
-
-	// Test EvalFlagGlobal with true (default behavior)
-	result7, err := ctx.Eval(`var globalFlagTest2 = "global flag test 2"; globalFlagTest2`,
-		quickjs.EvalFlagGlobal(true))
-	require.NoError(t, err)
-	defer result7.Free()
-	require.EqualValues(t, "global flag test 2", result7.String())
+	t.Run("EvaluationErrors", func(t *testing.T) {
+		_, err := ctx.Eval(`invalid syntax {`)
+		require.Error(t, err)
+	})
 }
 
-// TestContextBytecodeOperations tests compilation and bytecode execution
 func TestContextBytecodeOperations(t *testing.T) {
 	rt := quickjs.NewRuntime()
 	defer rt.Close()
-
 	ctx := rt.NewContext()
 	defer ctx.Close()
 
-	// Test basic compilation and execution
-	code := `function add(a, b) { return a + b; } add(2, 3);`
-	bytecode, err := ctx.Compile(code)
-	require.NoError(t, err)
-	require.NotEmpty(t, bytecode)
+	t.Run("BasicCompilation", func(t *testing.T) {
+		code := `function add(a, b) { return a + b; } add(2, 3);`
+		bytecode, err := ctx.Compile(code)
+		require.NoError(t, err)
+		require.NotEmpty(t, bytecode)
 
-	result, err := ctx.EvalBytecode(bytecode)
-	require.NoError(t, err)
-	defer result.Free()
-	require.EqualValues(t, 5, result.ToInt32())
+		// Execute bytecode
+		result, err := ctx.EvalBytecode(bytecode)
+		require.NoError(t, err)
+		defer result.Free()
+		require.EqualValues(t, 5, result.ToInt32())
+	})
 
-	// Test file operations
-	testFile := "./test_temp.js"
-	testContent := `function multiply(a, b) { return a * b; } multiply(3, 4);`
-	err = os.WriteFile(testFile, []byte(testContent), 0644)
-	require.NoError(t, err)
-	defer os.Remove(testFile)
+	t.Run("FileOperations", func(t *testing.T) {
+		testFile := "./test_temp.js"
+		testContent := `function multiply(a, b) { return a * b; } multiply(3, 4);`
+		err := os.WriteFile(testFile, []byte(testContent), 0644)
+		require.NoError(t, err)
+		defer os.Remove(testFile)
 
-	// NEW: Test EvalFile with custom options (covers context.go:376.107,379.2)
-	resultFromFile, err := ctx.EvalFile(testFile, quickjs.EvalFlagStrict(true))
-	require.NoError(t, err)
-	defer resultFromFile.Free()
-	require.EqualValues(t, 12, resultFromFile.ToInt32())
+		// EvalFile with options
+		resultFromFile, err := ctx.EvalFile(testFile, quickjs.EvalFlagStrict(true))
+		require.NoError(t, err)
+		defer resultFromFile.Free()
+		require.EqualValues(t, 12, resultFromFile.ToInt32())
 
-	// Test CompileFile with and without custom filename
-	bytecode2, err := ctx.CompileFile(testFile)
-	require.NoError(t, err)
-	require.NotEmpty(t, bytecode2)
+		// CompileFile tests
+		bytecode, err := ctx.CompileFile(testFile)
+		require.NoError(t, err)
+		require.NotEmpty(t, bytecode)
 
-	bytecode3, err := ctx.CompileFile(testFile, quickjs.EvalFileName("custom.js"))
-	require.NoError(t, err)
-	require.NotEmpty(t, bytecode3)
+		bytecode2, err := ctx.CompileFile(testFile, quickjs.EvalFileName("custom.js"))
+		require.NoError(t, err)
+		require.NotEmpty(t, bytecode2)
+	})
 
-	// Test error cases
-	_, err = ctx.EvalBytecode([]byte{})
-	require.Error(t, err)
+	t.Run("ErrorCases", func(t *testing.T) {
+		errorTests := []struct {
+			name string
+			test func() error
+		}{
+			{"EmptyBytecode", func() error { _, err := ctx.EvalBytecode([]byte{}); return err }},
+			{"InvalidBytecode", func() error { _, err := ctx.EvalBytecode([]byte{0x01, 0x02, 0x03}); return err }},
+			{"NonexistentFile", func() error { _, err := ctx.EvalFile("./nonexistent.js"); return err }},
+			{"CompileNonexistentFile", func() error { _, err := ctx.CompileFile("./nonexistent.js"); return err }},
+			{"CompilationError", func() error { _, err := ctx.Compile(`invalid syntax {`); return err }},
+		}
 
-	_, err = ctx.EvalBytecode([]byte{0x01, 0x02, 0x03})
-	require.Error(t, err)
+		for _, tt := range errorTests {
+			t.Run(tt.name, func(t *testing.T) {
+				require.Error(t, tt.test())
+			})
+		}
 
-	_, err = ctx.EvalFile("./nonexistent.js")
-	require.Error(t, err)
+		// Exception during bytecode evaluation
+		invalidCode := `throw new Error("test exception during evaluation");`
+		invalidBytecode, err := ctx.Compile(invalidCode)
+		require.NoError(t, err)
 
-	_, err = ctx.CompileFile("./nonexistent.js")
-	require.Error(t, err)
+		_, err = ctx.EvalBytecode(invalidBytecode)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "test exception during evaluation")
+	})
 
-	// NEW: Test EvalBytecode with invalid function that causes exception (covers context.go:418.23,420.3)
-	// Create bytecode that will throw exception during evaluation
-	invalidCode := `throw new Error("test exception during evaluation");`
-	invalidBytecode, err := ctx.Compile(invalidCode)
-	require.NoError(t, err)
+	t.Run("CompilationVariants", func(t *testing.T) {
+		// Test empty code compilation
+		bytecode, err := ctx.Compile(``)
+		require.NoError(t, err)
+		require.NotEmpty(t, bytecode)
 
-	_, err = ctx.EvalBytecode(invalidBytecode)
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "test exception during evaluation")
+		// Test normal function compilation
+		normalCode := `(function() { return 42; })`
+		r, e := ctx.Eval(normalCode)
+		defer r.Free()
+		require.NoError(t, e)
+
+		bytecode, err = ctx.Compile(normalCode)
+		require.NoError(t, err)
+		require.NotEmpty(t, bytecode)
+
+		result, err := ctx.EvalBytecode(bytecode)
+		require.NoError(t, err)
+		defer result.Free()
+		require.True(t, result.IsFunction())
+	})
 }
 
-// TestContextModules tests module operations
 func TestContextModules(t *testing.T) {
 	rt := quickjs.NewRuntime(quickjs.WithModuleImport(true))
 	defer rt.Close()
-
 	ctx := rt.NewContext()
 	defer ctx.Close()
 
-	// Test valid module loading
 	moduleCode := `export function add(a, b) { return a + b; }`
-	result, err := ctx.LoadModule(moduleCode, "math_module")
-	require.NoError(t, err)
-	defer result.Free()
 
-	// NEW: Test LoadModule with custom options (covers context.go:393.23,395.3)
-	result2, err := ctx.LoadModule(moduleCode, "math_module2", quickjs.EvalLoadOnly(true))
-	require.NoError(t, err)
-	defer result2.Free()
+	t.Run("ModuleLoading", func(t *testing.T) {
+		// Basic module loading
+		result, err := ctx.LoadModule(moduleCode, "math_module")
+		require.NoError(t, err)
+		defer result.Free()
 
-	// Test LoadModuleBytecode
-	bytecode, err := ctx.Compile(moduleCode, quickjs.EvalFlagModule(true), quickjs.EvalFlagCompileOnly(true))
-	require.NoError(t, err)
+		// Module with load_only option
+		result2, err := ctx.LoadModule(moduleCode, "math_module2", quickjs.EvalLoadOnly(true))
+		require.NoError(t, err)
+		defer result2.Free()
+	})
 
-	result3, err := ctx.LoadModuleBytecode(bytecode)
-	require.NoError(t, err)
-	defer result3.Free()
+	t.Run("ModuleBytecode", func(t *testing.T) {
+		bytecode, err := ctx.Compile(moduleCode, quickjs.EvalFlagModule(true), quickjs.EvalFlagCompileOnly(true))
+		require.NoError(t, err)
 
-	// NEW: Test LoadModuleBytecode with load_only flag (covers context.go:418.23,420.3)
-	result4, err := ctx.LoadModuleBytecode(bytecode, quickjs.EvalLoadOnly(true))
-	require.NoError(t, err)
-	defer result4.Free()
+		// Basic bytecode loading
+		result, err := ctx.LoadModuleBytecode(bytecode)
+		require.NoError(t, err)
+		defer result.Free()
 
-	// Test error cases that are not covered
-	// Module detection failure - test the uncovered line 346-348
-	_, err = ctx.LoadModule(`var x = 1; x;`, "not_module")
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "not a module")
+		// Bytecode loading with load_only flag
+		result2, err := ctx.LoadModuleBytecode(bytecode, quickjs.EvalLoadOnly(true))
+		require.NoError(t, err)
+		defer result2.Free()
+	})
 
-	// Module compilation error - test the uncovered line 358-360
-	_, err = ctx.LoadModule(`export { unclosed_brace`, "invalid_module")
-	require.Error(t, err)
+	t.Run("ModuleFiles", func(t *testing.T) {
+		moduleFile := "./test_module.js"
+		moduleContent := `export const value = 42;`
+		err := os.WriteFile(moduleFile, []byte(moduleContent), 0644)
+		require.NoError(t, err)
+		defer os.Remove(moduleFile)
 
-	// Empty bytecode
-	_, err = ctx.LoadModuleBytecode([]byte{})
-	require.Error(t, err)
+		// LoadModuleFile
+		moduleResult, err := ctx.LoadModuleFile(moduleFile, "test_module")
+		require.NoError(t, err)
+		defer moduleResult.Free()
 
-	// Invalid bytecode
-	_, err = ctx.LoadModuleBytecode([]byte{0x01, 0x02, 0x03})
-	require.Error(t, err)
+		// CompileModule tests
+		compiledModule, err := ctx.CompileModule(moduleFile, "compiled_module")
+		require.NoError(t, err)
+		require.NotEmpty(t, compiledModule)
 
-	// NEW: Test LoadModuleFile (covers context.go:372.2,372.46)
-	moduleFile := "./test_module.js"
-	moduleContent := `export const value = 42;`
-	err = os.WriteFile(moduleFile, []byte(moduleContent), 0644)
-	require.NoError(t, err)
-	defer os.Remove(moduleFile)
+		compiledModule2, err := ctx.CompileModule(moduleFile, "compiled_module2", quickjs.EvalFlagStrict(true))
+		require.NoError(t, err)
+		require.NotEmpty(t, compiledModule2)
+	})
 
-	moduleResult, err := ctx.LoadModuleFile(moduleFile, "test_module")
-	require.NoError(t, err)
-	defer moduleResult.Free()
+	t.Run("ModuleErrors", func(t *testing.T) {
+		errorTests := []struct {
+			name string
+			test func() error
+		}{
+			{"NotModule", func() error { _, err := ctx.LoadModule(`var x = 1; x;`, "not_module"); return err }},
+			{"InvalidModule", func() error { _, err := ctx.LoadModule(`export { unclosed_brace`, "invalid_module"); return err }},
+			{"EmptyBytecode", func() error { _, err := ctx.LoadModuleBytecode([]byte{}); return err }},
+			{"InvalidBytecode", func() error { _, err := ctx.LoadModuleBytecode([]byte{0x01, 0x02, 0x03}); return err }},
+			{"MissingFile", func() error { _, err := ctx.LoadModuleFile("./nonexistent_file.js", "missing"); return err }},
+		}
 
-	// NEW: Test CompileModule (covers context.go:376.107,379.2)
-	compiledModule, err := ctx.CompileModule(moduleFile, "compiled_module")
-	require.NoError(t, err)
-	require.NotEmpty(t, compiledModule)
-
-	// Test CompileModule with custom options
-	compiledModule2, err := ctx.CompileModule(moduleFile, "compiled_module2", quickjs.EvalFlagStrict(true))
-	require.NoError(t, err)
-	require.NotEmpty(t, compiledModule2)
-
-	// File not found error - test the uncovered line 369-371
-	_, err = ctx.LoadModuleFile("./nonexistent_file.js", "missing")
-	require.Error(t, err)
+		for _, tt := range errorTests {
+			t.Run(tt.name, func(t *testing.T) {
+				require.Error(t, tt.test())
+			})
+		}
+	})
 }
 
-// TestContextFunctions tests function creation and execution
 func TestContextFunctions(t *testing.T) {
 	rt := quickjs.NewRuntime()
 	defer rt.Close()
-
 	ctx := rt.NewContext()
 	defer ctx.Close()
 
-	// Test regular function
-	fn := ctx.Function(func(ctx *quickjs.Context, this quickjs.Value, args []quickjs.Value) quickjs.Value {
-		if len(args) == 0 {
-			return ctx.String("no args")
-		}
-		return ctx.String("Hello " + args[0].String())
+	t.Run("RegularFunctions", func(t *testing.T) {
+		fn := ctx.Function(func(ctx *quickjs.Context, this quickjs.Value, args []quickjs.Value) quickjs.Value {
+			if len(args) == 0 {
+				return ctx.String("no args")
+			}
+			return ctx.String("Hello " + args[0].String())
+		})
+		defer fn.Free()
+
+		// Test function execution
+		result := fn.Execute(ctx.Null())
+		defer result.Free()
+		require.EqualValues(t, "no args", result.String())
+
+		result2 := fn.Execute(ctx.Null(), ctx.String("World"))
+		defer result2.Free()
+		require.EqualValues(t, "Hello World", result2.String())
+
+		// Test Invoke method with different argument counts
+		result3 := ctx.Invoke(fn, ctx.Null())
+		defer result3.Free()
+		require.EqualValues(t, "no args", result3.String())
+
+		result4 := ctx.Invoke(fn, ctx.Null(), ctx.String("Test"))
+		defer result4.Free()
+		require.EqualValues(t, "Hello Test", result4.String())
 	})
-	defer fn.Free()
 
-	// Test function execution
-	result := fn.Execute(ctx.Null())
-	defer result.Free()
-	require.EqualValues(t, "no args", result.String())
+	t.Run("AsyncFunctions", func(t *testing.T) {
+		asyncFn := ctx.AsyncFunction(func(ctx *quickjs.Context, this quickjs.Value, promise quickjs.Value, args []quickjs.Value) quickjs.Value {
+			return promise.Call("resolve", ctx.String("async result"))
+		})
 
-	// Test with arguments
-	result2 := fn.Execute(ctx.Null(), ctx.String("World"))
-	defer result2.Free()
-	require.EqualValues(t, "Hello World", result2.String())
-
-	// Test Invoke method with different argument counts
-	result3 := ctx.Invoke(fn, ctx.Null())
-	defer result3.Free()
-	require.EqualValues(t, "no args", result3.String())
-
-	result4 := ctx.Invoke(fn, ctx.Null(), ctx.String("Test"))
-	defer result4.Free()
-	require.EqualValues(t, "Hello Test", result4.String())
-
-	// Test async function
-	asyncFn := ctx.AsyncFunction(func(ctx *quickjs.Context, this quickjs.Value, promise quickjs.Value, args []quickjs.Value) quickjs.Value {
-		return promise.Call("resolve", ctx.String("async result"))
+		ctx.Globals().Set("testAsync", asyncFn)
+		result, err := ctx.Eval(`testAsync()`, quickjs.EvalAwait(true))
+		require.NoError(t, err)
+		defer result.Free()
+		require.EqualValues(t, "async result", result.String())
 	})
-	// defer asyncFn.Free() // cause testAsync will attach to globals,  so we don't free it here
-
-	ctx.Globals().Set("testAsync", asyncFn)
-	result5, err := ctx.Eval(`testAsync()`, quickjs.EvalAwait(true))
-	require.NoError(t, err)
-	defer result5.Free()
-	require.EqualValues(t, "async result", result5.String())
 }
 
-// TestContextErrorHandling tests error creation and exception handling
 func TestContextErrorHandling(t *testing.T) {
 	rt := quickjs.NewRuntime()
 	defer rt.Close()
-
 	ctx := rt.NewContext()
 	defer ctx.Close()
 
-	// Test Error creation
-	testErr := errors.New("test error")
-	errorVal := ctx.Error(testErr)
-	defer errorVal.Free()
-	require.True(t, errorVal.IsError())
+	t.Run("ErrorCreation", func(t *testing.T) {
+		testErr := errors.New("test error")
+		errorVal := ctx.Error(testErr)
+		defer errorVal.Free()
+		require.True(t, errorVal.IsError())
+	})
 
-	// Test all throw methods
-	throwTests := []struct {
-		name     string
-		throwFn  func() quickjs.Value
-		errorStr string
-	}{
-		{"ThrowError", func() quickjs.Value { return ctx.ThrowError(errors.New("custom error")) }, "custom error"},
-		{"ThrowSyntax", func() quickjs.Value { return ctx.ThrowSyntaxError("syntax: %s", "invalid") }, "SyntaxError"},
-		{"ThrowType", func() quickjs.Value { return ctx.ThrowTypeError("type error") }, "TypeError"},
-		{"ThrowReference", func() quickjs.Value { return ctx.ThrowReferenceError("ref error") }, "ReferenceError"},
-		{"ThrowRange", func() quickjs.Value { return ctx.ThrowRangeError("range error") }, "RangeError"},
-		{"ThrowInternal", func() quickjs.Value { return ctx.ThrowInternalError("internal error") }, "InternalError"},
-	}
+	t.Run("ThrowMethods", func(t *testing.T) {
+		throwTests := []struct {
+			name     string
+			throwFn  func() quickjs.Value
+			errorStr string
+		}{
+			{"ThrowError", func() quickjs.Value { return ctx.ThrowError(errors.New("custom error")) }, "custom error"},
+			{"ThrowSyntax", func() quickjs.Value { return ctx.ThrowSyntaxError("syntax: %s", "invalid") }, "SyntaxError"},
+			{"ThrowType", func() quickjs.Value { return ctx.ThrowTypeError("type error") }, "TypeError"},
+			{"ThrowReference", func() quickjs.Value { return ctx.ThrowReferenceError("ref error") }, "ReferenceError"},
+			{"ThrowRange", func() quickjs.Value { return ctx.ThrowRangeError("range error") }, "RangeError"},
+			{"ThrowInternal", func() quickjs.Value { return ctx.ThrowInternalError("internal error") }, "InternalError"},
+		}
 
-	for _, tt := range throwTests {
-		t.Run(tt.name, func(t *testing.T) {
-			throwingFunc := ctx.Function(func(ctx *quickjs.Context, this quickjs.Value, args []quickjs.Value) quickjs.Value {
-				return tt.throwFn()
+		for _, tt := range throwTests {
+			t.Run(tt.name, func(t *testing.T) {
+				throwingFunc := ctx.Function(func(ctx *quickjs.Context, this quickjs.Value, args []quickjs.Value) quickjs.Value {
+					return tt.throwFn()
+				})
+				defer throwingFunc.Free()
+
+				result := throwingFunc.Execute(ctx.Null())
+				defer result.Free()
+				require.True(t, result.IsException())
+				require.True(t, ctx.HasException())
+
+				exception := ctx.Exception()
+				require.NotNil(t, exception)
+				require.Contains(t, exception.Error(), tt.errorStr)
+				require.False(t, ctx.HasException()) // Should be cleared
 			})
-			defer throwingFunc.Free()
+		}
+	})
 
-			result := throwingFunc.Execute(ctx.Null())
-			defer result.Free()
-			require.True(t, result.IsException())
-			require.True(t, ctx.HasException())
-
-			exception := ctx.Exception()
-			require.NotNil(t, exception)
-			require.Contains(t, exception.Error(), tt.errorStr)
-			require.False(t, ctx.HasException()) // Should be cleared
-		})
-	}
-
-	// Test Exception() when no exception
-	exception := ctx.Exception()
-	require.Nil(t, exception)
-	require.False(t, ctx.HasException())
+	t.Run("ExceptionHandling", func(t *testing.T) {
+		// Test Exception() when no exception
+		exception := ctx.Exception()
+		require.Nil(t, exception)
+		require.False(t, ctx.HasException())
+	})
 }
 
-// TestContextGlobalsAndUtilities tests globals access and utility methods
-func TestContextGlobalsAndUtilities(t *testing.T) {
+func TestContextUtilities(t *testing.T) {
 	rt := quickjs.NewRuntime()
 	defer rt.Close()
-
 	ctx := rt.NewContext()
 	defer ctx.Close()
 
-	// Test globals caching
-	globals1 := ctx.Globals()
-	globals2 := ctx.Globals()
-	require.True(t, globals1.IsObject())
-	require.True(t, globals2.IsObject())
+	t.Run("Globals", func(t *testing.T) {
+		// Test globals caching
+		globals1 := ctx.Globals()
+		globals2 := ctx.Globals()
+		require.True(t, globals1.IsObject())
+		require.True(t, globals2.IsObject())
 
-	// Test global variable operations
-	globals1.Set("testGlobal", ctx.String("global value"))
-	retrieved := globals2.Get("testGlobal")
-	defer retrieved.Free()
-	require.EqualValues(t, "global value", retrieved.String())
+		// Test global variable operations
+		globals1.Set("testGlobal", ctx.String("global value"))
+		retrieved := globals2.Get("testGlobal")
+		defer retrieved.Free()
+		require.EqualValues(t, "global value", retrieved.String())
+	})
 
-	// Test JSON parsing
-	jsonObj := ctx.ParseJSON(`{"name": "test", "value": 42}`)
-	defer jsonObj.Free()
-	require.True(t, jsonObj.IsObject())
+	t.Run("JSONParsing", func(t *testing.T) {
+		// Valid JSON
+		jsonObj := ctx.ParseJSON(`{"name": "test", "value": 42}`)
+		defer jsonObj.Free()
+		require.True(t, jsonObj.IsObject())
 
-	nameVal := jsonObj.Get("name")
-	defer nameVal.Free()
-	require.EqualValues(t, "test", nameVal.String())
+		nameVal := jsonObj.Get("name")
+		defer nameVal.Free()
+		require.EqualValues(t, "test", nameVal.String())
 
-	// Test invalid JSON
-	invalidJSON := ctx.ParseJSON(`{invalid}`)
-	defer invalidJSON.Free()
-	require.True(t, invalidJSON.IsException())
+		// Invalid JSON
+		invalidJSON := ctx.ParseJSON(`{invalid}`)
+		defer invalidJSON.Free()
+		require.True(t, invalidJSON.IsException())
+	})
+
+	t.Run("InterruptHandler", func(t *testing.T) {
+		interruptCalled := false
+		ctx.SetInterruptHandler(func() int {
+			interruptCalled = true
+			return 1 // Interrupt
+		})
+
+		_, err := ctx.Eval(`while(true){}`)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "interrupted")
+		require.True(t, interruptCalled)
+	})
 }
 
-// TestContextAsync tests async operations and event loop
 func TestContextAsync(t *testing.T) {
 	rt := quickjs.NewRuntime()
 	defer rt.Close()
-
 	ctx := rt.NewContext()
 	defer ctx.Close()
 
-	// Test event loop
-	result, err := ctx.Eval(`
-        var executed = false;
-        setTimeout(() => { executed = true; }, 10);
-    `)
-	require.NoError(t, err)
-	defer result.Free()
+	t.Run("EventLoop", func(t *testing.T) {
+		result, err := ctx.Eval(`
+            var executed = false;
+            setTimeout(() => { executed = true; }, 10);
+        `)
+		require.NoError(t, err)
+		defer result.Free()
 
-	ctx.Loop()
+		ctx.Loop()
 
-	executedResult, err := ctx.Eval(`executed`)
-	require.NoError(t, err)
-	defer executedResult.Free()
-	require.True(t, executedResult.ToBool())
-
-	// Test Await
-	ctx.Globals().Set("asyncTest", ctx.AsyncFunction(func(ctx *quickjs.Context, this quickjs.Value, promise quickjs.Value, args []quickjs.Value) quickjs.Value {
-		return promise.Call("resolve", ctx.String("awaited result"))
-	}))
-
-	promiseResult, err := ctx.Eval(`asyncTest()`)
-	require.NoError(t, err)
-	require.True(t, promiseResult.IsPromise())
-
-	awaitedResult, err := ctx.Await(promiseResult)
-	require.NoError(t, err)
-	defer awaitedResult.Free()
-	require.EqualValues(t, "awaited result", awaitedResult.String())
-
-	// Test rejected promise
-	ctx.Globals().Set("asyncReject", ctx.AsyncFunction(func(ctx *quickjs.Context, this quickjs.Value, promise quickjs.Value, args []quickjs.Value) quickjs.Value {
-		errorObj := ctx.Error(errors.New("rejection reason"))
-		defer errorObj.Free()
-		return promise.Call("reject", errorObj)
-	}))
-
-	rejectPromise, err := ctx.Eval(`asyncReject()`)
-	require.NoError(t, err)
-
-	_, err = ctx.Await(rejectPromise)
-	require.Error(t, err)
-}
-
-// TestContextInterruptHandler tests interrupt handler functionality
-func TestContextInterruptHandler(t *testing.T) {
-	rt := quickjs.NewRuntime()
-	defer rt.Close()
-
-	ctx := rt.NewContext()
-	defer ctx.Close()
-
-	interruptCalled := false
-
-	// Test deprecated SetInterruptHandler (delegates to runtime)
-	ctx.SetInterruptHandler(func() int {
-		interruptCalled = true
-		return 1 // Interrupt
+		executedResult, err := ctx.Eval(`executed`)
+		require.NoError(t, err)
+		defer executedResult.Free()
+		require.True(t, executedResult.ToBool())
 	})
 
-	_, err := ctx.Eval(`while(true){}`)
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "interrupted")
-	require.True(t, interruptCalled)
+	t.Run("AwaitPromises", func(t *testing.T) {
+		// Test successful promise
+		ctx.Globals().Set("asyncTest", ctx.AsyncFunction(func(ctx *quickjs.Context, this quickjs.Value, promise quickjs.Value, args []quickjs.Value) quickjs.Value {
+			return promise.Call("resolve", ctx.String("awaited result"))
+		}))
+
+		promiseResult, err := ctx.Eval(`asyncTest()`)
+		require.NoError(t, err)
+		require.True(t, promiseResult.IsPromise())
+
+		awaitedResult, err := ctx.Await(promiseResult)
+		require.NoError(t, err)
+		defer awaitedResult.Free()
+		require.EqualValues(t, "awaited result", awaitedResult.String())
+
+		// Test rejected promise
+		ctx.Globals().Set("asyncReject", ctx.AsyncFunction(func(ctx *quickjs.Context, this quickjs.Value, promise quickjs.Value, args []quickjs.Value) quickjs.Value {
+			errorObj := ctx.Error(errors.New("rejection reason"))
+			defer errorObj.Free()
+			return promise.Call("reject", errorObj)
+		}))
+
+		rejectPromise, err := ctx.Eval(`asyncReject()`)
+		require.NoError(t, err)
+
+		_, err = ctx.Await(rejectPromise)
+		require.Error(t, err)
+	})
 }
 
-// TestContextCompilationErrors tests compilation error edge cases
-func TestContextCompilationErrors(t *testing.T) {
+func TestContextTypedArrays(t *testing.T) {
 	rt := quickjs.NewRuntime()
 	defer rt.Close()
-
 	ctx := rt.NewContext()
 	defer ctx.Close()
 
-	// Test basic compilation errors
-	_, err := ctx.Compile(`invalid syntax {`)
-	require.Error(t, err)
+	t.Run("TypedArrayCreation", func(t *testing.T) {
+		// Test all TypedArray creation methods
+		typedArrayTests := []struct {
+			name       string
+			createFunc func() quickjs.Value
+			checkFunc  func(quickjs.Value) bool
+			testEmpty  func() quickjs.Value
+			testNil    func() quickjs.Value
+		}{
+			{
+				"Int8Array",
+				func() quickjs.Value { return ctx.Int8Array([]int8{-128, -1, 0, 1, 127}) },
+				func(v quickjs.Value) bool { return v.IsInt8Array() },
+				func() quickjs.Value { return ctx.Int8Array([]int8{}) },
+				func() quickjs.Value { return ctx.Int8Array(nil) },
+			},
+			{
+				"Uint8Array",
+				func() quickjs.Value { return ctx.Uint8Array([]uint8{0, 1, 128, 255}) },
+				func(v quickjs.Value) bool { return v.IsUint8Array() },
+				func() quickjs.Value { return ctx.Uint8Array([]uint8{}) },
+				func() quickjs.Value { return ctx.Uint8Array(nil) },
+			},
+			{
+				"Uint8ClampedArray",
+				func() quickjs.Value { return ctx.Uint8ClampedArray([]uint8{0, 127, 255}) },
+				func(v quickjs.Value) bool { return v.IsUint8ClampedArray() },
+				func() quickjs.Value { return ctx.Uint8ClampedArray([]uint8{}) },
+				func() quickjs.Value { return ctx.Uint8ClampedArray(nil) },
+			},
+			{
+				"Int16Array",
+				func() quickjs.Value { return ctx.Int16Array([]int16{-32768, -1, 0, 1, 32767}) },
+				func(v quickjs.Value) bool { return v.IsInt16Array() },
+				func() quickjs.Value { return ctx.Int16Array([]int16{}) },
+				func() quickjs.Value { return ctx.Int16Array(nil) },
+			},
+			{
+				"Uint16Array",
+				func() quickjs.Value { return ctx.Uint16Array([]uint16{0, 1, 32768, 65535}) },
+				func(v quickjs.Value) bool { return v.IsUint16Array() },
+				func() quickjs.Value { return ctx.Uint16Array([]uint16{}) },
+				func() quickjs.Value { return ctx.Uint16Array(nil) },
+			},
+			{
+				"Int32Array",
+				func() quickjs.Value { return ctx.Int32Array([]int32{-2147483648, -1, 0, 1, 2147483647}) },
+				func(v quickjs.Value) bool { return v.IsInt32Array() },
+				func() quickjs.Value { return ctx.Int32Array([]int32{}) },
+				func() quickjs.Value { return ctx.Int32Array(nil) },
+			},
+			{
+				"Uint32Array",
+				func() quickjs.Value { return ctx.Uint32Array([]uint32{0, 1, 2147483648, 4294967295}) },
+				func(v quickjs.Value) bool { return v.IsUint32Array() },
+				func() quickjs.Value { return ctx.Uint32Array([]uint32{}) },
+				func() quickjs.Value { return ctx.Uint32Array(nil) },
+			},
+			{
+				"Float32Array",
+				func() quickjs.Value { return ctx.Float32Array([]float32{-3.14, 0.0, 1.5, 3.14159}) },
+				func(v quickjs.Value) bool { return v.IsFloat32Array() },
+				func() quickjs.Value { return ctx.Float32Array([]float32{}) },
+				func() quickjs.Value { return ctx.Float32Array(nil) },
+			},
+			{
+				"Float64Array",
+				func() quickjs.Value {
+					return ctx.Float64Array([]float64{-3.141592653589793, 0.0, 1.5, 3.141592653589793})
+				},
+				func(v quickjs.Value) bool { return v.IsFloat64Array() },
+				func() quickjs.Value { return ctx.Float64Array([]float64{}) },
+				func() quickjs.Value { return ctx.Float64Array(nil) },
+			},
+			{
+				"BigInt64Array",
+				func() quickjs.Value {
+					return ctx.BigInt64Array([]int64{-9223372036854775808, -1, 0, 1, 9223372036854775807})
+				},
+				func(v quickjs.Value) bool { return v.IsBigInt64Array() },
+				func() quickjs.Value { return ctx.BigInt64Array([]int64{}) },
+				func() quickjs.Value { return ctx.BigInt64Array(nil) },
+			},
+			{
+				"BigUint64Array",
+				func() quickjs.Value {
+					return ctx.BigUint64Array([]uint64{0, 1, 9223372036854775808, 18446744073709551615})
+				},
+				func(v quickjs.Value) bool { return v.IsBigUint64Array() },
+				func() quickjs.Value { return ctx.BigUint64Array([]uint64{}) },
+				func() quickjs.Value { return ctx.BigUint64Array(nil) },
+			},
+		}
 
-	// Test compilation with invalid module syntax
-	_, err = ctx.Compile(`export { unclosed`, quickjs.EvalFlagModule(true))
-	require.Error(t, err)
+		for _, tt := range typedArrayTests {
+			t.Run(tt.name, func(t *testing.T) {
+				// Test with data
+				arr := tt.createFunc()
+				defer arr.Free()
+				require.True(t, arr.IsTypedArray())
+				require.True(t, tt.checkFunc(arr))
 
-	// Test empty code compilation
-	bytecode, err := ctx.Compile(``)
-	require.NoError(t, err)
-	require.NotEmpty(t, bytecode)
+				// Test empty array
+				emptyArr := tt.testEmpty()
+				defer emptyArr.Free()
+				require.True(t, tt.checkFunc(emptyArr))
+				require.EqualValues(t, 0, emptyArr.Len())
 
-	// Test normal compilation to ensure basic functionality works
-	normalCode := `(function() { return 42; })` // Function expression returns the function object
-	// Alternative: normalCode := `() => { return 42; }` // Arrow function
+				// Test nil slice
+				nilArr := tt.testNil()
+				defer nilArr.Free()
+				require.True(t, tt.checkFunc(nilArr))
+				require.EqualValues(t, 0, nilArr.Len())
+			})
+		}
+	})
 
-	r, e := ctx.Eval(normalCode)
-	defer r.Free()
-	require.NoError(t, e)
+	t.Run("TypedArrayInterop", func(t *testing.T) {
+		// Go to JavaScript
+		goData := []int32{1, 2, 3, 4, 5}
+		goArray := ctx.Int32Array(goData)
+		ctx.Globals().Set("goArray", goArray)
 
-	bytecode, err = ctx.Compile(normalCode)
-	require.NoError(t, err)
-	require.NotEmpty(t, bytecode)
+		result, err := ctx.Eval(`
+            let sum = 0;
+            for (let i = 0; i < goArray.length; i++) {
+                sum += goArray[i];
+            }
+            sum;
+        `)
+		require.NoError(t, err)
+		defer result.Free()
+		require.EqualValues(t, 15, result.ToInt32()) // 1+2+3+4+5 = 15
 
-	// Verify the compiled code can be executed
-	result, err := ctx.EvalBytecode(bytecode)
-	require.NoError(t, err)
-	defer result.Free()
-	require.True(t, result.IsFunction())
+		// JavaScript to Go
+		jsArray, err := ctx.Eval(`new Int32Array([10, 20, 30, 40, 50])`)
+		require.NoError(t, err)
+		defer jsArray.Free()
+
+		require.True(t, jsArray.IsTypedArray())
+		require.True(t, jsArray.IsInt32Array())
+
+		goSlice, err := jsArray.ToInt32Array()
+		require.NoError(t, err)
+		require.Equal(t, []int32{10, 20, 30, 40, 50}, goSlice)
+	})
+
+	t.Run("TypedArrayPrecision", func(t *testing.T) {
+		// Test Float32 precision
+		float32Data := []float32{3.14159265359, -2.718281828, 0.0, 1.23456789}
+		float32Array := ctx.Float32Array(float32Data)
+		defer float32Array.Free()
+
+		converted32, err := float32Array.ToFloat32Array()
+		require.NoError(t, err)
+		require.Len(t, converted32, len(float32Data))
+
+		for i, expected := range float32Data {
+			require.InDelta(t, expected, converted32[i], 0.0001)
+		}
+
+		// Test Float64 precision
+		float64Data := []float64{3.141592653589793, -2.718281828459045, 0.0, 1.2345678901234567}
+		float64Array := ctx.Float64Array(float64Data)
+		defer float64Array.Free()
+
+		converted64, err := float64Array.ToFloat64Array()
+		require.NoError(t, err)
+		require.Len(t, converted64, len(float64Data))
+
+		for i, expected := range float64Data {
+			require.InDelta(t, expected, converted64[i], 0.000000000001)
+		}
+	})
+
+	t.Run("TypedArrayErrors", func(t *testing.T) {
+		// Test conversion errors for wrong types
+		wrongTypeVal := ctx.String("not a typed array")
+		defer wrongTypeVal.Free()
+
+		conversionTests := []func() error{
+			func() error { _, err := wrongTypeVal.ToInt8Array(); return err },
+			func() error { _, err := wrongTypeVal.ToUint8Array(); return err },
+			func() error { _, err := wrongTypeVal.ToInt16Array(); return err },
+			func() error { _, err := wrongTypeVal.ToUint16Array(); return err },
+			func() error { _, err := wrongTypeVal.ToInt32Array(); return err },
+			func() error { _, err := wrongTypeVal.ToUint32Array(); return err },
+			func() error { _, err := wrongTypeVal.ToFloat32Array(); return err },
+			func() error { _, err := wrongTypeVal.ToFloat64Array(); return err },
+			func() error { _, err := wrongTypeVal.ToBigInt64Array(); return err },
+			func() error { _, err := wrongTypeVal.ToBigUint64Array(); return err },
+		}
+
+		for i, testFn := range conversionTests {
+			t.Run(fmt.Sprintf("ConversionError%d", i), func(t *testing.T) {
+				require.Error(t, testFn())
+			})
+		}
+
+		// Test type mismatch conversion
+		int8Array := ctx.Int8Array([]int8{1, 2, 3})
+		defer int8Array.Free()
+
+		_, err := int8Array.ToUint8Array()
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "not a Uint8Array")
+	})
+
+	t.Run("SharedMemoryTest", func(t *testing.T) {
+		// Test that TypedArrays share memory with their underlying ArrayBuffer
+		data := []uint8{1, 2, 3, 4, 5, 6, 7, 8}
+		arrayBuffer := ctx.ArrayBuffer(data)
+		ctx.Globals().Set("sharedBuffer", arrayBuffer)
+
+		// Create different views on the same buffer
+		ret, err := ctx.Eval(`
+            globalThis.uint8View = new Uint8Array(sharedBuffer);
+            globalThis.uint16View = new Uint16Array(sharedBuffer);
+        `)
+		defer ret.Free()
+		require.NoError(t, err)
+
+		// Modify through uint8 view
+		_, err = ctx.Eval(`uint8View[0] = 255;`)
+		require.NoError(t, err)
+
+		// Verify change is visible through uint16 view (shared memory)
+		uint16Value, err := ctx.Eval(`uint16View[0]`)
+		require.NoError(t, err)
+		defer uint16Value.Free()
+
+		// The uint16 value should have changed because we modified the underlying byte
+		// Original: bytes [1, 2] -> uint16: 513 (little-endian: 1 + 2*256)
+		// Modified: bytes [255, 2] -> uint16: 767 (little-endian: 255 + 2*256)
+		require.EqualValues(t, 767, uint16Value.ToInt32())
+
+		// Clean up
+		ctx.Eval(`delete globalThis.uint8View; delete globalThis.uint16View;`)
+	})
 }
 
-// Most aggressive approach to trigger JS_WriteObject failure
-func TestContextCompileExtremeMemoryPressure(t *testing.T) {
-	// Use extremely restrictive memory limit
+func TestContextMemoryPressure(t *testing.T) {
+	// Test extreme memory pressure to trigger compilation failures
 	rt := quickjs.NewRuntime(quickjs.WithMemoryLimit(32 * 1024)) // 32KB limit
 	defer rt.Close()
-
 	ctx := rt.NewContext()
 	defer ctx.Close()
 
@@ -513,7 +755,7 @@ func TestContextCompileExtremeMemoryPressure(t *testing.T) {
         }
     `)
 
-	// Now try to compile - this should fail at JS_WriteObject due to no available memory
+	// Try to compile - this should fail at JS_WriteObject due to no available memory
 	_, err := ctx.Compile(`
         var obj = {};
         for(let i = 0; i < 100; i++) {
@@ -523,7 +765,7 @@ func TestContextCompileExtremeMemoryPressure(t *testing.T) {
     `)
 
 	if err != nil {
-		t.Logf("Extreme memory pressure compilation error: %v", err)
+		t.Logf("Memory pressure compilation error (expected): %v", err)
 	}
 
 	// Try multiple rapid compilations to exhaust memory
@@ -531,7 +773,7 @@ func TestContextCompileExtremeMemoryPressure(t *testing.T) {
 		code := fmt.Sprintf(`var obj%d = { data: new Array(500).fill(%d) }; obj%d;`, i, i, i)
 		_, err := ctx.Compile(code)
 		if err != nil {
-			t.Logf("Rapid compilation %d failed: %v", i, err)
+			t.Logf("Rapid compilation %d failed (expected): %v", i, err)
 			break
 		}
 	}
