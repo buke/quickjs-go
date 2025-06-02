@@ -536,3 +536,556 @@ func TestContextCompileExtremeMemoryPressure(t *testing.T) {
 		}
 	}
 }
+
+// TestContextTypedArrayCreation tests TypedArray creation from Go types
+func TestContextTypedArrayCreation(t *testing.T) {
+	rt := quickjs.NewRuntime()
+	defer rt.Close()
+
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	t.Run("Int8Array", func(t *testing.T) {
+		// Test with data
+		data := []int8{-128, -1, 0, 1, 127}
+		arr := ctx.Int8Array(data)
+		defer arr.Free()
+
+		require.True(t, arr.IsTypedArray())
+		require.True(t, arr.IsInt8Array())
+		require.False(t, arr.IsUint8Array())
+		require.EqualValues(t, len(data), arr.Len())
+
+		// Test empty array
+		emptyArr := ctx.Int8Array([]int8{})
+		defer emptyArr.Free()
+		require.True(t, emptyArr.IsInt8Array())
+		require.EqualValues(t, 0, emptyArr.Len())
+
+		// Test nil slice
+		nilArr := ctx.Int8Array(nil)
+		defer nilArr.Free()
+		require.True(t, nilArr.IsInt8Array())
+		require.EqualValues(t, 0, nilArr.Len())
+	})
+
+	t.Run("Uint8Array", func(t *testing.T) {
+		data := []uint8{0, 1, 128, 255}
+		arr := ctx.Uint8Array(data)
+		defer arr.Free()
+
+		require.True(t, arr.IsTypedArray())
+		require.True(t, arr.IsUint8Array())
+		require.False(t, arr.IsInt8Array())
+		require.EqualValues(t, len(data), arr.Len())
+
+		// Test empty array
+		emptyArr := ctx.Uint8Array([]uint8{})
+		defer emptyArr.Free()
+		require.True(t, emptyArr.IsUint8Array())
+		require.EqualValues(t, 0, emptyArr.Len())
+	})
+
+	t.Run("Uint8ClampedArray", func(t *testing.T) {
+		data := []uint8{0, 127, 255}
+		arr := ctx.Uint8ClampedArray(data)
+		defer arr.Free()
+
+		require.True(t, arr.IsTypedArray())
+		require.True(t, arr.IsUint8ClampedArray())
+		require.False(t, arr.IsUint8Array())
+		require.EqualValues(t, len(data), arr.Len())
+
+		// Test empty array
+		emptyArr := ctx.Uint8ClampedArray([]uint8{})
+		defer emptyArr.Free()
+		require.True(t, emptyArr.IsUint8ClampedArray())
+		require.EqualValues(t, 0, emptyArr.Len())
+
+		// Test nil slice
+		nilArr := ctx.Uint8ClampedArray(nil)
+		defer nilArr.Free()
+		require.True(t, nilArr.IsUint8ClampedArray())
+		require.EqualValues(t, 0, nilArr.Len())
+	})
+
+	t.Run("Int16Array", func(t *testing.T) {
+		data := []int16{-32768, -1, 0, 1, 32767}
+		arr := ctx.Int16Array(data)
+		defer arr.Free()
+
+		require.True(t, arr.IsTypedArray())
+		require.True(t, arr.IsInt16Array())
+		require.False(t, arr.IsUint16Array())
+		require.EqualValues(t, len(data), arr.Len())
+	})
+
+	t.Run("Uint16Array", func(t *testing.T) {
+		data := []uint16{0, 1, 32768, 65535}
+		arr := ctx.Uint16Array(data)
+		defer arr.Free()
+
+		require.True(t, arr.IsTypedArray())
+		require.True(t, arr.IsUint16Array())
+		require.False(t, arr.IsInt16Array())
+		require.EqualValues(t, len(data), arr.Len())
+	})
+
+	t.Run("Int32Array", func(t *testing.T) {
+		data := []int32{-2147483648, -1, 0, 1, 2147483647}
+		arr := ctx.Int32Array(data)
+		defer arr.Free()
+
+		require.True(t, arr.IsTypedArray())
+		require.True(t, arr.IsInt32Array())
+		require.False(t, arr.IsUint32Array())
+		require.EqualValues(t, len(data), arr.Len())
+	})
+
+	t.Run("Uint32Array", func(t *testing.T) {
+		data := []uint32{0, 1, 2147483648, 4294967295}
+		arr := ctx.Uint32Array(data)
+		defer arr.Free()
+
+		require.True(t, arr.IsTypedArray())
+		require.True(t, arr.IsUint32Array())
+		require.False(t, arr.IsInt32Array())
+		require.EqualValues(t, len(data), arr.Len())
+	})
+
+	t.Run("Float32Array", func(t *testing.T) {
+		data := []float32{-3.14, 0.0, 1.5, 3.14159}
+		arr := ctx.Float32Array(data)
+		defer arr.Free()
+
+		require.True(t, arr.IsTypedArray())
+		require.True(t, arr.IsFloat32Array())
+		require.False(t, arr.IsFloat64Array())
+		require.EqualValues(t, len(data), arr.Len())
+	})
+
+	t.Run("Float64Array", func(t *testing.T) {
+		data := []float64{-3.141592653589793, 0.0, 1.5, 3.141592653589793}
+		arr := ctx.Float64Array(data)
+		defer arr.Free()
+
+		require.True(t, arr.IsTypedArray())
+		require.True(t, arr.IsFloat64Array())
+		require.False(t, arr.IsFloat32Array())
+		require.EqualValues(t, len(data), arr.Len())
+	})
+
+	t.Run("BigInt64Array", func(t *testing.T) {
+		data := []int64{-9223372036854775808, -1, 0, 1, 9223372036854775807}
+		arr := ctx.BigInt64Array(data)
+		defer arr.Free()
+
+		require.True(t, arr.IsTypedArray())
+		require.True(t, arr.IsBigInt64Array())
+		require.False(t, arr.IsBigUint64Array())
+		require.EqualValues(t, len(data), arr.Len())
+	})
+
+	t.Run("BigUint64Array", func(t *testing.T) {
+		data := []uint64{0, 1, 9223372036854775808, 18446744073709551615}
+		arr := ctx.BigUint64Array(data)
+		defer arr.Free()
+
+		require.True(t, arr.IsTypedArray())
+		require.True(t, arr.IsBigUint64Array())
+		require.False(t, arr.IsBigInt64Array())
+		require.EqualValues(t, len(data), arr.Len())
+	})
+}
+
+// TestContextTypedArrayInterop tests TypedArray interoperability between Go and JavaScript
+func TestContextTypedArrayInterop(t *testing.T) {
+	rt := quickjs.NewRuntime()
+	defer rt.Close()
+
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	t.Run("GoToJavaScript", func(t *testing.T) {
+		// Create TypedArray in Go and use in JavaScript
+		goData := []int32{1, 2, 3, 4, 5}
+		goArray := ctx.Int32Array(goData)
+		// defer goArray.Free()
+
+		// Set in global scope
+		ctx.Globals().Set("goArray", goArray)
+
+		// Use in JavaScript
+		result, err := ctx.Eval(`
+		    let sum = 0;
+		    for (let i = 0; i < goArray.length; i++) {
+		        sum += goArray[i];
+		    }
+		    sum;
+		`)
+		require.NoError(t, err)
+		defer result.Free()
+		require.EqualValues(t, 15, result.ToInt32()) // 1+2+3+4+5 = 15
+
+		// Test modification from JavaScript
+		_, err = ctx.Eval(`goArray[0] = 10;`)
+		require.NoError(t, err)
+
+		// Verify modification
+		modifiedResult, err := ctx.Eval(`goArray[0]`)
+		require.NoError(t, err)
+		defer modifiedResult.Free()
+		require.EqualValues(t, 10, modifiedResult.ToInt32())
+	})
+
+	t.Run("JavaScriptToGo", func(t *testing.T) {
+		// Create TypedArray in JavaScript and convert to Go
+		jsArray, err := ctx.Eval(`new Int32Array([10, 20, 30, 40, 50])`)
+		require.NoError(t, err)
+		defer jsArray.Free()
+
+		// Verify it's a TypedArray
+		require.True(t, jsArray.IsTypedArray())
+		require.True(t, jsArray.IsInt32Array())
+
+		// Convert to Go slice
+		goSlice, err := jsArray.ToInt32Array()
+		require.NoError(t, err)
+		require.Equal(t, []int32{10, 20, 30, 40, 50}, goSlice)
+	})
+
+	t.Run("RoundTripConversion", func(t *testing.T) {
+		// Test round-trip conversion for all TypedArray types
+		testCases := []struct {
+			name     string
+			create   func() quickjs.Value
+			convert  func(quickjs.Value) (interface{}, error)
+			expected interface{}
+		}{
+			{
+				"Int8Array",
+				func() quickjs.Value { return ctx.Int8Array([]int8{-1, 0, 1}) },
+				func(v quickjs.Value) (interface{}, error) { return v.ToInt8Array() },
+				[]int8{-1, 0, 1},
+			},
+			{
+				"Uint8Array",
+				func() quickjs.Value { return ctx.Uint8Array([]uint8{0, 128, 255}) },
+				func(v quickjs.Value) (interface{}, error) { return v.ToUint8Array() },
+				[]uint8{0, 128, 255},
+			},
+			{
+				"Float32Array",
+				func() quickjs.Value { return ctx.Float32Array([]float32{1.5, 2.5, 3.5}) },
+				func(v quickjs.Value) (interface{}, error) { return v.ToFloat32Array() },
+				[]float32{1.5, 2.5, 3.5},
+			},
+		}
+
+		for _, tc := range testCases {
+			t.Run(tc.name, func(t *testing.T) {
+				// Create in Go
+				goArray := tc.create()
+				defer goArray.Free()
+
+				// Convert back to Go slice
+				result, err := tc.convert(goArray)
+				require.NoError(t, err)
+
+				// Verify the data matches
+				switch expected := tc.expected.(type) {
+				case []int8:
+					require.Equal(t, expected, result.([]int8))
+				case []uint8:
+					require.Equal(t, expected, result.([]uint8))
+				case []float32:
+					resultSlice := result.([]float32)
+					require.Len(t, resultSlice, len(expected))
+					for i, v := range expected {
+						require.InDelta(t, v, resultSlice[i], 0.0001)
+					}
+				}
+			})
+		}
+	})
+
+	t.Run("SharedMemory", func(t *testing.T) {
+		// Test that TypedArrays share memory with their underlying ArrayBuffer
+		data := []uint8{1, 2, 3, 4, 5, 6, 7, 8}
+		arrayBuffer := ctx.ArrayBuffer(data)
+
+		// Set ArrayBuffer in global scope
+		ctx.Globals().Set("sharedBuffer", arrayBuffer)
+
+		// Create different views on the same buffer and store them globally
+		ret, err := ctx.Eval(`
+        globalThis.uint8View = new Uint8Array(sharedBuffer);
+        globalThis.uint16View = new Uint16Array(sharedBuffer);
+    `)
+		defer ret.Free()
+		require.NoError(t, err)
+
+		// Verify initial values
+		initialUint8, err := ctx.Eval(`uint8View[0]`)
+		require.NoError(t, err)
+		defer initialUint8.Free()
+		require.EqualValues(t, 1, initialUint8.ToInt32())
+
+		// Modify through uint8 view
+		_, err = ctx.Eval(`uint8View[0] = 255;`)
+		require.NoError(t, err)
+
+		// Verify change is visible through the same view
+		modifiedUint8, err := ctx.Eval(`uint8View[0]`)
+		require.NoError(t, err)
+		defer modifiedUint8.Free()
+		require.EqualValues(t, 255, modifiedUint8.ToInt32())
+
+		// Verify change is also visible through uint16 view (shared memory)
+		uint16Value, err := ctx.Eval(`uint16View[0]`)
+		require.NoError(t, err)
+		defer uint16Value.Free()
+
+		// The uint16 value should have changed because we modified the underlying byte
+		// Original: bytes [1, 2] -> uint16: 513 (little-endian: 1 + 2*256)
+		// Modified: bytes [255, 2] -> uint16: 767 (little-endian: 255 + 2*256)
+		require.EqualValues(t, 767, uint16Value.ToInt32())
+
+		// // Clean up global variables
+		ctx.Eval(`delete globalThis.uint8View; delete globalThis.uint16View;`)
+	})
+}
+
+// TestContextTypedArrayErrorCases tests TypedArray error handling
+func TestContextTypedArrayErrorCases(t *testing.T) {
+	rt := quickjs.NewRuntime()
+	defer rt.Close()
+
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	t.Run("EmptyArrayCreation", func(t *testing.T) {
+		// Test creating empty TypedArrays
+		emptyArrays := []struct {
+			name   string
+			create func() quickjs.Value
+		}{
+			{"Int8Array", func() quickjs.Value { return ctx.Int8Array([]int8{}) }},
+			{"Uint8Array", func() quickjs.Value { return ctx.Uint8Array([]uint8{}) }},
+			{"Int16Array", func() quickjs.Value { return ctx.Int16Array([]int16{}) }},
+			{"Uint16Array", func() quickjs.Value { return ctx.Uint16Array([]uint16{}) }},
+			{"Int32Array", func() quickjs.Value { return ctx.Int32Array([]int32{}) }},
+			{"Uint32Array", func() quickjs.Value { return ctx.Uint32Array([]uint32{}) }},
+			{"Float32Array", func() quickjs.Value { return ctx.Float32Array([]float32{}) }},
+			{"Float64Array", func() quickjs.Value { return ctx.Float64Array([]float64{}) }},
+			{"BigInt64Array", func() quickjs.Value { return ctx.BigInt64Array([]int64{}) }},
+			{"BigUint64Array", func() quickjs.Value { return ctx.BigUint64Array([]uint64{}) }},
+		}
+
+		for _, tc := range emptyArrays {
+			t.Run(tc.name, func(t *testing.T) {
+				arr := tc.create()
+				defer arr.Free()
+
+				require.True(t, arr.IsTypedArray())
+				require.EqualValues(t, 0, arr.Len())
+			})
+		}
+	})
+
+	t.Run("NilSliceCreation", func(t *testing.T) {
+		// Test creating TypedArrays with nil slices
+		nilArrays := []struct {
+			name   string
+			create func() quickjs.Value
+		}{
+			{"Int8Array", func() quickjs.Value { return ctx.Int8Array(nil) }},
+			{"Uint8Array", func() quickjs.Value { return ctx.Uint8Array(nil) }},
+			{"Int16Array", func() quickjs.Value { return ctx.Int16Array(nil) }},
+			{"Uint16Array", func() quickjs.Value { return ctx.Uint16Array(nil) }},
+			{"Int32Array", func() quickjs.Value { return ctx.Int32Array(nil) }},
+			{"Uint32Array", func() quickjs.Value { return ctx.Uint32Array(nil) }},
+			{"Float32Array", func() quickjs.Value { return ctx.Float32Array(nil) }},
+			{"Float64Array", func() quickjs.Value { return ctx.Float64Array(nil) }},
+			{"BigInt64Array", func() quickjs.Value { return ctx.BigInt64Array(nil) }},
+			{"BigUint64Array", func() quickjs.Value { return ctx.BigUint64Array(nil) }},
+		}
+
+		for _, tc := range nilArrays {
+			t.Run(tc.name, func(t *testing.T) {
+				arr := tc.create()
+				defer arr.Free()
+
+				require.True(t, arr.IsTypedArray())
+				require.EqualValues(t, 0, arr.Len())
+			})
+		}
+	})
+
+	t.Run("ConversionErrors", func(t *testing.T) {
+		// Test conversion errors for wrong types
+		wrongTypeVal := ctx.String("not a typed array")
+		defer wrongTypeVal.Free()
+
+		conversionTests := []struct {
+			name      string
+			convertFn func() (interface{}, error)
+		}{
+			{"ToInt8Array", func() (interface{}, error) { return wrongTypeVal.ToInt8Array() }},
+			{"ToUint8Array", func() (interface{}, error) { return wrongTypeVal.ToUint8Array() }},
+			{"ToInt16Array", func() (interface{}, error) { return wrongTypeVal.ToInt16Array() }},
+			{"ToUint16Array", func() (interface{}, error) { return wrongTypeVal.ToUint16Array() }},
+			{"ToInt32Array", func() (interface{}, error) { return wrongTypeVal.ToInt32Array() }},
+			{"ToUint32Array", func() (interface{}, error) { return wrongTypeVal.ToUint32Array() }},
+			{"ToFloat32Array", func() (interface{}, error) { return wrongTypeVal.ToFloat32Array() }},
+			{"ToFloat64Array", func() (interface{}, error) { return wrongTypeVal.ToFloat64Array() }},
+			{"ToBigInt64Array", func() (interface{}, error) { return wrongTypeVal.ToBigInt64Array() }},
+			{"ToBigUint64Array", func() (interface{}, error) { return wrongTypeVal.ToBigUint64Array() }},
+		}
+
+		for _, tc := range conversionTests {
+			t.Run(tc.name, func(t *testing.T) {
+				_, err := tc.convertFn()
+				require.Error(t, err)
+			})
+		}
+	})
+
+	t.Run("TypeMismatchConversion", func(t *testing.T) {
+		// Test converting TypedArray to wrong type
+		int8Array := ctx.Int8Array([]int8{1, 2, 3})
+		defer int8Array.Free()
+
+		// Try to convert Int8Array to Uint8Array (should fail)
+		_, err := int8Array.ToUint8Array()
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "not a Uint8Array")
+
+		// Try to convert Int8Array to Int16Array (should fail)
+		_, err = int8Array.ToInt16Array()
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "not an Int16Array")
+	})
+}
+
+// TestContextTypedArrayEdgeCases tests TypedArray edge cases and boundary conditions
+func TestContextTypedArrayEdgeCases(t *testing.T) {
+	rt := quickjs.NewRuntime()
+	defer rt.Close()
+
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	t.Run("LargeArrays", func(t *testing.T) {
+		// Test with relatively large arrays
+		largeSize := 10000
+		largeData := make([]int32, largeSize)
+		for i := range largeData {
+			largeData[i] = int32(i)
+		}
+
+		largeArray := ctx.Int32Array(largeData)
+		defer largeArray.Free()
+
+		require.True(t, largeArray.IsInt32Array())
+		require.EqualValues(t, largeSize, largeArray.Len())
+
+		// Convert back and verify first and last elements
+		converted, err := largeArray.ToInt32Array()
+		require.NoError(t, err)
+		require.Len(t, converted, largeSize)
+		require.EqualValues(t, 0, converted[0])
+		require.EqualValues(t, largeSize-1, converted[largeSize-1])
+	})
+
+	t.Run("ExtremeValues", func(t *testing.T) {
+		// Test with extreme values for each type
+		testCases := []struct {
+			name   string
+			create func() quickjs.Value
+			verify func(quickjs.Value)
+		}{
+			{
+				"Int8Array extremes",
+				func() quickjs.Value {
+					return ctx.Int8Array([]int8{-128, 127}) // min and max int8
+				},
+				func(v quickjs.Value) {
+					data, err := v.ToInt8Array()
+					require.NoError(t, err)
+					require.Equal(t, []int8{-128, 127}, data)
+				},
+			},
+			{
+				"Uint8Array extremes",
+				func() quickjs.Value {
+					return ctx.Uint8Array([]uint8{0, 255}) // min and max uint8
+				},
+				func(v quickjs.Value) {
+					data, err := v.ToUint8Array()
+					require.NoError(t, err)
+					require.Equal(t, []uint8{0, 255}, data)
+				},
+			},
+			{
+				"Int32Array extremes",
+				func() quickjs.Value {
+					return ctx.Int32Array([]int32{-2147483648, 2147483647}) // min and max int32
+				},
+				func(v quickjs.Value) {
+					data, err := v.ToInt32Array()
+					require.NoError(t, err)
+					require.Equal(t, []int32{-2147483648, 2147483647}, data)
+				},
+			},
+			{
+				"BigInt64Array extremes",
+				func() quickjs.Value {
+					return ctx.BigInt64Array([]int64{-9223372036854775808, 9223372036854775807}) // min and max int64
+				},
+				func(v quickjs.Value) {
+					data, err := v.ToBigInt64Array()
+					require.NoError(t, err)
+					require.Equal(t, []int64{-9223372036854775808, 9223372036854775807}, data)
+				},
+			},
+		}
+
+		for _, tc := range testCases {
+			t.Run(tc.name, func(t *testing.T) {
+				arr := tc.create()
+				defer arr.Free()
+
+				tc.verify(arr)
+			})
+		}
+	})
+
+	t.Run("FloatingPointPrecision", func(t *testing.T) {
+		// Test floating point precision preservation
+		float32Data := []float32{3.14159265359, -2.718281828, 0.0, 1.23456789}
+		float32Array := ctx.Float32Array(float32Data)
+		defer float32Array.Free()
+
+		converted32, err := float32Array.ToFloat32Array()
+		require.NoError(t, err)
+		require.Len(t, converted32, len(float32Data))
+
+		for i, expected := range float32Data {
+			require.InDelta(t, expected, converted32[i], 0.0001)
+		}
+
+		// Test Float64 precision
+		float64Data := []float64{3.141592653589793, -2.718281828459045, 0.0, 1.2345678901234567}
+		float64Array := ctx.Float64Array(float64Data)
+		defer float64Array.Free()
+
+		converted64, err := float64Array.ToFloat64Array()
+		require.NoError(t, err)
+		require.Len(t, converted64, len(float64Data))
+
+		for i, expected := range float64Data {
+			require.InDelta(t, expected, converted64[i], 0.000000000001)
+		}
+	})
+}

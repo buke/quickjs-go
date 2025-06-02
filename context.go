@@ -112,12 +112,128 @@ func (ctx *Context) String(v string) Value {
 	return Value{ctx: ctx, ref: C.JS_NewString(ctx.ref, ptr)}
 }
 
-// ArrayBuffer returns a string value with given binary data.
+// ArrayBuffer returns a ArrayBuffer value with given binary data.
 func (ctx *Context) ArrayBuffer(binaryData []byte) Value {
 	if len(binaryData) == 0 {
 		return Value{ctx: ctx, ref: C.JS_NewArrayBufferCopy(ctx.ref, nil, 0)}
 	}
 	return Value{ctx: ctx, ref: C.JS_NewArrayBufferCopy(ctx.ref, (*C.uchar)(&binaryData[0]), C.size_t(len(binaryData)))}
+}
+
+// createTypedArray is a helper function to create TypedArray with given data and type.
+// It creates an ArrayBuffer first, then constructs a TypedArray from it.
+func (ctx *Context) createTypedArray(data unsafe.Pointer, elementCount int, elementSize int, arrayType C.JSTypedArrayEnum) Value {
+	// Calculate total bytes needed for the data
+	totalBytes := elementCount * elementSize
+
+	// Convert raw data pointer to Go byte slice using unsafe.Slice (Go 1.17+)
+	var bytes []byte
+	if totalBytes > 0 && data != nil {
+		bytes = unsafe.Slice((*byte)(data), totalBytes)
+	}
+
+	// Create ArrayBuffer from the byte data
+	buffer := ctx.ArrayBuffer(bytes)
+	defer buffer.Free()
+
+	// Create TypedArray from ArrayBuffer: new TypedArray(buffer, offset, length)
+	offset := C.JS_NewInt32(ctx.ref, C.int(0))            // Start from beginning of buffer
+	length := C.JS_NewInt32(ctx.ref, C.int(elementCount)) // Number of elements (not bytes)
+
+	// Pack arguments for JS_NewTypedArray call
+	args := []C.JSValue{buffer.ref, offset, length}
+	return Value{
+		ctx: ctx,
+		ref: C.JS_NewTypedArray(ctx.ref, C.int(len(args)), &args[0], arrayType),
+	}
+}
+
+// Int8Array returns a Int8Array value with given int8 slice.
+func (ctx *Context) Int8Array(data []int8) Value {
+	if len(data) == 0 {
+		return ctx.createTypedArray(nil, 0, 1, C.JS_TYPED_ARRAY_INT8)
+	}
+	return ctx.createTypedArray(unsafe.Pointer(&data[0]), len(data), 1, C.JS_TYPED_ARRAY_INT8)
+}
+
+// Uint8Array returns a Uint8Array value with given uint8 slice.
+func (ctx *Context) Uint8Array(data []uint8) Value {
+	if len(data) == 0 {
+		return ctx.createTypedArray(nil, 0, 1, C.JS_TYPED_ARRAY_UINT8)
+	}
+	return ctx.createTypedArray(unsafe.Pointer(&data[0]), len(data), 1, C.JS_TYPED_ARRAY_UINT8)
+}
+
+// Uint8ClampedArray returns a Uint8ClampedArray value with given uint8 slice.
+func (ctx *Context) Uint8ClampedArray(data []uint8) Value {
+	if len(data) == 0 {
+		return ctx.createTypedArray(nil, 0, 1, C.JS_TYPED_ARRAY_UINT8C)
+	}
+	return ctx.createTypedArray(unsafe.Pointer(&data[0]), len(data), 1, C.JS_TYPED_ARRAY_UINT8C)
+}
+
+// Int16Array returns a Int16Array value with given int16 slice.
+func (ctx *Context) Int16Array(data []int16) Value {
+	if len(data) == 0 {
+		return ctx.createTypedArray(nil, 0, 2, C.JS_TYPED_ARRAY_INT16)
+	}
+	return ctx.createTypedArray(unsafe.Pointer(&data[0]), len(data), 2, C.JS_TYPED_ARRAY_INT16)
+}
+
+// Uint16Array returns a Uint16Array value with given uint16 slice.
+func (ctx *Context) Uint16Array(data []uint16) Value {
+	if len(data) == 0 {
+		return ctx.createTypedArray(nil, 0, 2, C.JS_TYPED_ARRAY_UINT16)
+	}
+	return ctx.createTypedArray(unsafe.Pointer(&data[0]), len(data), 2, C.JS_TYPED_ARRAY_UINT16)
+}
+
+// Int32Array returns a Int32Array value with given int32 slice.
+func (ctx *Context) Int32Array(data []int32) Value {
+	if len(data) == 0 {
+		return ctx.createTypedArray(nil, 0, 4, C.JS_TYPED_ARRAY_INT32)
+	}
+	return ctx.createTypedArray(unsafe.Pointer(&data[0]), len(data), 4, C.JS_TYPED_ARRAY_INT32)
+}
+
+// Uint32Array returns a Uint32Array value with given uint32 slice.
+func (ctx *Context) Uint32Array(data []uint32) Value {
+	if len(data) == 0 {
+		return ctx.createTypedArray(nil, 0, 4, C.JS_TYPED_ARRAY_UINT32)
+	}
+	return ctx.createTypedArray(unsafe.Pointer(&data[0]), len(data), 4, C.JS_TYPED_ARRAY_UINT32)
+}
+
+// Float32Array returns a Float32Array value with given float32 slice.
+func (ctx *Context) Float32Array(data []float32) Value {
+	if len(data) == 0 {
+		return ctx.createTypedArray(nil, 0, 4, C.JS_TYPED_ARRAY_FLOAT32)
+	}
+	return ctx.createTypedArray(unsafe.Pointer(&data[0]), len(data), 4, C.JS_TYPED_ARRAY_FLOAT32)
+}
+
+// Float64Array returns a Float64Array value with given float64 slice.
+func (ctx *Context) Float64Array(data []float64) Value {
+	if len(data) == 0 {
+		return ctx.createTypedArray(nil, 0, 8, C.JS_TYPED_ARRAY_FLOAT64)
+	}
+	return ctx.createTypedArray(unsafe.Pointer(&data[0]), len(data), 8, C.JS_TYPED_ARRAY_FLOAT64)
+}
+
+// BigInt64Array returns a BigInt64Array value with given int64 slice.
+func (ctx *Context) BigInt64Array(data []int64) Value {
+	if len(data) == 0 {
+		return ctx.createTypedArray(nil, 0, 8, C.JS_TYPED_ARRAY_BIG_INT64)
+	}
+	return ctx.createTypedArray(unsafe.Pointer(&data[0]), len(data), 8, C.JS_TYPED_ARRAY_BIG_INT64)
+}
+
+// BigUint64Array returns a BigUint64Array value with given uint64 slice.
+func (ctx *Context) BigUint64Array(data []uint64) Value {
+	if len(data) == 0 {
+		return ctx.createTypedArray(nil, 0, 8, C.JS_TYPED_ARRAY_BIG_UINT64)
+	}
+	return ctx.createTypedArray(unsafe.Pointer(&data[0]), len(data), 8, C.JS_TYPED_ARRAY_BIG_UINT64)
 }
 
 // Object returns a new object value.
