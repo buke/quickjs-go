@@ -15,8 +15,6 @@ extern JSValue ThrowRangeError(JSContext *ctx, const char *fmt);
 extern JSValue ThrowInternalError(JSContext *ctx, const char *fmt);
 int JS_DeletePropertyInt64(JSContext *ctx, JSValueConst obj, int64_t idx, int flags);
 
-// Legacy proxy functions (keep for async functions)
-extern JSValue InvokeAsyncProxy(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv);
 
 // New efficient proxy function for regular functions only
 extern JSValue GoFunctionProxy(JSContext *ctx, JSValueConst this_val, 

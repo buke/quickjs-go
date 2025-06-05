@@ -319,9 +319,13 @@ func TestContextFunctions(t *testing.T) {
 		require.EqualValues(t, "Hello Test", result4.String())
 	})
 
+	// Updated: Use Function + Promise instead of AsyncFunction
 	t.Run("AsyncFunctions", func(t *testing.T) {
-		asyncFn := ctx.AsyncFunction(func(ctx *quickjs.Context, this quickjs.Value, promise quickjs.Value, args []quickjs.Value) quickjs.Value {
-			return promise.Call("resolve", ctx.String("async result"))
+		// New approach using Function + Promise
+		asyncFn := ctx.Function(func(ctx *quickjs.Context, this quickjs.Value, args []quickjs.Value) quickjs.Value {
+			return ctx.Promise(func(resolve, reject func(quickjs.Value)) {
+				resolve(ctx.String("async result"))
+			})
 		})
 
 		ctx.Globals().Set("testAsync", asyncFn)
@@ -459,11 +463,15 @@ func TestContextAsync(t *testing.T) {
 		require.True(t, executedResult.ToBool())
 	})
 
+	// Updated: Use Function + Promise instead of AsyncFunction
 	t.Run("AwaitPromises", func(t *testing.T) {
-		// Test successful promise
-		ctx.Globals().Set("asyncTest", ctx.AsyncFunction(func(ctx *quickjs.Context, this quickjs.Value, promise quickjs.Value, args []quickjs.Value) quickjs.Value {
-			return promise.Call("resolve", ctx.String("awaited result"))
-		}))
+		// Test successful promise using new Promise API
+		asyncTestFn := ctx.Function(func(ctx *quickjs.Context, this quickjs.Value, args []quickjs.Value) quickjs.Value {
+			return ctx.Promise(func(resolve, reject func(quickjs.Value)) {
+				resolve(ctx.String("awaited result"))
+			})
+		})
+		ctx.Globals().Set("asyncTest", asyncTestFn)
 
 		promiseResult, err := ctx.Eval(`asyncTest()`)
 		require.NoError(t, err)
@@ -474,18 +482,221 @@ func TestContextAsync(t *testing.T) {
 		defer awaitedResult.Free()
 		require.EqualValues(t, "awaited result", awaitedResult.String())
 
-		// Test rejected promise
-		ctx.Globals().Set("asyncReject", ctx.AsyncFunction(func(ctx *quickjs.Context, this quickjs.Value, promise quickjs.Value, args []quickjs.Value) quickjs.Value {
-			errorObj := ctx.Error(errors.New("rejection reason"))
-			defer errorObj.Free()
-			return promise.Call("reject", errorObj)
-		}))
+		// Test rejected promise using new Promise API
+		asyncRejectFn := ctx.Function(func(ctx *quickjs.Context, this quickjs.Value, args []quickjs.Value) quickjs.Value {
+			return ctx.Promise(func(resolve, reject func(quickjs.Value)) {
+				errorObj := ctx.Error(errors.New("rejection reason"))
+				defer errorObj.Free()
+				reject(errorObj)
+			})
+		})
+		ctx.Globals().Set("asyncReject", asyncRejectFn)
 
 		rejectPromise, err := ctx.Eval(`asyncReject()`)
 		require.NoError(t, err)
 
 		_, err = ctx.Await(rejectPromise)
 		require.Error(t, err)
+	})
+}
+
+func TestContextPromise(t *testing.T) {
+	rt := quickjs.NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	t.Run("BasicPromise", func(t *testing.T) {
+		// Test immediate resolve
+		promise := ctx.Promise(func(resolve, reject func(quickjs.Value)) {
+			resolve(ctx.String("success"))
+		})
+
+		require.True(t, promise.IsPromise())
+		require.Equal(t, quickjs.PromiseFulfilled, promise.PromiseState())
+
+		result, err := promise.Await()
+		require.NoError(t, err)
+		defer result.Free()
+		require.Equal(t, "success", result.String())
+	})
+
+	t.Run("RejectedPromise", func(t *testing.T) {
+		promise := ctx.Promise(func(resolve, reject func(quickjs.Value)) {
+			errorObj := ctx.Error(errors.New("error"))
+			defer errorObj.Free()
+			reject(errorObj)
+		})
+
+		require.True(t, promise.IsPromise())
+
+		state := promise.PromiseState()
+		require.Equal(t, quickjs.PromiseRejected, state)
+
+		_, err := promise.Await()
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "error")
+	})
+
+	t.Run("PromiseFunction", func(t *testing.T) {
+		// Create function that returns Promise
+		asyncFn := ctx.Function(func(ctx *quickjs.Context, this quickjs.Value, args []quickjs.Value) quickjs.Value {
+			return ctx.Promise(func(resolve, reject func(quickjs.Value)) {
+				if len(args) == 0 {
+					errObj := ctx.Error(errors.New("no arguments provided"))
+					defer errObj.Free()
+					reject(errObj)
+					return
+				}
+				resolve(ctx.String("Hello " + args[0].String()))
+			})
+		})
+
+		// Test in JavaScript
+		global := ctx.Globals()
+		global.Set("asyncGreet", asyncFn)
+
+		// Test with argument
+		result1, err := ctx.Eval(`asyncGreet("World")`)
+		require.NoError(t, err)
+
+		final1, err := result1.Await()
+		require.NoError(t, err)
+		require.Equal(t, "Hello World", final1.String())
+
+		// Test without argument (should reject)
+		result2, err := ctx.Eval(`asyncGreet()`)
+		require.NoError(t, err)
+
+		_, err = result2.Await()
+		require.Error(t, err)
+	})
+
+	t.Run("PromiseChaining", func(t *testing.T) {
+		// Create async function for chaining
+		asyncDouble := ctx.Function(func(ctx *quickjs.Context, this quickjs.Value, args []quickjs.Value) quickjs.Value {
+			return ctx.Promise(func(resolve, reject func(quickjs.Value)) {
+				if len(args) == 0 {
+					errObj := ctx.Error(errors.New("no number provided"))
+					defer errObj.Free()
+					reject(errObj)
+					return
+				}
+				value := args[0].ToInt32()
+				resolve(ctx.Int32(value * 2))
+			})
+		})
+
+		global := ctx.Globals()
+		global.Set("asyncDouble", asyncDouble)
+
+		// Test promise chaining
+		result, err := ctx.Eval(`
+            asyncDouble(5)
+                .then(x => asyncDouble(x))
+                .then(x => x + 10)
+        `)
+		require.NoError(t, err)
+
+		final, err := result.Await()
+		require.NoError(t, err)
+		defer final.Free()
+		require.Equal(t, int32(30), final.ToInt32()) // 5 * 2 * 2 + 10 = 30
+	})
+
+	t.Run("PromiseState", func(t *testing.T) {
+		// Test different promise states
+		pendingPromise, err := ctx.Eval(`new Promise(() => {})`) // Never resolves
+		require.NoError(t, err)
+		defer pendingPromise.Free()
+		require.Equal(t, quickjs.PromisePending, pendingPromise.PromiseState())
+
+		fulfilledPromise, err := ctx.Eval(`Promise.resolve("fulfilled")`)
+		require.NoError(t, err)
+		defer fulfilledPromise.Free()
+		require.Equal(t, quickjs.PromiseFulfilled, fulfilledPromise.PromiseState())
+
+		rejectedPromise, err := ctx.Eval(`Promise.reject("rejected")`)
+		require.NoError(t, err)
+		defer rejectedPromise.Free()
+		require.Equal(t, quickjs.PromiseRejected, rejectedPromise.PromiseState())
+
+		// Test PromiseState on non-Promise
+		nonPromise := ctx.String("not a promise")
+		defer nonPromise.Free()
+		require.Equal(t, quickjs.PromisePending, nonPromise.PromiseState()) // Should return default
+	})
+
+	t.Run("ValueAwait", func(t *testing.T) {
+		// Test Value.Await() method
+		promise := ctx.Promise(func(resolve, reject func(quickjs.Value)) {
+			resolve(ctx.String("awaited via Value.Await"))
+		})
+
+		result, err := promise.Await()
+		require.NoError(t, err)
+		require.Equal(t, "awaited via Value.Await", result.String())
+
+		// Test Await on non-Promise (should return equivalent value)
+		nonPromise := ctx.String("not a promise")
+
+		result2, err := nonPromise.Await()
+		require.NoError(t, err)
+		defer result2.Free()
+
+		// Verify the content is the same
+		require.Equal(t, nonPromise.String(), result2.String())
+		require.Equal(t, "not a promise", result2.String())
+
+		// Verify it's still a string
+		require.True(t, result2.IsString())
+	})
+
+	t.Run("ComplexAsync", func(t *testing.T) {
+		// Test more complex async scenario
+		asyncProcessor := ctx.Function(func(ctx *quickjs.Context, this quickjs.Value, args []quickjs.Value) quickjs.Value {
+			return ctx.Promise(func(resolve, reject func(quickjs.Value)) {
+				if len(args) == 0 {
+					errObj := ctx.Error(errors.New("no data to process"))
+					defer errObj.Free()
+					reject(errObj)
+					return
+				}
+
+				// Simulate processing
+				input := args[0].String()
+				if input == "error" {
+					errObj := ctx.Error(errors.New("processing failed"))
+					defer errObj.Free()
+					reject(errObj)
+					return
+				}
+
+				result := ctx.String("processed: " + input)
+				resolve(result)
+			})
+		})
+
+		global := ctx.Globals()
+		global.Set("process", asyncProcessor)
+
+		// Test successful processing
+		success, err := ctx.Eval(`process("data").then(result => "Success: " + result)`)
+		require.NoError(t, err)
+
+		successResult, err := success.Await()
+		require.NoError(t, err)
+		defer successResult.Free()
+		require.Equal(t, "Success: processed: data", successResult.String())
+
+		// Test error handling
+		errorCase, err := ctx.Eval(`process("error").catch(err =>  err)`)
+		require.NoError(t, err)
+
+		errorResult, err := errorCase.Await()
+		require.NoError(t, err)
+		defer errorResult.Free()
+		require.Equal(t, "Error: processing failed", errorResult.String())
 	})
 }
 
@@ -718,8 +929,9 @@ func TestContextTypedArrays(t *testing.T) {
 		require.NoError(t, err)
 
 		// Modify through uint8 view
-		_, err = ctx.Eval(`uint8View[0] = 255;`)
+		modifyResult, err := ctx.Eval(`uint8View[0] = 255;`)
 		require.NoError(t, err)
+		defer modifyResult.Free() // Fixed: Added missing defer Free()
 
 		// Verify change is visible through uint16 view (shared memory)
 		uint16Value, err := ctx.Eval(`uint16View[0]`)
@@ -732,7 +944,9 @@ func TestContextTypedArrays(t *testing.T) {
 		require.EqualValues(t, 767, uint16Value.ToInt32())
 
 		// Clean up
-		ctx.Eval(`delete globalThis.uint8View; delete globalThis.uint16View;`)
+		cleanupResult, err := ctx.Eval(`delete globalThis.uint8View; delete globalThis.uint16View;`)
+		require.NoError(t, err)
+		defer cleanupResult.Free() // Fixed: Added missing defer Free()
 	})
 }
 
@@ -744,7 +958,7 @@ func TestContextMemoryPressure(t *testing.T) {
 	defer ctx.Close()
 
 	// Fill memory first
-	ctx.Eval(`
+	memoryResult, err := ctx.Eval(`
         var memoryFiller = [];
         try {
             for(let i = 0; i < 1000; i++) {
@@ -754,9 +968,12 @@ func TestContextMemoryPressure(t *testing.T) {
             // Expected to fail due to memory limit
         }
     `)
+	if err == nil {
+		defer memoryResult.Free() // Fixed: Added defer Free() for successful evaluation
+	}
 
 	// Try to compile - this should fail at JS_WriteObject due to no available memory
-	_, err := ctx.Compile(`
+	_, err = ctx.Compile(`
         var obj = {};
         for(let i = 0; i < 100; i++) {
             obj['prop_' + i] = function() { return 'value_' + i; };

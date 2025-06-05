@@ -3,7 +3,6 @@ package quickjs
 import (
 	"fmt"
 	"os"
-	"runtime/cgo"
 	"unsafe"
 )
 
@@ -18,7 +17,6 @@ type Context struct {
 	runtime     *Runtime
 	ref         *C.JSContext
 	globals     *Value
-	asyncProxy  *Value       // Keep for AsyncFunction
 	handleStore *HandleStore // New: efficient function handle storage
 }
 
@@ -29,10 +27,6 @@ func (ctx *Context) Runtime() *Runtime {
 
 // Free will free context and all associated objects.
 func (ctx *Context) Close() {
-	if ctx.asyncProxy != nil {
-		ctx.asyncProxy.Free()
-	}
-
 	if ctx.globals != nil {
 		ctx.globals.Free()
 	}
@@ -276,34 +270,52 @@ func (ctx *Context) Function(fn func(*Context, Value, []Value) Value) Value {
 }
 
 // AsyncFunction returns a js async function value with given function template
-// Keep the original implementation unchanged for now
+//
+// Deprecated: Use Context.Function + Context.Promise instead for better memory management and thread safety.
+// Example:
+//
+//	asyncFn := ctx.Function(func(ctx *quickjs.Context, this quickjs.Value, args []quickjs.Value) quickjs.Value {
+//	    return ctx.Promise(func(resolve, reject func(quickjs.Value)) {
+//	        // async work here
+//	        resolve(ctx.String("result"))
+//	    })
+//	})
 func (ctx *Context) AsyncFunction(asyncFn func(ctx *Context, this Value, promise Value, args []Value) Value) Value {
-	if ctx.asyncProxy == nil {
-		ctx.asyncProxy = &Value{
-			ctx: ctx,
-			ref: C.JS_NewCFunction(ctx.ref, (*C.JSCFunction)(unsafe.Pointer(C.InvokeAsyncProxy)), nil, C.int(0)),
-		}
-	}
+	// New implementation using Function + Promise
+	return ctx.Function(func(ctx *Context, this Value, args []Value) Value {
+		return ctx.Promise(func(resolve, reject func(Value)) {
+			// Create a promise object that has resolve/reject methods
+			promiseObj := ctx.Object()
+			promiseObj.Set("resolve", ctx.Function(func(ctx *Context, this Value, args []Value) Value {
+				if len(args) > 0 {
+					resolve(args[0])
+				} else {
+					resolve(ctx.Undefined())
+				}
+				return ctx.Undefined()
+			}))
+			promiseObj.Set("reject", ctx.Function(func(ctx *Context, this Value, args []Value) Value {
+				if len(args) > 0 {
+					reject(args[0])
+				} else {
+					reject(ctx.Undefined())
+				}
+				return ctx.Undefined()
+			}))
+			defer promiseObj.Free()
 
-	fnHandler := ctx.Int64(int64(cgo.NewHandle(asyncFn)))
-	ctxHandler := ctx.Int64(int64(cgo.NewHandle(ctx)))
-	args := []C.JSValue{ctx.asyncProxy.ref, fnHandler.ref, ctxHandler.ref}
+			// Call the original async function with the promise object
+			result := asyncFn(ctx, this, promiseObj, args)
 
-	val, _ := ctx.Eval(`(proxy, fnHandler, ctx) => async function(...arguments) {
-		let resolve, reject;
-		const promise = new Promise((resolve_, reject_) => {
-		  resolve = resolve_;
-		  reject = reject_;
-		});
-		promise.resolve = resolve;
-		promise.reject = reject;
+			// If the function returned a value directly (not using promise.resolve/reject),
+			// we resolve with that value
+			if !result.IsUndefined() {
+				resolve(result)
+				result.Free() // Free the result if it's not undefined
+			}
 
-		proxy.call(this, fnHandler, ctx, promise,  ...arguments);
-		return await promise;
-	}`)
-	defer val.Free()
-
-	return Value{ctx: ctx, ref: C.JS_Call(ctx.ref, val.ref, ctx.Null().ref, C.int(len(args)), &args[0])}
+		})
+	})
 }
 
 // getFunction gets function from HandleStore (internal use)
@@ -681,4 +693,42 @@ func (ctx *Context) Await(v Value) (Value, error) {
 		return val, ctx.Exception()
 	}
 	return val, nil
+}
+
+// Promise creates a new Promise with executor function
+// Executor runs synchronously in current thread for thread safety
+func (ctx *Context) Promise(executor func(resolve, reject func(Value))) Value {
+	// Create Promise using JavaScript code to avoid complex C API reference management
+	promiseSetup, _ := ctx.Eval(`
+        (() => {
+            let _resolve, _reject;
+            const promise = new Promise((resolve, reject) => {
+                _resolve = resolve;
+                _reject = reject;
+            });
+            return { promise, resolve: _resolve, reject: _reject };
+        })()
+    `)
+
+	defer promiseSetup.Free()
+
+	promise := promiseSetup.Get("promise")
+	resolveFunc := promiseSetup.Get("resolve")
+	rejectFunc := promiseSetup.Get("reject")
+	defer resolveFunc.Free()
+	defer rejectFunc.Free()
+
+	// Create wrapper functions that call JavaScript resolve/reject
+	resolve := func(result Value) {
+		resolveFunc.Execute(ctx.Undefined(), result)
+	}
+
+	reject := func(reason Value) {
+		rejectFunc.Execute(ctx.Undefined(), reason)
+	}
+
+	// Execute user function synchronously
+	executor(resolve, reject)
+
+	return promise
 }

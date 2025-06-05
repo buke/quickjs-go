@@ -19,9 +19,7 @@ int ValueGetTag(JSValueConst v) {
     return JS_VALUE_GET_TAG(v);
 }
 
-JSValue InvokeAsyncProxy(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
-    return goAsyncProxy(ctx, this_val, argc, argv);
-}
+
 
 // New efficient proxy function for regular functions
 JSValue GoFunctionProxy(JSContext *ctx, JSValueConst this_val, 
