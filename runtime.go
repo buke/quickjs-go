@@ -127,6 +127,7 @@ func (r *Runtime) RunGC() {
 // Close will free the runtime pointer.
 func (r *Runtime) Close() {
 	C.JS_FreeRuntime(r.ref)
+	clearContextMapping() // Clear all registered contexts
 	r.pinner.Unpin()
 }
 
@@ -203,5 +204,15 @@ func (r *Runtime) NewContext() *Context {
 	init_run := C.js_std_await(ctx_ref, C.JS_EvalFunction(ctx_ref, init_compile))
 	C.JS_FreeValue(ctx_ref, init_run)
 
-	return &Context{ref: ctx_ref, runtime: r}
+	// Create Context with HandleStore for function management
+	ctx := &Context{
+		ref:         ctx_ref,
+		runtime:     r,
+		handleStore: NewHandleStore(), // Initialize HandleStore for function management
+	}
+
+	// Register context mapping for C callbacks
+	registerContext(ctx_ref, ctx)
+
+	return ctx
 }

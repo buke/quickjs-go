@@ -16,23 +16,25 @@ JSValue ThrowRangeError(JSContext *ctx, const char *fmt) { return JS_ThrowRangeE
 JSValue ThrowInternalError(JSContext *ctx, const char *fmt) { return JS_ThrowInternalError(ctx, "%s", fmt); }
 
 int ValueGetTag(JSValueConst v) {
-	return JS_VALUE_GET_TAG(v);
-}
-
-JSValue InvokeProxy(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
-	 return goProxy(ctx, this_val, argc, argv);
+    return JS_VALUE_GET_TAG(v);
 }
 
 JSValue InvokeAsyncProxy(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
-	return goAsyncProxy(ctx, this_val, argc, argv);
+    return goAsyncProxy(ctx, this_val, argc, argv);
+}
+
+// New efficient proxy function for regular functions
+JSValue GoFunctionProxy(JSContext *ctx, JSValueConst this_val, 
+                       int argc, JSValueConst *argv, int magic) {
+    return goFunctionProxy(ctx, this_val, argc, argv, magic);
 }
 
 int interruptHandler(JSRuntime *rt, void *handlerArgs) {
-	return goInterruptHandler(rt, handlerArgs);
+    return goInterruptHandler(rt, handlerArgs);
 }
 
 void SetInterruptHandler(JSRuntime *rt, void *handlerArgs){
-	JS_SetInterruptHandler(rt, &interruptHandler, handlerArgs);
+    JS_SetInterruptHandler(rt, &interruptHandler, handlerArgs);
 }
 
 typedef struct {
@@ -44,17 +46,17 @@ int timeoutHandler(JSRuntime *rt, void *opaque) {
     TimeoutStruct* ts = (TimeoutStruct*)opaque;
     time_t timeout = ts->timeout;
     time_t start = ts->start;
-	if (timeout <= 0) {
-		return 0;
-	}
+    if (timeout <= 0) {
+        return 0;
+    }
 
-	time_t now = time(NULL);
-	if (now - start > timeout) {
-		free(ts);
-		return 1;
-	}
+    time_t now = time(NULL);
+    if (now - start > timeout) {
+        free(ts);
+        return 1;
+    }
 
-	return 0;
+    return 0;
 }
 
 void SetExecuteTimeout(JSRuntime *rt, time_t timeout){
@@ -64,8 +66,7 @@ void SetExecuteTimeout(JSRuntime *rt, time_t timeout){
     JS_SetInterruptHandler(rt, &timeoutHandler, ts);
 }
 
-
-// Implementation of LoadModuleBytecode function, based on js_std_eval_binary
+// LoadModuleBytecode implementation (unchanged)
 JSValue LoadModuleBytecode(JSContext *ctx, const uint8_t *buf, size_t buf_len, int load_only) {
     JSValue obj, val;
     
