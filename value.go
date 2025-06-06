@@ -648,20 +648,6 @@ const (
 	PromiseRejected
 )
 
-// String returns string representation of promise state
-func (ps PromiseState) String() string {
-	switch ps {
-	case PromisePending:
-		return "pending"
-	case PromiseFulfilled:
-		return "fulfilled"
-	case PromiseRejected:
-		return "rejected"
-	default:
-		return "unknown"
-	}
-}
-
 // PromiseState returns the state of the Promise
 func (v Value) PromiseState() PromiseState {
 	if !v.IsPromise() {
@@ -674,10 +660,8 @@ func (v Value) PromiseState() PromiseState {
 		return PromisePending
 	case C.JS_PROMISE_FULFILLED:
 		return PromiseFulfilled
-	case C.JS_PROMISE_REJECTED:
-		return PromiseRejected
 	default:
-		return PromisePending
+		return PromiseRejected
 	}
 }
 

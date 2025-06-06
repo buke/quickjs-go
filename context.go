@@ -17,7 +17,7 @@ type Context struct {
 	runtime     *Runtime
 	ref         *C.JSContext
 	globals     *Value
-	handleStore *HandleStore // New: efficient function handle storage
+	handleStore *handleStore // New: efficient function handle storage
 }
 
 // Runtime returns the runtime of the context.
@@ -298,7 +298,9 @@ func (ctx *Context) AsyncFunction(asyncFn func(ctx *Context, this Value, promise
 				if len(args) > 0 {
 					reject(args[0])
 				} else {
-					reject(ctx.Undefined())
+					errObj := ctx.Error(fmt.Errorf("Promise rejected without reason"))
+					defer errObj.Free() // Free the error object
+					reject(errObj)
 				}
 				return ctx.Undefined()
 			}))
@@ -320,10 +322,8 @@ func (ctx *Context) AsyncFunction(asyncFn func(ctx *Context, this Value, promise
 
 // getFunction gets function from HandleStore (internal use)
 func (ctx *Context) loadFunctionFromHandleID(id int32) interface{} {
-	if fn, ok := ctx.handleStore.Load(id); ok {
-		return fn
-	}
-	return nil
+	fn, _ := ctx.handleStore.Load(id)
+	return fn
 }
 
 // SetInterruptHandler sets a interrupt handler.

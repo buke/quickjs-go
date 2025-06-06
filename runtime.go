@@ -243,7 +243,7 @@ func (r *Runtime) NewContext() *Context {
 	ctx := &Context{
 		ref:         ctx_ref,
 		runtime:     r,
-		handleStore: NewHandleStore(), // Initialize HandleStore for function management
+		handleStore: newHandleStore(), // Initialize HandleStore for function management
 	}
 
 	// Register context mapping for C callbacks

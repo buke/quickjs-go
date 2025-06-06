@@ -1,17 +1,16 @@
-package quickjs_test
+package quickjs
 
 import (
 	"strings"
 	"testing"
 
-	"github.com/buke/quickjs-go"
 	"github.com/stretchr/testify/require"
 )
 
 // TestErrorBasics tests basic Error functionality and Error() method
 func TestErrorBasics(t *testing.T) {
 	// Test Error with all fields
-	err := quickjs.Error{
+	err := Error{
 		Name:       "TestError",
 		Message:    "test message",
 		Cause:      "test cause",
@@ -30,14 +29,14 @@ func TestErrorBasics(t *testing.T) {
 	require.EqualValues(t, `{"name":"TestError","message":"test message"}`, err.JSONString)
 
 	// Test empty Error
-	emptyErr := quickjs.Error{}
+	emptyErr := Error{}
 	require.EqualValues(t, ": ", emptyErr.Error())
 
 	// Test partial fields
-	nameOnlyErr := quickjs.Error{Name: "OnlyName"}
+	nameOnlyErr := Error{Name: "OnlyName"}
 	require.EqualValues(t, "OnlyName: ", nameOnlyErr.Error())
 
-	messageOnlyErr := quickjs.Error{Message: "only message"}
+	messageOnlyErr := Error{Message: "only message"}
 	require.EqualValues(t, ": only message", messageOnlyErr.Error())
 }
 
@@ -59,7 +58,7 @@ func TestErrorStandardTypes(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			err := quickjs.Error{
+			err := Error{
 				Name:    tc.errorName,
 				Message: tc.message,
 			}
@@ -122,7 +121,7 @@ func TestErrorSpecialCharacters(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			err := quickjs.Error{
+			err := Error{
 				Name:    tc.errorName,
 				Message: tc.message,
 			}
@@ -134,7 +133,7 @@ func TestErrorSpecialCharacters(t *testing.T) {
 	longName := strings.Repeat("A", 100)
 	longMessage := strings.Repeat("a", 500)
 
-	longErr := quickjs.Error{
+	longErr := Error{
 		Name:    longName,
 		Message: longMessage,
 	}
@@ -145,7 +144,7 @@ func TestErrorSpecialCharacters(t *testing.T) {
 
 // TestErrorAsGoInterface tests Error implementing Go's error interface
 func TestErrorAsGoInterface(t *testing.T) {
-	quickjsErr := quickjs.Error{
+	quickjsErr := Error{
 		Name:    "TestError",
 		Message: "test error message",
 	}
@@ -164,9 +163,9 @@ func TestErrorAsGoInterface(t *testing.T) {
 	require.EqualValues(t, "TestError: test error message", err.Error())
 
 	// Test struct equality
-	err1 := quickjs.Error{Name: "TestError", Message: "test message"}
-	err2 := quickjs.Error{Name: "TestError", Message: "test message"}
-	err3 := quickjs.Error{Name: "DifferentError", Message: "test message"}
+	err1 := Error{Name: "TestError", Message: "test message"}
+	err2 := Error{Name: "TestError", Message: "test message"}
+	err3 := Error{Name: "DifferentError", Message: "test message"}
 
 	require.Equal(t, err1, err2)
 	require.NotEqual(t, err1, err3)
@@ -176,7 +175,7 @@ func TestErrorAsGoInterface(t *testing.T) {
 
 // TestErrorFieldManipulation tests field access and modification
 func TestErrorFieldManipulation(t *testing.T) {
-	err := quickjs.Error{
+	err := Error{
 		Name:    "InitialError",
 		Message: "initial message",
 	}
@@ -200,7 +199,7 @@ func TestErrorFieldManipulation(t *testing.T) {
 	require.EqualValues(t, `{"modified": true}`, err.JSONString)
 
 	// Test zero value behavior
-	var zeroErr quickjs.Error
+	var zeroErr Error
 	require.EqualValues(t, "", zeroErr.Name)
 	require.EqualValues(t, "", zeroErr.Message)
 	require.EqualValues(t, "", zeroErr.Cause)

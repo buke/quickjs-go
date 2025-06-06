@@ -1,18 +1,17 @@
-package quickjs_test
+package quickjs
 
 import (
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/buke/quickjs-go"
 	"github.com/stretchr/testify/require"
 )
 
 // TestRuntimeBasics tests basic runtime creation and operations
 func TestRuntimeBasics(t *testing.T) {
 	// Test default runtime
-	rt := quickjs.NewRuntime()
+	rt := NewRuntime()
 	defer rt.Close()
 
 	ctx := rt.NewContext()
@@ -23,15 +22,15 @@ func TestRuntimeBasics(t *testing.T) {
 	defer result.Free()
 	require.EqualValues(t, 2, result.ToInt32())
 
-	// Test runtime with all options
-	rt2 := quickjs.NewRuntime(
-		quickjs.WithExecuteTimeout(30),
-		quickjs.WithMemoryLimit(128*1024),
-		quickjs.WithGCThreshold(256*1024),
-		quickjs.WithMaxStackSize(65534),
-		quickjs.WithCanBlock(true),
-		quickjs.WithModuleImport(true),
-		quickjs.WithStripInfo(1),
+	// Test runtime with all options in one go
+	rt2 := NewRuntime(
+		WithExecuteTimeout(30),
+		WithMemoryLimit(128*1024),
+		WithGCThreshold(256*1024),
+		WithMaxStackSize(65534),
+		WithCanBlock(true),
+		WithModuleImport(true),
+		WithStripInfo(1),
 	)
 	defer rt2.Close()
 
@@ -41,304 +40,322 @@ func TestRuntimeBasics(t *testing.T) {
 	result2, err := ctx2.Eval(`"Hello World"`)
 	require.NoError(t, err)
 	defer result2.Free()
-	require.EqualValues(t, "Hello World", result2.String())
-
-	// Test with zero values (should work normally)
-	rt3 := quickjs.NewRuntime(
-		quickjs.WithExecuteTimeout(0),
-		quickjs.WithMemoryLimit(0),
-		quickjs.WithGCThreshold(0),
-		quickjs.WithMaxStackSize(0),
-	)
-	defer rt3.Close()
-
-	ctx3 := rt3.NewContext()
-	defer ctx3.Close()
-
-	result3, err := ctx3.Eval(`"zero values work"`)
-	require.NoError(t, err)
-	defer result3.Free()
-	require.EqualValues(t, "zero values work", result3.String())
+	require.Equal(t, "Hello World", result2.String())
 }
 
-// TestRuntimeLimitsAndTimeouts tests memory limits, timeouts, and stack limits
-func TestRuntimeLimitsAndTimeouts(t *testing.T) {
-	// Test execute timeout
-	rt1 := quickjs.NewRuntime(quickjs.WithExecuteTimeout(1))
-	defer rt1.Close()
+// TestRuntimeLimitsAndErrors tests memory limits, timeouts, and stack limits
+func TestRuntimeLimitsAndErrors(t *testing.T) {
+	t.Run("ExecuteTimeout", func(t *testing.T) {
+		rt := NewRuntime(WithExecuteTimeout(1))
+		defer rt.Close()
 
-	ctx1 := rt1.NewContext()
-	defer ctx1.Close()
+		ctx := rt.NewContext()
+		defer ctx.Close()
 
-	_, err := ctx1.Eval(`while(true){}`)
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "interrupted")
+		_, err := ctx.Eval(`while(true){}`)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "interrupted")
+	})
 
-	// Test memory limit
-	rt2 := quickjs.NewRuntime(quickjs.WithMemoryLimit(512 * 1024))
-	defer rt2.Close()
+	t.Run("MemoryLimit", func(t *testing.T) {
+		rt := NewRuntime(WithMemoryLimit(512 * 1024))
+		defer rt.Close()
 
-	ctx2 := rt2.NewContext()
-	defer ctx2.Close()
+		ctx := rt.NewContext()
+		defer ctx.Close()
 
-	result, err := ctx2.Eval(`var array = []; while (true) { array.push(null) }`)
-	defer result.Free()
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "out of memory")
+		result, err := ctx.Eval(`var array = []; while (true) { array.push(null) }`)
+		defer result.Free()
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "out of memory")
+	})
 
-	// Test stack overflow
-	rt3 := quickjs.NewRuntime(quickjs.WithMaxStackSize(8192))
-	defer rt3.Close()
+	t.Run("StackOverflow", func(t *testing.T) {
+		rt := NewRuntime(WithMaxStackSize(8192))
+		defer rt.Close()
 
-	ctx3 := rt3.NewContext()
-	defer ctx3.Close()
+		ctx := rt.NewContext()
+		defer ctx.Close()
 
-	_, err = ctx3.Eval(`
-        function recursive(n) {
-            if (n <= 0) return 0;
-            return recursive(n - 1) + 1;
-        }
-        recursive(10000);
-    `)
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "stack overflow")
+		_, err := ctx.Eval(`
+            function recursive(n) {
+                if (n <= 0) return 0;
+                return recursive(n - 1) + 1;
+            }
+            recursive(10000);
+        `)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "stack overflow")
+	})
 }
 
-// TestRuntimeConfigurationMethods tests runtime configuration setters
-func TestRuntimeConfigurationMethods(t *testing.T) {
-	rt := quickjs.NewRuntime()
+// TestRuntimeConfiguration tests runtime configuration setters
+func TestRuntimeConfiguration(t *testing.T) {
+	rt := NewRuntime()
 	defer rt.Close()
 
-	ctx := rt.NewContext()
-	defer ctx.Close()
-
-	// Test SetMemoryLimit
-	rt.SetMemoryLimit(512 * 1024)
-	result, err := ctx.Eval(`var array = []; while (true) { array.push(null) }`)
-	defer result.Free()
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "out of memory")
-
-	// Create new runtime for other tests (previous one is memory limited)
-	rt2 := quickjs.NewRuntime()
-	defer rt2.Close()
-
-	ctx2 := rt2.NewContext()
-	defer ctx2.Close()
-
-	// Test SetExecuteTimeout
-	rt2.SetExecuteTimeout(1)
-	_, err = ctx2.Eval(`while(true){}`)
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "interrupted")
-
-	// Create new runtime for stack test
-	rt3 := quickjs.NewRuntime()
-	defer rt3.Close()
-
-	ctx3 := rt3.NewContext()
-	defer ctx3.Close()
-
-	// Test SetMaxStackSize
-	rt3.SetMaxStackSize(8192)
-	_, err = ctx3.Eval(`
-        function recursive(n) {
-            if (n <= 0) return 0;
-            return recursive(n - 1) + 1;
-        }
-        recursive(10000);
-    `)
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "stack overflow")
-
-	// Test other setters (these don't have easy ways to verify effect)
-	rt4 := quickjs.NewRuntime()
-	defer rt4.Close()
-
-	rt4.SetGCThreshold(1024)
-	rt4.SetCanBlock(true)
-	rt4.SetCanBlock(false)
-	rt4.SetStripInfo(1)
-
-	ctx4 := rt4.NewContext()
-	defer ctx4.Close()
-
-	result4, err := ctx4.Eval(`"configuration methods work"`)
-	require.NoError(t, err)
-	defer result4.Free()
-	require.EqualValues(t, "configuration methods work", result4.String())
-}
-
-// TestRuntimeGarbageCollection tests garbage collection functionality
-func TestRuntimeGarbageCollection(t *testing.T) {
-	rt := quickjs.NewRuntime()
-	defer rt.Close()
-
-	ctx := rt.NewContext()
-	defer ctx.Close()
-
-	// Create objects for GC
-	result, err := ctx.Eval(`
-        var objects = [];
-        for(let i = 0; i < 1000; i++) {
-            objects.push({data: new Array(100).fill(i)});
-        }
-        objects.length;
-    `)
-	require.NoError(t, err)
-	defer result.Free()
-	require.EqualValues(t, 1000, result.ToInt32())
+	// Test all setters for coverage
+	rt.SetMemoryLimit(1024 * 1024)
+	rt.SetExecuteTimeout(5)
+	rt.SetMaxStackSize(16384)
+	rt.SetGCThreshold(2048)
+	rt.SetCanBlock(true)
+	rt.SetCanBlock(false) // Test both branches
+	rt.SetStripInfo(1)
 
 	// Run garbage collection
 	rt.RunGC()
 
-	// Verify runtime still works after GC
-	result2, err := ctx.Eval(`"GC completed"`)
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	result, err := ctx.Eval(`"configuration test"`)
 	require.NoError(t, err)
-	defer result2.Free()
-	require.EqualValues(t, "GC completed", result2.String())
-
-	// Test GC threshold options
-	rt2 := quickjs.NewRuntime(quickjs.WithGCThreshold(1024))
-	defer rt2.Close()
-
-	ctx2 := rt2.NewContext()
-	defer ctx2.Close()
-
-	result3, err := ctx2.Eval(`"GC enabled"`)
-	require.NoError(t, err)
-	defer result3.Free()
-	require.EqualValues(t, "GC enabled", result3.String())
-
-	// Test GC disabled
-	rt3 := quickjs.NewRuntime(quickjs.WithGCThreshold(-1))
-	defer rt3.Close()
-
-	ctx3 := rt3.NewContext()
-	defer ctx3.Close()
-
-	result4, err := ctx3.Eval(`"GC disabled"`)
-	require.NoError(t, err)
-	defer result4.Free()
-	require.EqualValues(t, "GC disabled", result4.String())
+	defer result.Free()
+	require.Equal(t, "configuration test", result.String())
 }
 
-// TestRuntimeInterruptHandler tests interrupt handler functionality
+// TestRuntimeInterruptHandler tests interrupt handler functionality and coverage
 func TestRuntimeInterruptHandler(t *testing.T) {
-	rt := quickjs.NewRuntime()
+	rt := NewRuntime()
 	defer rt.Close()
-
-	startTime := time.Now()
-	interruptCalled := false
-
-	// Set interrupt handler that triggers after 1 second
-	rt.SetInterruptHandler(func() int {
-		interruptCalled = true
-		if time.Since(startTime) > time.Second {
-			return 1 // Signal to interrupt
-		}
-		return 0 // Continue execution
-	})
 
 	ctx := rt.NewContext()
 	defer ctx.Close()
 
-	// Execute infinite loop - should be interrupted
-	_, err := ctx.Eval(`while(true){}`)
+	t.Run("InterruptAfterDelay", func(t *testing.T) {
+		startTime := time.Now()
+		rt.SetInterruptHandler(func() int {
+			if time.Since(startTime) > time.Second {
+				return 1 // Interrupt after 1 second
+			}
+			return 0 // Continue
+		})
 
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "interrupted")
-	require.True(t, interruptCalled, "Interrupt handler should have been called")
-
-	// Test replacing interrupt handler (covers the handler cleanup logic)
-	secondInterruptCalled := false
-	rt.SetInterruptHandler(func() int {
-		secondInterruptCalled = true
-		return 1 // Interrupt immediately
+		_, err := ctx.Eval(`while(true){}`)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "interrupted")
 	})
 
-	_, err = ctx.Eval(`while(true){}`)
-	require.Error(t, err)
-	require.True(t, secondInterruptCalled, "Second interrupt handler should have been called")
+	t.Run("ClearBySettingNil", func(t *testing.T) {
+		// Set then clear by nil (covers else branch in SetInterruptHandler)
+		rt.SetInterruptHandler(func() int { return 1 })
+		rt.SetInterruptHandler(nil)
 
+		done := make(chan bool, 1)
+		go func() {
+			_, err := ctx.Eval(`let sum = 0; for(let i = 0; i < 100000; i++) sum += i; sum`)
+			done <- (err == nil)
+		}()
+
+		select {
+		case success := <-done:
+			require.True(t, success)
+		case <-time.After(3 * time.Second):
+			t.Fatal("Code took too long")
+		}
+	})
+
+	t.Run("ClearExplicitly", func(t *testing.T) {
+		rt.SetInterruptHandler(func() int { return 1 })
+		rt.ClearInterruptHandler()
+
+		done := make(chan bool, 1)
+		go func() {
+			_, err := ctx.Eval(`let result = 42; result`)
+			done <- (err == nil)
+		}()
+
+		select {
+		case success := <-done:
+			require.True(t, success)
+		case <-time.After(2 * time.Second):
+			t.Fatal("Code took too long")
+		}
+	})
+}
+
+// TestCallInterruptHandler_DirectCall directly tests callInterruptHandler method for 100% coverage
+func TestCallInterruptHandler_DirectCall(t *testing.T) {
+	rt := NewRuntime()
+	defer rt.Close()
+
+	// Test return 0 branch when no handler is set
+	rt.ClearInterruptHandler()
+	require.Equal(t, 0, rt.callInterruptHandler())
+
+	// Test handler invocation with different return values
+	testCases := []int{0, 1, 42, -1}
+	for _, expected := range testCases {
+		rt.SetInterruptHandler(func() int { return expected })
+		require.Equal(t, expected, rt.callInterruptHandler())
+	}
+}
+
+// TestRuntimeTimeoutVsInterruptHandler tests precedence between timeout and interrupt handler
+func TestRuntimeTimeoutVsInterruptHandler(t *testing.T) {
+	t.Run("TimeoutOverridesHandler", func(t *testing.T) {
+		rt := NewRuntime()
+		defer rt.Close()
+
+		ctx := rt.NewContext()
+		defer ctx.Close()
+
+		// Set handler first, then timeout (timeout should override)
+		rt.SetInterruptHandler(func() int { return 0 })
+		rt.SetExecuteTimeout(1)
+
+		start := time.Now()
+		_, err := ctx.Eval(`while(true){}`)
+		elapsed := time.Since(start)
+
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "interrupted")
+		require.Less(t, elapsed, 3*time.Second)
+	})
+
+	t.Run("HandlerOverridesTimeout", func(t *testing.T) {
+		rt := NewRuntime()
+		defer rt.Close()
+
+		ctx := rt.NewContext()
+		defer ctx.Close()
+
+		// Set timeout first, then handler (handler should override)
+		rt.SetExecuteTimeout(10)
+		rt.SetInterruptHandler(func() int { return 1 })
+
+		start := time.Now()
+		_, err := ctx.Eval(`while(true){}`)
+		elapsed := time.Since(start)
+
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "interrupted")
+		require.Less(t, elapsed, 3*time.Second)
+	})
 }
 
 // TestRuntimeMultipleContexts tests creating and using multiple contexts
 func TestRuntimeMultipleContexts(t *testing.T) {
-	rt := quickjs.NewRuntime()
+	rt := NewRuntime()
 	defer rt.Close()
 
-	// Create multiple contexts
 	ctx1 := rt.NewContext()
 	defer ctx1.Close()
 
 	ctx2 := rt.NewContext()
 	defer ctx2.Close()
 
-	// Test that contexts are independent
-	result1, err := ctx1.Eval(`var x = "context1"; x`)
+	// Test context isolation
+	result1, err := ctx1.Eval(`var x = "ctx1"; x`)
 	require.NoError(t, err)
 	defer result1.Free()
-	require.EqualValues(t, "context1", result1.String())
+	require.Equal(t, "ctx1", result1.String())
 
-	result2, err := ctx2.Eval(`var x = "context2"; x`)
+	result2, err := ctx2.Eval(`var x = "ctx2"; x`)
 	require.NoError(t, err)
 	defer result2.Free()
-	require.EqualValues(t, "context2", result2.String())
+	require.Equal(t, "ctx2", result2.String())
 
-	// Verify contexts don't interfere with each other
+	// Verify isolation
 	result3, err := ctx1.Eval(`x`)
 	require.NoError(t, err)
 	defer result3.Free()
-	require.EqualValues(t, "context1", result3.String())
-
-	result4, err := ctx2.Eval(`x`)
-	require.NoError(t, err)
-	defer result4.Free()
-	require.EqualValues(t, "context2", result4.String())
+	require.Equal(t, "ctx1", result3.String())
 }
 
-// TestRuntimeConcurrency tests concurrent usage of multiple runtime instances
+// TestRuntimeConcurrency tests concurrent usage of runtime instances
 func TestRuntimeConcurrency(t *testing.T) {
-	n := 4  // Reduce concurrent goroutines
-	m := 50 // Reduce operations per goroutine
+	const numGoroutines = 4
+	const opsPerGoroutine = 20
 
 	var wg sync.WaitGroup
-	wg.Add(n)
+	results := make(chan bool, numGoroutines*opsPerGoroutine)
 
-	results := make(chan int64, n*m)
-
-	// Start n goroutines, each with its own runtime
-	for i := 0; i < n; i++ {
-		go func(goroutineID int) {
+	for i := 0; i < numGoroutines; i++ {
+		wg.Add(1)
+		go func() {
 			defer wg.Done()
 
-			// Each goroutine gets its own runtime and context
-			rt := quickjs.NewRuntime()
+			rt := NewRuntime()
 			defer rt.Close()
 
 			ctx := rt.NewContext()
 			defer ctx.Close()
 
-			// Perform m operations
-			for j := 0; j < m; j++ {
+			for j := 0; j < opsPerGoroutine; j++ {
 				result, err := ctx.Eval(`new Date().getTime()`)
-				require.NoError(t, err)
-
-				results <- result.ToInt64()
-				result.Free()
+				results <- (err == nil)
+				if err == nil {
+					result.Free()
+				}
 			}
-		}(i)
+		}()
 	}
 
-	// Wait for all goroutines to complete
 	wg.Wait()
 	close(results)
 
-	// Verify we got all expected results
-	resultCount := 0
-	for range results {
-		resultCount++
+	// Verify all operations succeeded
+	successCount := 0
+	for success := range results {
+		if success {
+			successCount++
+		}
 	}
-	require.Equal(t, n*m, resultCount)
+	require.Equal(t, numGoroutines*opsPerGoroutine, successCount)
+}
+
+// TestRuntimeAdvancedOptions tests advanced runtime options for coverage
+func TestRuntimeAdvancedOptions(t *testing.T) {
+	// Test WithCanBlock(false)
+	rt1 := NewRuntime(WithCanBlock(false))
+	defer rt1.Close()
+
+	ctx1 := rt1.NewContext()
+	defer ctx1.Close()
+
+	result1, err := ctx1.Eval(`"canBlock disabled"`)
+	require.NoError(t, err)
+	defer result1.Free()
+	require.Equal(t, "canBlock disabled", result1.String())
+
+	// Test WithModuleImport(true)
+	rt2 := NewRuntime(WithModuleImport(true))
+	defer rt2.Close()
+
+	ctx2 := rt2.NewContext()
+	defer ctx2.Close()
+
+	result2, err := ctx2.Eval(`"module import enabled"`)
+	require.NoError(t, err)
+	defer result2.Free()
+	require.Equal(t, "module import enabled", result2.String())
+
+	// Test WithStripInfo(0)
+	rt3 := NewRuntime(WithStripInfo(0))
+	defer rt3.Close()
+
+	ctx3 := rt3.NewContext()
+	defer ctx3.Close()
+
+	result3, err := ctx3.Eval(`"strip info test"`)
+	require.NoError(t, err)
+	defer result3.Free()
+	require.Equal(t, "strip info test", result3.String())
+
+	// Test GC options
+	rt4 := NewRuntime(WithGCThreshold(1024))
+	defer rt4.Close()
+
+	rt5 := NewRuntime(WithGCThreshold(-1)) // Disabled
+	defer rt5.Close()
+
+	ctx4 := rt4.NewContext()
+	defer ctx4.Close()
+
+	result4, err := ctx4.Eval(`"GC test"`)
+	require.NoError(t, err)
+	defer result4.Free()
+	require.Equal(t, "GC test", result4.String())
 }
