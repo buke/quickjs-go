@@ -1,16 +1,15 @@
-package quickjs_test
+package quickjs
 
 import (
 	"strings"
 	"testing"
 
-	"github.com/buke/quickjs-go"
 	"github.com/stretchr/testify/require"
 )
 
 // TestAtomBasics tests basic Atom functionality
 func TestAtomBasics(t *testing.T) {
-	rt := quickjs.NewRuntime()
+	rt := NewRuntime()
 	defer rt.Close()
 
 	ctx := rt.NewContext()
@@ -46,7 +45,7 @@ func TestAtomBasics(t *testing.T) {
 
 // TestAtomSpecialCases tests special characters and edge cases
 func TestAtomSpecialCases(t *testing.T) {
-	rt := quickjs.NewRuntime()
+	rt := NewRuntime()
 	defer rt.Close()
 
 	ctx := rt.NewContext()
@@ -72,7 +71,7 @@ func TestAtomSpecialCases(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			var atom quickjs.Atom
+			var atom Atom
 
 			switch v := tc.input.(type) {
 			case string:
@@ -100,7 +99,7 @@ func TestAtomSpecialCases(t *testing.T) {
 
 // TestAtomMemoryManagement tests proper memory management
 func TestAtomMemoryManagement(t *testing.T) {
-	rt := quickjs.NewRuntime()
+	rt := NewRuntime()
 	defer rt.Close()
 
 	ctx := rt.NewContext()
@@ -113,7 +112,7 @@ func TestAtomMemoryManagement(t *testing.T) {
 	}
 
 	// Test creating atoms with different names
-	atoms := make([]quickjs.Atom, 50)
+	atoms := make([]Atom, 50)
 	for i := 0; i < 50; i++ {
 		atoms[i] = ctx.Atom("property" + string(rune('A'+i%26)))
 	}
@@ -136,7 +135,7 @@ func TestAtomMemoryManagement(t *testing.T) {
 
 // TestAtomWithObjects tests Atom usage with object properties
 func TestAtomWithObjects(t *testing.T) {
-	rt := quickjs.NewRuntime()
+	rt := NewRuntime()
 	defer rt.Close()
 
 	ctx := rt.NewContext()
@@ -147,7 +146,7 @@ func TestAtomWithObjects(t *testing.T) {
 
 	// Test setting and getting properties using atoms
 	propNames := []string{"name", "value", "flag", "data"}
-	propValues := []quickjs.Value{
+	propValues := []Value{
 		ctx.String("test"),
 		ctx.Int32(42),
 		ctx.Bool(true),
@@ -188,7 +187,7 @@ func TestAtomWithObjects(t *testing.T) {
 
 // TestAtomDeduplication tests atom deduplication behavior
 func TestAtomDeduplication(t *testing.T) {
-	rt := quickjs.NewRuntime()
+	rt := NewRuntime()
 	defer rt.Close()
 
 	ctx := rt.NewContext()
@@ -196,7 +195,7 @@ func TestAtomDeduplication(t *testing.T) {
 
 	// Test creating many atoms with the same name
 	sameName := "duplicateName"
-	atoms := make([]quickjs.Atom, 50)
+	atoms := make([]Atom, 50)
 
 	for i := 0; i < 50; i++ {
 		atoms[i] = ctx.Atom(sameName)

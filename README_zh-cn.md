@@ -204,9 +204,11 @@ func main() {
     go_ret := ctx.Globals().Get("test").Call("hello", ctx.String("Golang!"))
     fmt.Println(go_ret.String())
 
-    //bind go function to Javascript async function
-    ctx.Globals().Set("testAsync", ctx.AsyncFunction(func(ctx *quickjs.Context, this quickjs.Value, promise quickjs.Value, args []quickjs.Value) {
-        promise.Call("resolve", ctx.String("Hello Async Function!"))
+    // 使用 Function + Promise 绑定 Go 函数为 JavaScript 异步函数
+    ctx.Globals().Set("testAsync", ctx.Function(func(ctx *quickjs.Context, this quickjs.Value, args []quickjs.Value) quickjs.Value {
+        return ctx.Promise(func(resolve, reject func(quickjs.Value)) {
+            resolve(ctx.String("Hello Async Function!"))
+        })
     }))
 
     ret, _ := ctx.Eval(`

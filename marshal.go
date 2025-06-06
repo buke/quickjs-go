@@ -1,4 +1,3 @@
-// marshal.go
 package quickjs
 
 import (

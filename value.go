@@ -638,3 +638,45 @@ func (v Value) IsPromise() bool {
 }
 
 func (v Value) IsConstructor() bool { return C.JS_IsConstructor(v.ctx.ref, v.ref) == 1 }
+
+// Promise state enumeration matching QuickJS
+type PromiseState int
+
+const (
+	PromisePending PromiseState = iota
+	PromiseFulfilled
+	PromiseRejected
+)
+
+// PromiseState returns the state of the Promise
+func (v Value) PromiseState() PromiseState {
+	if !v.IsPromise() {
+		return PromisePending // or return error
+	}
+
+	state := C.JS_PromiseState(v.ctx.ref, v.ref)
+	switch state {
+	case C.JS_PROMISE_PENDING:
+		return PromisePending
+	case C.JS_PROMISE_FULFILLED:
+		return PromiseFulfilled
+	default:
+		return PromiseRejected
+	}
+}
+
+// Await waits for promise resolution and executes pending jobs
+// Similar to Context.Await but called on Value directly
+func (v Value) Await() (Value, error) {
+	if !v.IsPromise() {
+		// Not a promise, return as-is
+		return v, nil
+	}
+
+	// Use js_std_await which handles the event loop
+	result := Value{ctx: v.ctx, ref: C.js_std_await(v.ctx.ref, v.ref)}
+	if result.IsException() {
+		return result, v.ctx.Exception()
+	}
+	return result, nil
+}

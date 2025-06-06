@@ -3,7 +3,6 @@ package quickjs
 import (
 	"fmt"
 	"os"
-	"runtime/cgo"
 	"unsafe"
 )
 
@@ -15,11 +14,10 @@ import "C"
 
 // Context represents a Javascript context (or Realm). Each JSContext has its own global objects and system objects. There can be several JSContexts per JSRuntime and they can share objects, similar to frames of the same origin sharing Javascript objects in a web browser.
 type Context struct {
-	runtime    *Runtime
-	ref        *C.JSContext
-	globals    *Value
-	proxy      *Value
-	asyncProxy *Value
+	runtime     *Runtime
+	ref         *C.JSContext
+	globals     *Value
+	handleStore *handleStore // New: efficient function handle storage
 }
 
 // Runtime returns the runtime of the context.
@@ -29,17 +27,17 @@ func (ctx *Context) Runtime() *Runtime {
 
 // Free will free context and all associated objects.
 func (ctx *Context) Close() {
-	if ctx.proxy != nil {
-		ctx.proxy.Free()
-	}
-
-	if ctx.asyncProxy != nil {
-		ctx.asyncProxy.Free()
-	}
-
 	if ctx.globals != nil {
 		ctx.globals.Free()
 	}
+
+	// Clean up all registered function handles (critical for memory management)
+	if ctx.handleStore != nil {
+		ctx.handleStore.Clear()
+	}
+
+	// Remove from global mapping
+	unregisterContext(ctx.ref)
 
 	C.JS_FreeContext(ctx.ref)
 }
@@ -252,58 +250,81 @@ func (ctx *Context) ParseJSON(v string) Value {
 	return Value{ctx: ctx, ref: C.JS_ParseJSON(ctx.ref, ptr, C.size_t(len(v)), filenamePtr)}
 }
 
-// Function returns a js function value with given function template.
-func (ctx *Context) Function(fn func(ctx *Context, this Value, args []Value) Value) Value {
-	if ctx.proxy == nil {
-		ctx.proxy = &Value{
-			ctx: ctx,
-			ref: C.JS_NewCFunction(ctx.ref, (*C.JSCFunction)(unsafe.Pointer(C.InvokeProxy)), nil, C.int(0)),
-		}
+// Function returns a js function value with given function template
+// New implementation using HandleStore and JS_NewCFunction2 with magic parameter
+func (ctx *Context) Function(fn func(*Context, Value, []Value) Value) Value {
+	// Store function in HandleStore and get int32 ID
+	fnID := ctx.handleStore.Store(fn)
+
+	return Value{
+		ctx: ctx,
+		ref: C.JS_NewCFunction2(
+			ctx.ref,
+			(*C.JSCFunction)(unsafe.Pointer(C.GoFunctionProxy)),
+			nil,                      // name (can be set later)
+			0,                        // length (auto-detected)
+			C.JS_CFUNC_generic_magic, // enable magic parameter support
+			C.int(fnID),              // magic parameter passes function ID
+		),
 	}
-
-	fnHandler := ctx.Int64(int64(cgo.NewHandle(fn)))
-	ctxHandler := ctx.Int64(int64(cgo.NewHandle(ctx)))
-	args := []C.JSValue{ctx.proxy.ref, fnHandler.ref, ctxHandler.ref}
-
-	val, _ := ctx.Eval(`(proxy, fnHandler, ctx) => function() { return proxy.call(this, fnHandler, ctx, ...arguments); }`)
-	defer val.Free()
-
-	return Value{ctx: ctx, ref: C.JS_Call(ctx.ref, val.ref, ctx.Null().ref, C.int(len(args)), &args[0])}
 }
 
-// AsyncFunction returns a js async function value with given function template.
+// AsyncFunction returns a js async function value with given function template
+//
+// Deprecated: Use Context.Function + Context.Promise instead for better memory management and thread safety.
+// Example:
+//
+//	asyncFn := ctx.Function(func(ctx *quickjs.Context, this quickjs.Value, args []quickjs.Value) quickjs.Value {
+//	    return ctx.Promise(func(resolve, reject func(quickjs.Value)) {
+//	        // async work here
+//	        resolve(ctx.String("result"))
+//	    })
+//	})
 func (ctx *Context) AsyncFunction(asyncFn func(ctx *Context, this Value, promise Value, args []Value) Value) Value {
-	if ctx.asyncProxy == nil {
-		ctx.asyncProxy = &Value{
-			ctx: ctx,
-			ref: C.JS_NewCFunction(ctx.ref, (*C.JSCFunction)(unsafe.Pointer(C.InvokeAsyncProxy)), nil, C.int(0)),
-		}
-	}
+	// New implementation using Function + Promise
+	return ctx.Function(func(ctx *Context, this Value, args []Value) Value {
+		return ctx.Promise(func(resolve, reject func(Value)) {
+			// Create a promise object that has resolve/reject methods
+			promiseObj := ctx.Object()
+			promiseObj.Set("resolve", ctx.Function(func(ctx *Context, this Value, args []Value) Value {
+				if len(args) > 0 {
+					resolve(args[0])
+				} else {
+					resolve(ctx.Undefined())
+				}
+				return ctx.Undefined()
+			}))
+			promiseObj.Set("reject", ctx.Function(func(ctx *Context, this Value, args []Value) Value {
+				if len(args) > 0 {
+					reject(args[0])
+				} else {
+					errObj := ctx.Error(fmt.Errorf("Promise rejected without reason"))
+					defer errObj.Free() // Free the error object
+					reject(errObj)
+				}
+				return ctx.Undefined()
+			}))
+			defer promiseObj.Free()
 
-	fnHandler := ctx.Int64(int64(cgo.NewHandle(asyncFn)))
-	ctxHandler := ctx.Int64(int64(cgo.NewHandle(ctx)))
-	args := []C.JSValue{ctx.asyncProxy.ref, fnHandler.ref, ctxHandler.ref}
+			// Call the original async function with the promise object
+			result := asyncFn(ctx, this, promiseObj, args)
 
-	val, _ := ctx.Eval(`(proxy, fnHandler, ctx) => async function(...arguments) {
-		let resolve, reject;
-		const promise = new Promise((resolve_, reject_) => {
-		  resolve = resolve_;
-		  reject = reject_;
-		});
-		promise.resolve = resolve;
-		promise.reject = reject;
+			// If the function returned a value directly (not using promise.resolve/reject),
+			// we resolve with that value
+			if !result.IsUndefined() {
+				resolve(result)
+				result.Free() // Free the result if it's not undefined
+			}
 
-		proxy.call(this, fnHandler, ctx, promise,  ...arguments);
-		return await promise;
-	}`)
-	defer val.Free()
-
-	return Value{ctx: ctx, ref: C.JS_Call(ctx.ref, val.ref, ctx.Null().ref, C.int(len(args)), &args[0])}
+		})
+	})
 }
 
-// InterruptHandler is a function type for interrupt handler.
-/* return != 0 if the JS code needs to be interrupted */
-type InterruptHandler func() int
+// getFunction gets function from HandleStore (internal use)
+func (ctx *Context) loadFunctionFromHandleID(id int32) interface{} {
+	fn, _ := ctx.handleStore.Load(id)
+	return fn
+}
 
 // SetInterruptHandler sets a interrupt handler.
 //
@@ -668,4 +689,42 @@ func (ctx *Context) Await(v Value) (Value, error) {
 		return val, ctx.Exception()
 	}
 	return val, nil
+}
+
+// Promise creates a new Promise with executor function
+// Executor runs synchronously in current thread for thread safety
+func (ctx *Context) Promise(executor func(resolve, reject func(Value))) Value {
+	// Create Promise using JavaScript code to avoid complex C API reference management
+	promiseSetup, _ := ctx.Eval(`
+        (() => {
+            let _resolve, _reject;
+            const promise = new Promise((resolve, reject) => {
+                _resolve = resolve;
+                _reject = reject;
+            });
+            return { promise, resolve: _resolve, reject: _reject };
+        })()
+    `)
+
+	defer promiseSetup.Free()
+
+	promise := promiseSetup.Get("promise")
+	resolveFunc := promiseSetup.Get("resolve")
+	rejectFunc := promiseSetup.Get("reject")
+	defer resolveFunc.Free()
+	defer rejectFunc.Free()
+
+	// Create wrapper functions that call JavaScript resolve/reject
+	resolve := func(result Value) {
+		resolveFunc.Execute(ctx.Undefined(), result)
+	}
+
+	reject := func(reason Value) {
+		rejectFunc.Execute(ctx.Undefined(), reason)
+	}
+
+	// Execute user function synchronously
+	executor(resolve, reject)
+
+	return promise
 }
