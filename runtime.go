@@ -7,15 +7,18 @@ package quickjs
 import "C"
 import (
 	"runtime"
-	"runtime/cgo"
 	"unsafe"
 )
 
-// Runtime represents a Javascript runtime corresponding to an object heap. Several runtimes can exist at the same time but they cannot exchange objects. Inside a given runtime, no multi-threading is supported.
+// InterruptHandler is a function type for interrupt handler.
+// Return != 0 if the JS code needs to be interrupted
+type InterruptHandler func() int
+
+// Runtime represents a Javascript runtime with simplified interrupt handling
 type Runtime struct {
-	ref     *C.JSRuntime
-	options *Options
-	pinner  runtime.Pinner
+	ref              *C.JSRuntime
+	options          *Options
+	interruptHandler InterruptHandler // Store interrupt handler directly (no cgo.Handle)
 }
 
 type Options struct {
@@ -77,8 +80,8 @@ func WithStripInfo(strip int) Option {
 	}
 }
 
-// NewRuntime creates a new quickjs runtime.
-func NewRuntime(opts ...Option) Runtime {
+// NewRuntime creates a new quickjs runtime with simplified interrupt handling.
+func NewRuntime(opts ...Option) *Runtime {
 	runtime.LockOSThread() // prevent multiple quickjs runtime from being created
 
 	options := &Options{
@@ -94,12 +97,12 @@ func NewRuntime(opts ...Option) Runtime {
 		opt(options)
 	}
 
-	rt := Runtime{ref: C.JS_NewRuntime(), options: options}
-
-	if rt.options.timeout > 0 {
-		rt.SetExecuteTimeout(rt.options.timeout)
+	rt := &Runtime{
+		ref:     C.JS_NewRuntime(),
+		options: options,
 	}
 
+	// Configure runtime options
 	if rt.options.memoryLimit > 0 {
 		rt.SetMemoryLimit(rt.options.memoryLimit)
 	}
@@ -116,6 +119,15 @@ func NewRuntime(opts ...Option) Runtime {
 	if rt.options.strip > 0 {
 		rt.SetStripInfo(rt.options.strip)
 	}
+
+	// Set timeout after registration (will override interrupt handler)
+	if rt.options.timeout > 0 {
+		rt.SetExecuteTimeout(rt.options.timeout)
+	}
+
+	// Register runtime for interrupt handler mapping
+	registerRuntime(rt.ref, rt)
+
 	return rt
 }
 
@@ -124,11 +136,18 @@ func (r *Runtime) RunGC() {
 	C.JS_RunGC(r.ref)
 }
 
-// Close will free the runtime pointer.
+// Close will free the runtime pointer with proper cleanup.
 func (r *Runtime) Close() {
+	// Clear interrupt handler before closing
+	r.ClearInterruptHandler()
+
+	// Unregister runtime mapping
+	unregisterRuntime(r.ref)
+
 	C.JS_FreeRuntime(r.ref)
-	clearContextMapping() // Clear all registered contexts
-	r.pinner.Unpin()
+	clearContextMapping()
+
+	// Remove pinner.Unpin() - no longer needed
 }
 
 // SetCanBlock will set the runtime's can block; default is true
@@ -156,29 +175,45 @@ func (r *Runtime) SetMaxStackSize(stack_size uint64) {
 }
 
 // SetExecuteTimeout will set the runtime's execute timeout;
+// This will override any user interrupt handler (expected behavior)
 func (r *Runtime) SetExecuteTimeout(timeout uint64) {
 	C.SetExecuteTimeout(r.ref, C.time_t(timeout))
+	// Clear user interrupt handler since timeout takes precedence
+	r.interruptHandler = nil
 }
 
 func (r *Runtime) SetStripInfo(strip int) {
 	C.JS_SetStripInfo(r.ref, C.int(strip))
 }
 
-// SetInterruptHandler sets a interrupt handler.
+// SetInterruptHandler sets a user interrupt handler using simplified approach.
+// This will override any timeout handler (expected behavior)
 func (r *Runtime) SetInterruptHandler(handler InterruptHandler) {
-	handlerArgsPtr := &C.handlerArgs{
-		fn: (C.uintptr_t)(cgo.NewHandle(handler)),
+	r.interruptHandler = handler
+
+	if handler != nil {
+		// Simplified call - no handlerArgs complexity
+		C.SetInterruptHandler(r.ref)
+	} else {
+		C.ClearInterruptHandler(r.ref)
 	}
+}
 
-	// Ensure the C.handlerArgs instance is never moved to a different place or GCed.
-	r.pinner.Pin(handlerArgsPtr)
+// ClearInterruptHandler clears the user interrupt handler
+func (r *Runtime) ClearInterruptHandler() {
+	r.interruptHandler = nil
+	C.ClearInterruptHandler(r.ref)
+}
 
-	C.SetInterruptHandler(r.ref, unsafe.Pointer(handlerArgsPtr))
+// callInterruptHandler is called from C layer via runtime mapping (internal use)
+func (r *Runtime) callInterruptHandler() int {
+	if r.interruptHandler != nil {
+		return r.interruptHandler()
+	}
+	return 0 // No interrupt
 }
 
 // NewContext creates a new JavaScript context.
-// enable BigFloat/BigDecimal support and enable .
-// enable operator overloading.
 func (r *Runtime) NewContext() *Context {
 	C.js_std_init_handlers(r.ref)
 

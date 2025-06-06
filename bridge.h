@@ -23,10 +23,7 @@ extern JSValue GoFunctionProxy(JSContext *ctx, JSValueConst this_val,
 extern int ValueGetTag(JSValueConst v);
 extern JSValue LoadModuleBytecode(JSContext *ctx, const uint8_t *buf, size_t buf_len, int load_only);
 
-// Interrupt handler (unchanged)
-typedef struct {
-    uintptr_t fn;
-} handlerArgs;
-
-extern void SetInterruptHandler(JSRuntime *rt, void *handlerArgs);
+// Simplified interrupt handler interface (no handlerArgs complexity)
+extern void SetInterruptHandler(JSRuntime *rt);
+extern void ClearInterruptHandler(JSRuntime *rt);
 extern void SetExecuteTimeout(JSRuntime *rt, time_t timeout);

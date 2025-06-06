@@ -326,10 +326,6 @@ func (ctx *Context) loadFunctionFromHandleID(id int32) interface{} {
 	return nil
 }
 
-// InterruptHandler is a function type for interrupt handler.
-/* return != 0 if the JS code needs to be interrupted */
-type InterruptHandler func() int
-
 // SetInterruptHandler sets a interrupt handler.
 //
 // Deprecated: Use SetInterruptHandler on runtime instead

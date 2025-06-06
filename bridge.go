@@ -1,7 +1,6 @@
 package quickjs
 
 import (
-	"runtime/cgo"
 	"sync"
 	"unsafe"
 )
@@ -12,8 +11,13 @@ import (
 */
 import "C"
 
-// Global context mapping using sync.Map for lock-free performance
-var contextMapping sync.Map // map[*C.JSContext]*Context
+var (
+	// Global context mapping using sync.Map for lock-free performance
+	contextMapping sync.Map // map[*C.JSContext]*Context
+
+	// Global runtime mapping for interrupt handler access (new addition)
+	runtimeMapping sync.Map // map[*C.JSRuntime]*Runtime
+)
 
 // registerContext registers Go Context with C JSContext (internal use)
 func registerContext(cCtx *C.JSContext, goCtx *Context) {
@@ -42,15 +46,37 @@ func getContextFromJS(cCtx *C.JSContext) *Context {
 	return nil
 }
 
+// registerRuntime registers Runtime for interrupt handler access (new addition)
+func registerRuntime(cRt *C.JSRuntime, goRt *Runtime) {
+	runtimeMapping.Store(cRt, goRt)
+}
+
+// unregisterRuntime removes Runtime mapping when closed (new addition)
+func unregisterRuntime(cRt *C.JSRuntime) {
+	runtimeMapping.Delete(cRt)
+}
+
+// getRuntimeFromJS gets Go Runtime from C JSRuntime (internal use)
+func getRuntimeFromJS(cRt *C.JSRuntime) *Runtime {
+	if value, ok := runtimeMapping.Load(cRt); ok {
+		return value.(*Runtime)
+	}
+	return nil
+}
+
+// Simplified interrupt handler export (no cgo.Handle complexity)
+//
 //export goInterruptHandler
-func goInterruptHandler(rt *C.JSRuntime, handlerArgs unsafe.Pointer) C.int {
-	handlerArgsStruct := (*C.handlerArgs)(handlerArgs)
+func goInterruptHandler(runtimePtr *C.JSRuntime) C.int {
+	// Get Runtime from mapping instead of unsafe handle operations
+	runtime := getRuntimeFromJS(runtimePtr)
+	if runtime == nil {
+		return C.int(0) // Runtime not found, no interrupt
+	}
 
-	hFn := cgo.Handle(handlerArgsStruct.fn)
-	hFnValue := hFn.Value().(InterruptHandler)
-	// defer hFn.Delete()
+	r := runtime.callInterruptHandler()
 
-	return C.int(hFnValue())
+	return C.int(r)
 }
 
 // New efficient proxy function for regular functions using HandleStore
