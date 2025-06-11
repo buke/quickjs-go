@@ -6,8 +6,23 @@ package quickjs
 import "C"
 import (
 	"errors"
-	"fmt"
 	"unsafe"
+)
+
+// Constants for class binding configuration
+const (
+	// Default parameter counts for different function types
+	DefaultConstructorParams = 2 // newTarget + arguments
+	DefaultMethodParams      = 0 // Auto-detect
+	DefaultGetterParams      = 0 // No parameters for getters
+	DefaultSetterParams      = 1 // One parameter for setters
+
+	// QuickJS limits
+	MaxClassID = 1 << 16 // QuickJS class ID hard limit
+
+	// Common property flags
+	PropertyWritableConfigurable = C.JS_PROP_WRITABLE | C.JS_PROP_CONFIGURABLE
+	PropertyConfigurable         = C.JS_PROP_CONFIGURABLE
 )
 
 // Optional cleanup interface for class instances
@@ -85,13 +100,13 @@ func (cb *ClassBuilder) Constructor(fn ClassConstructorFunc) *ClassBuilder {
 // Method adds an instance method to the class
 // Instance methods are called on object instances
 func (cb *ClassBuilder) Method(name string, fn ClassMethodFunc) *ClassBuilder {
-	return cb.MethodWithLength(name, fn, -1) // Auto-detect parameter count
+	return cb.MethodWithLength(name, fn, DefaultMethodParams)
 }
 
 // StaticMethod adds a static method to the class
 // Static methods are called on the constructor function itself
 func (cb *ClassBuilder) StaticMethod(name string, fn ClassMethodFunc) *ClassBuilder {
-	return cb.StaticMethodWithLength(name, fn, -1) // Auto-detect parameter count
+	return cb.StaticMethodWithLength(name, fn, DefaultMethodParams)
 }
 
 // MethodWithLength adds an instance method with explicit parameter count
@@ -181,28 +196,35 @@ func (cb *ClassBuilder) Build(ctx *Context) (Value, uint32, error) {
 	return ctx.createClass(cb)
 }
 
+// validateClassBuilder validates ClassBuilder configuration
+func validateClassBuilder(builder *ClassBuilder) error {
+	if builder.name == "" {
+		return errors.New("class name cannot be empty")
+	}
+	if builder.constructor == nil {
+		return errors.New("constructor function is required")
+	}
+	return nil
+}
+
 // createClass implements the core class creation logic
 // This method follows the exact pattern from point.c example
 func (ctx *Context) createClass(builder *ClassBuilder) (Value, uint32, error) {
-	if builder.name == "" {
-		return Value{}, 0, errors.New("class name cannot be empty")
+	// Step 1: Validate input
+	if err := validateClassBuilder(builder); err != nil {
+		return Value{}, 0, err
 	}
 
-	if builder.constructor == nil {
-		return Value{}, 0, errors.New("constructor function is required")
-	}
-
-	// Step 1: Create class ID (corresponds to point.c: JS_NewClassID(&js_point_class_id))
-	// Fix: Pass pointer to classID variable, not nil
+	// Step 2: Create class ID (corresponds to point.c: JS_NewClassID(&js_point_class_id))
 	var classID C.JSClassID
 	C.JS_NewClassID(&classID)
 
-	// QuickJS hard limit: (1 << 16)
-	if classID >= (1 << 16) {
-		return Value{}, uint32(classID), errors.New("class ID exceeds maximum value (65535)")
+	// Check QuickJS limits
+	if classID >= MaxClassID {
+		return Value{}, uint32(classID), errors.New("class ID exceeds maximum value")
 	}
 
-	// Step 2: Register class definition (corresponds to point.c: JS_NewClass)
+	// Step 3: Register class definition (corresponds to point.c: JS_NewClass)
 	className := C.CString(builder.name)
 	defer C.free(unsafe.Pointer(className))
 
@@ -213,120 +235,139 @@ func (ctx *Context) createClass(builder *ClassBuilder) (Value, uint32, error) {
 
 	result := C.JS_NewClass(ctx.runtime.ref, classID, &classDef)
 	if result != 0 {
-		if ctx.HasException() {
-			fmt.Printf("Error creating class sssssssssss")
-		}
-		// C.JS_FreeCString(ctx.ref, className)
 		return Value{}, 0, errors.New("failed to create class definition")
 	}
 
-	// Step 3: Create prototype object (corresponds to point.c: point_proto = JS_NewObject(ctx))
+	// Step 4: Create prototype object (corresponds to point.c: point_proto = JS_NewObject(ctx))
 	proto := C.JS_NewObject(ctx.ref)
 	if C.JS_IsException(proto) != 0 {
 		return Value{}, 0, errors.New("failed to create prototype object")
 	}
 
-	// Step 4: Bind instance methods and properties to prototype
-	for _, method := range builder.methods {
-		if !method.Static {
-			if err := ctx.bindMethodToObject(proto, method); err != nil {
-				C.JS_FreeValue(ctx.ref, proto)
-				return Value{}, 0, err
-			}
-		}
-	}
-
-	for _, prop := range builder.properties {
-		if !prop.Static {
-			if err := ctx.bindPropertyToObject(proto, prop); err != nil {
-				C.JS_FreeValue(ctx.ref, proto)
-				return Value{}, 0, err
-			}
-		}
-	}
-
-	// Step 5: Create constructor function (corresponds to point.c: JS_NewCFunction2)
-	constructorID := ctx.handleStore.Store(builder.constructor)
-	constructorName := C.CString(builder.name)
-	defer C.free(unsafe.Pointer(constructorName))
-
-	constructor := C.JS_NewCFunction2(
-		ctx.ref,
-		(*C.JSCFunction)(unsafe.Pointer(C.GoClassConstructorProxy)),
-		constructorName,
-		C.int(2), // Default expected parameter count
-		C.JS_CFUNC_constructor_magic,
-		C.int(constructorID),
-	)
-
-	if C.JS_IsException(constructor) != 0 {
-		ctx.handleStore.Delete(constructorID)
+	// Step 5: Bind instance methods and properties to prototype
+	if err := ctx.bindMembersToObject(proto, builder.methods, builder.properties, false); err != nil {
 		C.JS_FreeValue(ctx.ref, proto)
-		return Value{}, 0, errors.New("failed to create constructor function")
+		return Value{}, 0, err
 	}
 
-	// Step 6: Associate constructor with prototype (corresponds to point.c: JS_SetConstructor)
+	// Step 6: Create constructor function (corresponds to point.c: JS_NewCFunction2)
+	constructor, constructorID, err := ctx.createCFunction(
+		builder.name,
+		builder.constructor,
+		C.JS_CFUNC_constructor_magic,
+		DefaultConstructorParams,
+	)
+	if err != nil {
+		C.JS_FreeValue(ctx.ref, proto)
+		return Value{}, 0, err
+	}
+
+	// Step 7: Associate constructor with prototype (corresponds to point.c: JS_SetConstructor)
 	C.JS_SetConstructor(ctx.ref, constructor, proto)
 
-	// Step 7: Set class prototype (corresponds to point.c: JS_SetClassProto)
+	// Step 8: Set class prototype (corresponds to point.c: JS_SetClassProto)
 	C.JS_SetClassProto(ctx.ref, classID, proto)
 
-	// Step 8: Bind static methods and properties to constructor
-	for _, method := range builder.methods {
-		if method.Static {
-			if err := ctx.bindMethodToObject(constructor, method); err != nil {
-				ctx.handleStore.Delete(constructorID)
-				C.JS_FreeValue(ctx.ref, constructor)
-				return Value{}, 0, err
-			}
-		}
-	}
-
-	for _, prop := range builder.properties {
-		if prop.Static {
-			if err := ctx.bindPropertyToObject(constructor, prop); err != nil {
-				ctx.handleStore.Delete(constructorID)
-				C.JS_FreeValue(ctx.ref, constructor)
-				return Value{}, 0, err
-			}
-		}
+	// Step 9: Bind static methods and properties to constructor
+	if err := ctx.bindMembersToObject(constructor, builder.methods, builder.properties, true); err != nil {
+		ctx.handleStore.Delete(constructorID)
+		C.JS_FreeValue(ctx.ref, constructor)
+		return Value{}, 0, err
 	}
 
 	// Return constructor and classID
 	return Value{ctx: ctx, ref: constructor}, uint32(classID), nil
 }
 
-// bindMethodToObject binds a method to a JavaScript object (prototype or constructor)
-func (ctx *Context) bindMethodToObject(obj C.JSValue, method MethodEntry) error {
-	methodID := ctx.handleStore.Store(method.Func)
-	methodName := C.CString(method.Name)
-	defer C.free(unsafe.Pointer(methodName))
+// createCFunction creates a C function with the specified type and parameters
+// This is a common helper that reduces code duplication
+func (ctx *Context) createCFunction(name string, handler interface{}, funcType C.JSCFunctionEnum, length int) (C.JSValue, int32, error) {
+	handlerID := ctx.handleStore.Store(handler)
+	cName := C.CString(name)
+	defer C.free(unsafe.Pointer(cName))
 
-	length := method.Length
-	if length < 0 {
-		length = 0 // Default to 0 if not specified
+	var proxy unsafe.Pointer
+	switch funcType {
+	case C.JS_CFUNC_constructor_magic:
+		proxy = unsafe.Pointer(C.GoClassConstructorProxy)
+	case C.JS_CFUNC_generic_magic:
+		proxy = unsafe.Pointer(C.GoClassMethodProxy)
+	case C.JS_CFUNC_getter_magic:
+		proxy = unsafe.Pointer(C.GoClassGetterProxy)
+	case C.JS_CFUNC_setter_magic:
+		proxy = unsafe.Pointer(C.GoClassSetterProxy)
+	default:
+		ctx.handleStore.Delete(handlerID)
+		return C.JS_UNDEFINED, 0, errors.New("unsupported function type")
 	}
 
-	methodFunc := C.JS_NewCFunction2(
+	jsFunc := C.JS_NewCFunction2(
 		ctx.ref,
-		(*C.JSCFunction)(unsafe.Pointer(C.GoClassMethodProxy)),
-		methodName,
+		(*C.JSCFunction)(proxy),
+		cName,
 		C.int(length),
-		C.JS_CFUNC_generic_magic,
-		C.int(methodID),
+		funcType,
+		C.int(handlerID),
 	)
 
-	if C.JS_IsException(methodFunc) != 0 {
-		ctx.handleStore.Delete(methodID)
-		return errors.New("failed to create method function")
+	if C.JS_IsException(jsFunc) != 0 {
+		ctx.handleStore.Delete(handlerID)
+		return C.JS_UNDEFINED, 0, errors.New("failed to create function")
 	}
+
+	return jsFunc, handlerID, nil
+}
+
+// bindMembersToObject binds methods and properties to a JavaScript object
+// isStatic determines whether to bind static or instance members
+func (ctx *Context) bindMembersToObject(obj C.JSValue, methods []MethodEntry, properties []PropertyEntry, isStatic bool) error {
+	// Bind methods
+	for _, method := range methods {
+		if method.Static == isStatic {
+			if err := ctx.bindMethodToObject(obj, method); err != nil {
+				return err
+			}
+		}
+	}
+
+	// Bind properties
+	for _, prop := range properties {
+		if prop.Static == isStatic {
+			if err := ctx.bindPropertyToObject(obj, prop); err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
+}
+
+// bindMethodToObject binds a method to a JavaScript object (prototype or constructor)
+func (ctx *Context) bindMethodToObject(obj C.JSValue, method MethodEntry) error {
+	length := method.Length
+	if length < 0 {
+		length = DefaultMethodParams
+	}
+
+	methodFunc, methodID, err := ctx.createCFunction(
+		method.Name,
+		method.Func,
+		C.JS_CFUNC_generic_magic,
+		length,
+	)
+	if err != nil {
+		return err
+	}
+
+	methodName := C.CString(method.Name)
+	defer C.free(unsafe.Pointer(methodName))
 
 	result := C.JS_DefinePropertyValueStr(
 		ctx.ref,
 		obj,
 		methodName,
 		methodFunc,
-		C.JS_PROP_WRITABLE|C.JS_PROP_CONFIGURABLE,
+		PropertyWritableConfigurable,
 	)
 
 	if result < 0 {
@@ -348,49 +389,37 @@ func (ctx *Context) bindPropertyToObject(obj C.JSValue, prop PropertyEntry) erro
 	defer C.JS_FreeAtom(ctx.ref, propAtom)
 
 	var getterFunc, setterFunc C.JSValue = C.JS_UNDEFINED, C.JS_UNDEFINED
+	var getterID, setterID int32
 
 	// Create getter function if provided
 	if prop.Getter != nil {
-		getterID := ctx.handleStore.Store(prop.Getter)
-		getterName := C.CString("get " + prop.Name)
-		defer C.free(unsafe.Pointer(getterName))
-
-		getterFunc = C.JS_NewCFunction2(
-			ctx.ref,
-			(*C.JSCFunction)(unsafe.Pointer(C.GoClassGetterProxy)),
-			getterName,
-			C.int(0),
+		var err error
+		getterFunc, getterID, err = ctx.createCFunction(
+			"get "+prop.Name,
+			prop.Getter,
 			C.JS_CFUNC_getter_magic,
-			C.int(getterID),
+			DefaultGetterParams,
 		)
-
-		if C.JS_IsException(getterFunc) != 0 {
-			ctx.handleStore.Delete(getterID)
-			return errors.New("failed to create getter function")
+		if err != nil {
+			return err
 		}
 	}
 
 	// Create setter function if provided
 	if prop.Setter != nil {
-		setterID := ctx.handleStore.Store(prop.Setter)
-		setterName := C.CString("set " + prop.Name)
-		defer C.free(unsafe.Pointer(setterName))
-
-		setterFunc = C.JS_NewCFunction2(
-			ctx.ref,
-			(*C.JSCFunction)(unsafe.Pointer(C.GoClassSetterProxy)),
-			setterName,
-			C.int(1),
+		var err error
+		setterFunc, setterID, err = ctx.createCFunction(
+			"set "+prop.Name,
+			prop.Setter,
 			C.JS_CFUNC_setter_magic,
-			C.int(setterID),
+			DefaultSetterParams,
 		)
-
-		if C.JS_IsException(setterFunc) != 0 {
-			ctx.handleStore.Delete(setterID)
-			if C.JS_IsUndefined(getterFunc) == 0 { // 0 means not undefined
+		if err != nil {
+			if prop.Getter != nil {
+				ctx.handleStore.Delete(getterID)
 				C.JS_FreeValue(ctx.ref, getterFunc)
 			}
-			return errors.New("failed to create setter function")
+			return err
 		}
 	}
 
@@ -401,14 +430,16 @@ func (ctx *Context) bindPropertyToObject(obj C.JSValue, prop PropertyEntry) erro
 		propAtom,
 		getterFunc,
 		setterFunc,
-		C.JS_PROP_CONFIGURABLE,
+		PropertyConfigurable,
 	)
 
 	if result < 0 {
-		if C.JS_IsUndefined(getterFunc) == 0 { // 0 means not undefined
+		if prop.Getter != nil {
+			ctx.handleStore.Delete(getterID)
 			C.JS_FreeValue(ctx.ref, getterFunc)
 		}
-		if C.JS_IsUndefined(setterFunc) == 0 { // 0 means not undefined
+		if prop.Setter != nil {
+			ctx.handleStore.Delete(setterID)
 			C.JS_FreeValue(ctx.ref, setterFunc)
 		}
 		return errors.New("failed to bind property to object")
