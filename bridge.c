@@ -24,6 +24,42 @@ JSValue GoFunctionProxy(JSContext *ctx, JSValueConst this_val,
     return goFunctionProxy(ctx, this_val, argc, argv, magic);
 }
 
+// Class-related proxy functions - C layer wrappers for Go exports
+
+// Constructor proxy - handles new_target for inheritance support
+// Corresponds to QuickJS JSCFunctionType.constructor_magic
+JSValue GoClassConstructorProxy(JSContext *ctx, JSValueConst new_target, 
+                               int argc, JSValueConst *argv, int magic) {
+    return goClassConstructorProxy(ctx, new_target, argc, argv, magic);
+}
+
+// Method proxy - handles both instance and static methods
+// Corresponds to QuickJS JSCFunctionType.generic_magic  
+JSValue GoClassMethodProxy(JSContext *ctx, JSValueConst this_val,
+                          int argc, JSValueConst *argv, int magic) {
+    return goClassMethodProxy(ctx, this_val, argc, argv, magic);
+}
+
+// Property getter proxy
+// Corresponds to QuickJS JSCFunctionType.getter_magic
+JSValue GoClassGetterProxy(JSContext *ctx, JSValueConst this_val, int magic) {
+    return goClassGetterProxy(ctx, this_val, magic);
+}
+
+// Property setter proxy
+// Corresponds to QuickJS JSCFunctionType.setter_magic
+JSValue GoClassSetterProxy(JSContext *ctx, JSValueConst this_val, 
+                          JSValueConst val, int magic) {
+    return goClassSetterProxy(ctx, this_val, val, magic);
+}
+
+// Finalizer proxy - unified cleanup handler
+// Corresponds to QuickJS JSClassDef.finalizer
+// Called when JS object is garbage collected
+void GoClassFinalizerProxy(JSRuntime *rt, JSValue val) {
+    goClassFinalizerProxy(rt, val);
+}
+
 // Simplified interrupt handler (no handlerArgs complexity)
 int interruptHandler(JSRuntime *rt, void *opaque) {
     JSRuntime *runtimePtr = (JSRuntime*)opaque;

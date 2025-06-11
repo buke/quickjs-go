@@ -20,6 +20,9 @@ type Value struct {
 
 // Free the value.
 func (v Value) Free() {
+	if v.ctx == nil || v.ref == C.JS_UNDEFINED {
+		return // No context or undefined value, nothing to free
+	}
 	C.JS_FreeValue(v.ctx.ref, v.ref)
 }
 
@@ -616,6 +619,10 @@ func (v Value) ToBigUint64Array() ([]uint64, error) {
 	return result, nil
 }
 
+// =============================================================================
+// BASIC TYPE CHECKING METHODS (existing)
+// =============================================================================
+
 func (v Value) IsNumber() bool        { return C.JS_IsNumber(v.ref) == 1 }
 func (v Value) IsBigInt() bool        { return C.JS_IsBigInt(v.ctx.ref, v.ref) == 1 }
 func (v Value) IsBool() bool          { return C.JS_IsBool(v.ref) == 1 }
@@ -629,6 +636,12 @@ func (v Value) IsObject() bool        { return C.JS_IsObject(v.ref) == 1 }
 func (v Value) IsArray() bool         { return C.JS_IsArray(v.ctx.ref, v.ref) == 1 }
 func (v Value) IsError() bool         { return C.JS_IsError(v.ctx.ref, v.ref) == 1 }
 func (v Value) IsFunction() bool      { return C.JS_IsFunction(v.ctx.ref, v.ref) == 1 }
+func (v Value) IsConstructor() bool   { return C.JS_IsConstructor(v.ctx.ref, v.ref) == 1 }
+
+// =============================================================================
+// PROMISE SUPPORT METHODS (existing)
+// =============================================================================
+
 func (v Value) IsPromise() bool {
 	state := C.JS_PromiseState(v.ctx.ref, v.ref)
 	if state == C.JS_PROMISE_PENDING || state == C.JS_PROMISE_FULFILLED || state == C.JS_PROMISE_REJECTED {
@@ -636,8 +649,6 @@ func (v Value) IsPromise() bool {
 	}
 	return false
 }
-
-func (v Value) IsConstructor() bool { return C.JS_IsConstructor(v.ctx.ref, v.ref) == 1 }
 
 // Promise state enumeration matching QuickJS
 type PromiseState int
@@ -679,4 +690,206 @@ func (v Value) Await() (Value, error) {
 		return result, v.ctx.Exception()
 	}
 	return result, nil
+}
+
+// =============================================================================
+// CLASS INSTANCE SUPPORT METHODS - New additions for class binding
+// =============================================================================
+
+// IsClassInstance checks if the value is an instance of any user-defined class
+// This method uses opaque data validation for maximum reliability
+func (v Value) IsClassInstance() bool {
+	if !v.IsObject() {
+		return false // Only objects can be class instances
+	}
+
+	// The most reliable method: check for valid opaque data
+	// All our class instances have opaque data pointing to HandleStore entries
+	return v.HasInstanceData()
+}
+
+// HasInstanceData checks if the value has associated Go object data
+// This is the most reliable way to identify our class instances
+func (v Value) HasInstanceData() bool {
+	if !v.IsObject() {
+		return false
+	}
+
+	// Get class ID first
+	classID := C.JS_GetClassID(v.ref)
+	if classID == C.JS_INVALID_CLASS_ID {
+		return false
+	}
+
+	// Use JS_GetOpaque2 for type-safe check (like point.c methods)
+	opaque := C.JS_GetOpaque2(v.ctx.ref, v.ref, classID)
+	if opaque == nil {
+		return false
+	}
+
+	// Validate that the handle ID exists in our HandleStore
+	handleID := int32(uintptr(opaque))
+	_, exists := v.ctx.handleStore.Load(handleID)
+	return exists
+}
+
+// IsInstanceOfClass checks if the value is an instance of a specific class ID
+// This provides type-safe class instance checking with double validation
+func (v Value) IsInstanceOfClass(expectedClassID uint32) bool {
+	if !v.IsObject() {
+		return false
+	}
+
+	// First check: class ID must match
+	objClassID := uint32(C.JS_GetClassID(v.ref))
+	if objClassID != expectedClassID || objClassID == C.JS_INVALID_CLASS_ID {
+		return false
+	}
+
+	// Second check: must have valid instance data using type-safe retrieval
+	opaque := C.JS_GetOpaque2(v.ctx.ref, v.ref, C.JSClassID(expectedClassID))
+	if opaque == nil {
+		return false
+	}
+
+	// Third check: validate handle exists in store
+	handleID := int32(uintptr(opaque))
+	_, exists := v.ctx.handleStore.Load(handleID)
+	return exists
+}
+
+// GetClassID returns the class ID of the value if it's a class instance
+// Returns JS_INVALID_CLASS_ID (0) if not a class instance
+func (v Value) GetClassID() uint32 {
+	if !v.IsObject() {
+		return C.JS_INVALID_CLASS_ID
+	}
+	return uint32(C.JS_GetClassID(v.ref))
+}
+
+// =============================================================================
+// SPECIALIZED CLASS TYPE CHECKING METHODS
+// =============================================================================
+
+// These methods can be used to check for specific known class types
+// They serve as examples of how to implement type checking for custom classes
+
+// IsCustomClass checks if the value is an instance of a class with given name
+// This method uses the constructor.name property for identification
+func (v Value) IsCustomClass(className string) bool {
+	if !v.IsObject() {
+		return false
+	}
+
+	// Get constructor
+	constructor := v.Get("constructor")
+	if constructor.IsUndefined() {
+		return false
+	}
+	defer constructor.Free()
+
+	// Get constructor name
+	name := constructor.Get("name")
+	if name.IsUndefined() {
+		return false
+	}
+	defer name.Free()
+
+	return name.ToString() == className
+}
+
+// IsInstanceOfConstructor checks if the value is an instance of a specific constructor
+// This uses JavaScript's instanceof operator semantics
+func (v Value) IsInstanceOfConstructor(constructor Value) bool {
+	if !v.IsObject() || !constructor.IsFunction() {
+		return false
+	}
+
+	return C.JS_IsInstanceOf(v.ctx.ref, v.ref, constructor.ref) == 1
+}
+
+// =============================================================================
+// UTILITY METHODS FOR CLASS INSTANCES
+// =============================================================================
+
+// CallMethod calls a method on the class instance with given arguments
+// This is equivalent to obj.methodName(args...) in JavaScript
+func (v Value) CallMethod(methodName string, args ...Value) Value {
+	return v.Call(methodName, args...)
+}
+
+// GetProperty gets a property value from the class instance
+// This is equivalent to obj.propertyName in JavaScript
+func (v Value) GetProperty(propertyName string) Value {
+	return v.Get(propertyName)
+}
+
+// SetProperty sets a property value on the class instance
+// This is equivalent to obj.propertyName = value in JavaScript
+func (v Value) SetProperty(propertyName string, value Value) {
+	v.Set(propertyName, value)
+}
+
+// HasMethod checks if the class instance has a method with given name
+// This checks if the property exists and is a function
+func (v Value) HasMethod(methodName string) bool {
+	if !v.Has(methodName) {
+		return false
+	}
+
+	method := v.Get(methodName)
+	defer method.Free()
+
+	return method.IsFunction()
+}
+
+// HasProperty checks if the class instance has a property with given name
+// This is a wrapper around the existing Has method for consistency
+func (v Value) HasProperty(propertyName string) bool {
+	return v.Has(propertyName)
+}
+
+// =============================================================================
+// DEBUGGING AND INSPECTION METHODS
+// =============================================================================
+
+// GetClassName returns the class name of the value if it's a class instance
+// Returns empty string if not a class instance or name cannot be determined
+func (v Value) GetClassName() string {
+	if !v.IsObject() {
+		return ""
+	}
+
+	constructor := v.Get("constructor")
+	if constructor.IsUndefined() {
+		return ""
+	}
+	defer constructor.Free()
+
+	name := constructor.Get("name")
+	if name.IsUndefined() {
+		return ""
+	}
+	defer name.Free()
+
+	return name.ToString()
+}
+
+// GetObjectInfo returns debugging information about the object
+// Useful for development and debugging class instances
+func (v Value) GetObjectInfo() map[string]interface{} {
+	info := make(map[string]interface{})
+
+	info["isObject"] = v.IsObject()
+	info["isClassInstance"] = v.IsClassInstance()
+	info["hasInstanceData"] = v.HasInstanceData()
+	info["classID"] = int(v.GetClassID())
+	info["className"] = v.GetClassName()
+
+	if v.IsFunction() {
+		info["isFunction"] = true
+		info["isConstructor"] = v.IsConstructor()
+	}
+
+	return info
 }

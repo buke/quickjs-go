@@ -16,9 +16,28 @@ extern JSValue ThrowInternalError(JSContext *ctx, const char *fmt);
 int JS_DeletePropertyInt64(JSContext *ctx, JSValueConst obj, int64_t idx, int flags);
 
 
-// New efficient proxy function for regular functions only
+// Function proxy for regular functions
 extern JSValue GoFunctionProxy(JSContext *ctx, JSValueConst this_val, 
                               int argc, JSValueConst *argv, int magic);
+
+// Class-related proxy functions
+// Constructor proxy - handles new_target for inheritance support
+extern JSValue GoClassConstructorProxy(JSContext *ctx, JSValueConst new_target, 
+                                      int argc, JSValueConst *argv, int magic);
+
+// Method proxy - handles both instance and static methods  
+extern JSValue GoClassMethodProxy(JSContext *ctx, JSValueConst this_val,
+                                 int argc, JSValueConst *argv, int magic);
+
+// Property getter proxy
+extern JSValue GoClassGetterProxy(JSContext *ctx, JSValueConst this_val, int magic);
+
+// Property setter proxy  
+extern JSValue GoClassSetterProxy(JSContext *ctx, JSValueConst this_val, 
+                                 JSValueConst val, int magic);
+
+// Finalizer proxy - unified cleanup handler
+extern void GoClassFinalizerProxy(JSRuntime *rt, JSValue val);
 
 extern int ValueGetTag(JSValueConst v);
 extern JSValue LoadModuleBytecode(JSContext *ctx, const uint8_t *buf, size_t buf_len, int load_only);

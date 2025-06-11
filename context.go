@@ -1,6 +1,7 @@
 package quickjs
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"unsafe"
@@ -17,7 +18,7 @@ type Context struct {
 	runtime     *Runtime
 	ref         *C.JSContext
 	globals     *Value
-	handleStore *handleStore // New: efficient function handle storage
+	handleStore *handleStore //  function handle storage
 }
 
 // Runtime returns the runtime of the context.
@@ -727,4 +728,120 @@ func (ctx *Context) Promise(executor func(resolve, reject func(Value))) Value {
 	executor(resolve, reject)
 
 	return promise
+}
+
+// =============================================================================
+// CLASS BINDING METHODS
+// =============================================================================
+
+// CreateClass creates and registers a JavaScript class using the ClassBuilder pattern
+// This method delegates to the class.go implementation for consistency
+func (ctx *Context) CreateClass(builder *ClassBuilder) (Value, uint32, error) {
+	return ctx.createClass(builder)
+}
+
+// CreateInstanceFromNewTarget creates a class instance using new_target and classID
+// This helper method implements the standard pattern from point.c constructor
+// and supports inheritance through proper prototype chain setup
+func (ctx *Context) CreateInstanceFromNewTarget(newTarget Value, classID uint32, goObj interface{}) Value {
+	// Store Go object in HandleStore for automatic memory management
+	handleID := ctx.handleStore.Store(goObj)
+
+	// Get prototype from new_target (supports inheritance)
+	// This corresponds to point.c: proto = JS_GetPropertyStr(ctx, new_target, "prototype")
+	proto := newTarget.Get("prototype")
+	if proto.IsException() {
+		ctx.handleStore.Delete(handleID)
+		return proto
+	}
+	defer proto.Free()
+
+	// Create JS object with correct prototype and class
+	// This corresponds to point.c: obj = JS_NewObjectProtoClass(ctx, proto, js_point_class_id)
+	jsObj := C.JS_NewObjectProtoClass(ctx.ref, proto.ref, C.JSClassID(classID))
+	if C.JS_IsException(jsObj) != 0 {
+		ctx.handleStore.Delete(handleID)
+		return Value{ctx: ctx, ref: jsObj}
+	}
+
+	// Associate Go object with JS object
+	// This corresponds to point.c: JS_SetOpaque(obj, s)
+	// Note: Safe conversion of integer ID to opaque pointer for QuickJS storage
+	C.JS_SetOpaque(jsObj, unsafe.Pointer(uintptr(handleID)))
+
+	return Value{ctx: ctx, ref: jsObj}
+}
+
+// GetInstanceData retrieves Go object from JavaScript class instance
+// This method extracts the opaque data stored by CreateInstanceFromNewTarget
+func (ctx *Context) GetInstanceData(val Value) (interface{}, error) {
+	// First check if the value is an object
+	if !val.IsObject() {
+		return nil, errors.New("value is not an object")
+	}
+
+	// Get class ID to ensure we have a class instance
+	classID := C.JS_GetClassID(val.ref)
+	if classID == C.JS_INVALID_CLASS_ID {
+		return nil, errors.New("value is not a class instance")
+	}
+
+	// Use JS_GetOpaque2 for type-safe retrieval with context validation
+	// This corresponds to point.c: s = JS_GetOpaque2(ctx, this_val, js_point_class_id)
+	opaque := C.JS_GetOpaque2(ctx.ref, val.ref, classID)
+	if opaque == nil {
+		return nil, errors.New("no instance data found")
+	}
+
+	// Convert opaque pointer back to handle ID
+	// Note: Safe conversion back to integer ID for HandleStore lookup
+	handleID := int32(uintptr(opaque))
+
+	// Retrieve Go object from HandleStore
+	if obj, exists := ctx.handleStore.Load(handleID); exists {
+		return obj, nil
+	}
+
+	return nil, errors.New("instance data not found in handle store")
+}
+
+// GetInstanceDataTyped retrieves Go object from JavaScript class instance with type assertion
+// This is a convenience method that combines GetInstanceData with type assertion
+func (ctx *Context) GetInstanceDataTyped(val Value, expectedClassID uint32) (interface{}, error) {
+	// First verify this is the expected class type
+	if !val.IsInstanceOfClass(expectedClassID) {
+		return nil, errors.New("value is not an instance of expected class")
+	}
+
+	// Use JS_GetOpaque2 with specific class ID for maximum type safety
+	// This corresponds to point.c pattern: s = JS_GetOpaque2(ctx, this_val, js_point_class_id)
+	opaque := C.JS_GetOpaque2(ctx.ref, val.ref, C.JSClassID(expectedClassID))
+	if opaque == nil {
+		return nil, errors.New("no instance data found for expected class")
+	}
+
+	// Convert opaque pointer back to handle ID
+	handleID := int32(uintptr(opaque))
+
+	// Retrieve Go object from HandleStore
+	if obj, exists := ctx.handleStore.Load(handleID); exists {
+		return obj, nil
+	}
+
+	return nil, errors.New("instance data not found in handle store")
+}
+
+// IsInstanceOf checks if a JavaScript value is an instance of a given class
+// This provides a Go-friendly wrapper around JS_GetClassID comparison
+func (ctx *Context) IsInstanceOf(val Value, expectedClassID uint32) bool {
+	if !val.IsObject() {
+		return false
+	}
+
+	objClassID := C.JS_GetClassID(val.ref)
+	if objClassID == C.JS_INVALID_CLASS_ID {
+		return false
+	}
+
+	return uint32(objClassID) == expectedClassID
 }
