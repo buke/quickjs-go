@@ -766,8 +766,8 @@ func (ctx *Context) CreateInstanceFromNewTarget(newTarget Value, classID uint32,
 
 	// Associate Go object with JS object
 	// This corresponds to point.c: JS_SetOpaque(obj, s)
-	// Note: Safe conversion of integer ID to opaque pointer for QuickJS storage
-	C.JS_SetOpaque(jsObj, unsafe.Pointer(uintptr(handleID)))
+	// Use C helper function to safely convert int32 to opaque pointer
+	C.JS_SetOpaque(jsObj, C.IntToOpaque(C.int32_t(handleID)))
 
 	return Value{ctx: ctx, ref: jsObj}
 }
@@ -793,9 +793,8 @@ func (ctx *Context) GetInstanceData(val Value) (interface{}, error) {
 		return nil, errors.New("no instance data found")
 	}
 
-	// Convert opaque pointer back to handle ID
-	// Note: Safe conversion back to integer ID for HandleStore lookup
-	handleID := int32(uintptr(opaque))
+	// Use C helper function to safely convert opaque pointer back to int32
+	handleID := int32(C.OpaqueToInt(opaque))
 
 	// Retrieve Go object from HandleStore
 	if obj, exists := ctx.handleStore.Load(handleID); exists {
@@ -820,8 +819,8 @@ func (ctx *Context) GetInstanceDataTyped(val Value, expectedClassID uint32) (int
 		return nil, errors.New("no instance data found for expected class")
 	}
 
-	// Convert opaque pointer back to handle ID
-	handleID := int32(uintptr(opaque))
+	// Use C helper function to safely convert opaque pointer back to int32
+	handleID := int32(C.OpaqueToInt(opaque))
 
 	// Retrieve Go object from HandleStore
 	if obj, exists := ctx.handleStore.Load(handleID); exists {

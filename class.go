@@ -298,7 +298,7 @@ func (ctx *Context) createCFunction(name string, handler interface{}, funcType C
 		proxy = unsafe.Pointer(C.GoClassSetterProxy)
 	default:
 		ctx.handleStore.Delete(handlerID)
-		return C.JS_UNDEFINED, 0, errors.New("unsupported function type")
+		return C.JS_NewUndefined(), 0, errors.New("unsupported function type")
 	}
 
 	jsFunc := C.JS_NewCFunction2(
@@ -312,7 +312,7 @@ func (ctx *Context) createCFunction(name string, handler interface{}, funcType C
 
 	if C.JS_IsException(jsFunc) != 0 {
 		ctx.handleStore.Delete(handlerID)
-		return C.JS_UNDEFINED, 0, errors.New("failed to create function")
+		return C.JS_NewUndefined(), 0, errors.New("failed to create function")
 	}
 
 	return jsFunc, handlerID, nil
@@ -388,7 +388,7 @@ func (ctx *Context) bindPropertyToObject(obj C.JSValue, prop PropertyEntry) erro
 	propAtom := C.JS_NewAtom(ctx.ref, propName)
 	defer C.JS_FreeAtom(ctx.ref, propAtom)
 
-	var getterFunc, setterFunc C.JSValue = C.JS_UNDEFINED, C.JS_UNDEFINED
+	var getterFunc, setterFunc C.JSValue = C.JS_NewUndefined(), C.JS_NewUndefined()
 	var getterID, setterID int32
 
 	// Create getter function if provided

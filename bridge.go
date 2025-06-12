@@ -316,8 +316,8 @@ func goClassFinalizerProxy(rt *C.JSRuntime, val C.JSValue) {
 		return // Corresponds to point.c: 's' can be NULL
 	}
 
-	// Convert opaque pointer back to handle ID
-	handleID := int32(uintptr(opaque))
+	// Use C helper function to safely convert opaque pointer back to int32
+	handleID := int32(C.OpaqueToInt(opaque))
 
 	// Get Context from runtime mapping
 	// Note: We need to find the Context that owns this object

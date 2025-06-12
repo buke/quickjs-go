@@ -18,6 +18,16 @@ int ValueGetTag(JSValueConst v) {
     return JS_VALUE_GET_TAG(v);
 }
 
+// Helper functions for safe opaque data handling
+// These avoid pointer arithmetic in Go code
+void* IntToOpaque(int32_t id) {
+    return (void*)(intptr_t)id;
+}
+
+int32_t OpaqueToInt(void* opaque) {
+    return (int32_t)(intptr_t)opaque;
+}
+
 // Efficient proxy function for regular functions
 JSValue GoFunctionProxy(JSContext *ctx, JSValueConst this_val, 
                        int argc, JSValueConst *argv, int magic) {

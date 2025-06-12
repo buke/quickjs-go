@@ -15,6 +15,10 @@ extern JSValue ThrowRangeError(JSContext *ctx, const char *fmt);
 extern JSValue ThrowInternalError(JSContext *ctx, const char *fmt);
 int JS_DeletePropertyInt64(JSContext *ctx, JSValueConst obj, int64_t idx, int flags);
 
+// Helper functions for safe opaque data handling
+// These avoid pointer arithmetic in Go code
+extern void* IntToOpaque(int32_t id);
+extern int32_t OpaqueToInt(void* opaque);
 
 // Function proxy for regular functions
 extern JSValue GoFunctionProxy(JSContext *ctx, JSValueConst this_val, 
