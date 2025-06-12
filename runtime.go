@@ -235,7 +235,10 @@ func (r *Runtime) NewContext() *Context {
     globalThis.setTimeout = setTimeout;
     globalThis.clearTimeout = clearTimeout;
     `
-	init_compile := C.JS_Eval(ctx_ref, C.CString(code), C.size_t(len(code)), C.CString("init.js"), C.JS_EVAL_TYPE_MODULE|C.JS_EVAL_FLAG_COMPILE_ONLY)
+
+	// Replace evaluation flags with function calls
+	evalFlags := C.int(C.GetEvalTypeModule()) | C.int(C.GetEvalFlagCompileOnly())
+	init_compile := C.JS_Eval(ctx_ref, C.CString(code), C.size_t(len(code)), C.CString("init.js"), evalFlags)
 	init_run := C.js_std_await(ctx_ref, C.JS_EvalFunction(ctx_ref, init_compile))
 	C.JS_FreeValue(ctx_ref, init_run)
 

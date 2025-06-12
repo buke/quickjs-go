@@ -19,11 +19,16 @@ const (
 
 	// QuickJS limits
 	MaxClassID = 1 << 16 // QuickJS class ID hard limit
-
-	// Common property flags
-	PropertyWritableConfigurable = C.JS_PROP_WRITABLE | C.JS_PROP_CONFIGURABLE
-	PropertyConfigurable         = C.JS_PROP_CONFIGURABLE
 )
+
+// Use function calls for property flags instead of constants
+func getPropertyWritableConfigurable() C.int {
+	return C.int(C.GetPropertyWritableConfigurable())
+}
+
+func getPropertyConfigurable() C.int {
+	return C.int(C.GetPropertyConfigurable())
+}
 
 // Optional cleanup interface for class instances
 // Objects implementing this interface will have Finalize() called automatically
@@ -254,7 +259,7 @@ func (ctx *Context) createClass(builder *ClassBuilder) (Value, uint32, error) {
 	constructor, constructorID, err := ctx.createCFunction(
 		builder.name,
 		builder.constructor,
-		C.JS_CFUNC_constructor_magic,
+		C.JSCFunctionEnum(C.GetCFuncConstructorMagic()),
 		DefaultConstructorParams,
 	)
 	if err != nil {
@@ -287,14 +292,19 @@ func (ctx *Context) createCFunction(name string, handler interface{}, funcType C
 	defer C.free(unsafe.Pointer(cName))
 
 	var proxy unsafe.Pointer
+	constructorMagic := C.JSCFunctionEnum(C.GetCFuncConstructorMagic())
+	genericMagic := C.JSCFunctionEnum(C.GetCFuncGenericMagic())
+	getterMagic := C.JSCFunctionEnum(C.GetCFuncGetterMagic())
+	setterMagic := C.JSCFunctionEnum(C.GetCFuncSetterMagic())
+
 	switch funcType {
-	case C.JS_CFUNC_constructor_magic:
+	case constructorMagic:
 		proxy = unsafe.Pointer(C.GoClassConstructorProxy)
-	case C.JS_CFUNC_generic_magic:
+	case genericMagic:
 		proxy = unsafe.Pointer(C.GoClassMethodProxy)
-	case C.JS_CFUNC_getter_magic:
+	case getterMagic:
 		proxy = unsafe.Pointer(C.GoClassGetterProxy)
-	case C.JS_CFUNC_setter_magic:
+	case setterMagic:
 		proxy = unsafe.Pointer(C.GoClassSetterProxy)
 	default:
 		ctx.handleStore.Delete(handlerID)
@@ -352,7 +362,7 @@ func (ctx *Context) bindMethodToObject(obj C.JSValue, method MethodEntry) error 
 	methodFunc, methodID, err := ctx.createCFunction(
 		method.Name,
 		method.Func,
-		C.JS_CFUNC_generic_magic,
+		C.JSCFunctionEnum(C.GetCFuncGenericMagic()),
 		length,
 	)
 	if err != nil {
@@ -367,7 +377,7 @@ func (ctx *Context) bindMethodToObject(obj C.JSValue, method MethodEntry) error 
 		obj,
 		methodName,
 		methodFunc,
-		PropertyWritableConfigurable,
+		getPropertyWritableConfigurable(),
 	)
 
 	if result < 0 {
@@ -397,7 +407,7 @@ func (ctx *Context) bindPropertyToObject(obj C.JSValue, prop PropertyEntry) erro
 		getterFunc, getterID, err = ctx.createCFunction(
 			"get "+prop.Name,
 			prop.Getter,
-			C.JS_CFUNC_getter_magic,
+			C.JSCFunctionEnum(C.GetCFuncGetterMagic()),
 			DefaultGetterParams,
 		)
 		if err != nil {
@@ -411,7 +421,7 @@ func (ctx *Context) bindPropertyToObject(obj C.JSValue, prop PropertyEntry) erro
 		setterFunc, setterID, err = ctx.createCFunction(
 			"set "+prop.Name,
 			prop.Setter,
-			C.JS_CFUNC_setter_magic,
+			C.JSCFunctionEnum(C.GetCFuncSetterMagic()),
 			DefaultSetterParams,
 		)
 		if err != nil {
@@ -430,7 +440,7 @@ func (ctx *Context) bindPropertyToObject(obj C.JSValue, prop PropertyEntry) erro
 		propAtom,
 		getterFunc,
 		setterFunc,
-		PropertyConfigurable,
+		getPropertyConfigurable(),
 	)
 
 	if result < 0 {

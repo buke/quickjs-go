@@ -20,7 +20,7 @@ type Value struct {
 
 // Free the value.
 func (v Value) Free() {
-	if v.ctx == nil || v.ref == C.JS_UNDEFINED {
+	if v.ctx == nil || C.JS_IsUndefined_Wrapper(v.ref) == 1 {
 		return // No context or undefined value, nothing to free
 	}
 	C.JS_FreeValue(v.ctx.ref, v.ref)
@@ -620,31 +620,35 @@ func (v Value) ToBigUint64Array() ([]uint64, error) {
 }
 
 // =============================================================================
-// BASIC TYPE CHECKING METHODS (existing)
+// BASIC TYPE CHECKING METHODS (replaced macros with wrapper functions)
 // =============================================================================
 
-func (v Value) IsNumber() bool        { return C.JS_IsNumber(v.ref) == 1 }
-func (v Value) IsBigInt() bool        { return C.JS_IsBigInt(v.ctx.ref, v.ref) == 1 }
-func (v Value) IsBool() bool          { return C.JS_IsBool(v.ref) == 1 }
-func (v Value) IsNull() bool          { return C.JS_IsNull(v.ref) == 1 }
-func (v Value) IsUndefined() bool     { return C.JS_IsUndefined(v.ref) == 1 }
-func (v Value) IsException() bool     { return C.JS_IsException(v.ref) == 1 }
-func (v Value) IsUninitialized() bool { return C.JS_IsUninitialized(v.ref) == 1 }
-func (v Value) IsString() bool        { return C.JS_IsString(v.ref) == 1 }
-func (v Value) IsSymbol() bool        { return C.JS_IsSymbol(v.ref) == 1 }
-func (v Value) IsObject() bool        { return C.JS_IsObject(v.ref) == 1 }
+func (v Value) IsNumber() bool        { return C.JS_IsNumber_Wrapper(v.ref) == 1 }
+func (v Value) IsBigInt() bool        { return C.JS_IsBigInt_Wrapper(v.ctx.ref, v.ref) == 1 }
+func (v Value) IsBool() bool          { return C.JS_IsBool_Wrapper(v.ref) == 1 }
+func (v Value) IsNull() bool          { return C.JS_IsNull_Wrapper(v.ref) == 1 }
+func (v Value) IsUndefined() bool     { return C.JS_IsUndefined_Wrapper(v.ref) == 1 }
+func (v Value) IsException() bool     { return C.JS_IsException_Wrapper(v.ref) == 1 }
+func (v Value) IsUninitialized() bool { return C.JS_IsUninitialized_Wrapper(v.ref) == 1 }
+func (v Value) IsString() bool        { return C.JS_IsString_Wrapper(v.ref) == 1 }
+func (v Value) IsSymbol() bool        { return C.JS_IsSymbol_Wrapper(v.ref) == 1 }
+func (v Value) IsObject() bool        { return C.JS_IsObject_Wrapper(v.ref) == 1 }
 func (v Value) IsArray() bool         { return C.JS_IsArray(v.ctx.ref, v.ref) == 1 }
 func (v Value) IsError() bool         { return C.JS_IsError(v.ctx.ref, v.ref) == 1 }
 func (v Value) IsFunction() bool      { return C.JS_IsFunction(v.ctx.ref, v.ref) == 1 }
 func (v Value) IsConstructor() bool   { return C.JS_IsConstructor(v.ctx.ref, v.ref) == 1 }
 
 // =============================================================================
-// PROMISE SUPPORT METHODS (existing)
+// PROMISE SUPPORT METHODS (replaced constants with getter functions)
 // =============================================================================
 
 func (v Value) IsPromise() bool {
 	state := C.JS_PromiseState(v.ctx.ref, v.ref)
-	if state == C.JS_PROMISE_PENDING || state == C.JS_PROMISE_FULFILLED || state == C.JS_PROMISE_REJECTED {
+	pending := C.GetPromisePending()
+	fulfilled := C.GetPromiseFulfilled()
+	rejected := C.GetPromiseRejected()
+
+	if C.int(state) == pending || C.int(state) == fulfilled || C.int(state) == rejected {
 		return true
 	}
 	return false
@@ -662,14 +666,14 @@ const (
 // PromiseState returns the state of the Promise
 func (v Value) PromiseState() PromiseState {
 	if !v.IsPromise() {
-		return PromisePending // or return error
+		return PromisePending
 	}
 
 	state := C.JS_PromiseState(v.ctx.ref, v.ref)
 	switch state {
-	case C.JS_PROMISE_PENDING:
+	case C.JSPromiseStateEnum(C.GetPromisePending()):
 		return PromisePending
-	case C.JS_PROMISE_FULFILLED:
+	case C.JSPromiseStateEnum(C.GetPromiseFulfilled()):
 		return PromiseFulfilled
 	default:
 		return PromiseRejected
@@ -693,7 +697,7 @@ func (v Value) Await() (Value, error) {
 }
 
 // =============================================================================
-// CLASS INSTANCE SUPPORT METHODS - New additions for class binding
+// CLASS INSTANCE SUPPORT METHODS (replaced invalid class ID constant)
 // =============================================================================
 
 // IsClassInstance checks if the value is an instance of any user-defined class
@@ -717,7 +721,8 @@ func (v Value) HasInstanceData() bool {
 
 	// Get class ID first
 	classID := C.JS_GetClassID(v.ref)
-	if classID == C.JS_INVALID_CLASS_ID {
+	invalidClassID := C.uint32_t(C.GetInvalidClassID())
+	if classID == invalidClassID {
 		return false
 	}
 
@@ -728,7 +733,7 @@ func (v Value) HasInstanceData() bool {
 	}
 
 	// Validate that the handle ID exists in our HandleStore
-	handleID := int32(uintptr(opaque))
+	handleID := int32(C.OpaqueToInt(opaque))
 	_, exists := v.ctx.handleStore.Load(handleID)
 	return exists
 }
@@ -742,7 +747,8 @@ func (v Value) IsInstanceOfClass(expectedClassID uint32) bool {
 
 	// First check: class ID must match
 	objClassID := uint32(C.JS_GetClassID(v.ref))
-	if objClassID != expectedClassID || objClassID == C.JS_INVALID_CLASS_ID {
+	invalidClassID := uint32(C.GetInvalidClassID())
+	if objClassID != expectedClassID || objClassID == invalidClassID {
 		return false
 	}
 
@@ -753,7 +759,7 @@ func (v Value) IsInstanceOfClass(expectedClassID uint32) bool {
 	}
 
 	// Third check: validate handle exists in store
-	handleID := int32(uintptr(opaque))
+	handleID := int32(C.OpaqueToInt(opaque))
 	_, exists := v.ctx.handleStore.Load(handleID)
 	return exists
 }
@@ -762,7 +768,7 @@ func (v Value) IsInstanceOfClass(expectedClassID uint32) bool {
 // Returns JS_INVALID_CLASS_ID (0) if not a class instance
 func (v Value) GetClassID() uint32 {
 	if !v.IsObject() {
-		return C.JS_INVALID_CLASS_ID
+		return uint32(C.GetInvalidClassID())
 	}
 	return uint32(C.JS_GetClassID(v.ref))
 }

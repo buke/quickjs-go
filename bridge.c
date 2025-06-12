@@ -4,22 +4,91 @@
 #include "cutils.h" 
 #include <time.h>
 
+// ============================================================================
+// MACRO WRAPPER FUNCTIONS
+// Convert QuickJS macros to functions for Windows cgo compatibility
+// ============================================================================
+
+// Value creation macros -> functions
 JSValue JS_NewNull() { return JS_NULL; }
 JSValue JS_NewUndefined() { return JS_UNDEFINED; }
 JSValue JS_NewUninitialized() { return JS_UNINITIALIZED; }
+JSValue JS_NewException() { return JS_EXCEPTION; }
+JSValue JS_NewTrue() { return JS_TRUE; }
+JSValue JS_NewFalse() { return JS_FALSE; }
 
+// Error throwing macros -> functions
 JSValue ThrowSyntaxError(JSContext *ctx, const char *fmt) { return JS_ThrowSyntaxError(ctx, "%s", fmt); }
 JSValue ThrowTypeError(JSContext *ctx, const char *fmt) { return JS_ThrowTypeError(ctx, "%s", fmt); }
 JSValue ThrowReferenceError(JSContext *ctx, const char *fmt) { return JS_ThrowReferenceError(ctx, "%s", fmt); }
 JSValue ThrowRangeError(JSContext *ctx, const char *fmt) { return JS_ThrowRangeError(ctx, "%s", fmt); }
 JSValue ThrowInternalError(JSContext *ctx, const char *fmt) { return JS_ThrowInternalError(ctx, "%s", fmt); }
 
+// Type checking macros -> functions (这些在 Go 代码中大量使用)
+int JS_IsNumber_Wrapper(JSValue val) { return JS_IsNumber(val); }
+int JS_IsBigInt_Wrapper(JSContext *ctx, JSValue val) { return JS_IsBigInt(ctx, val); }
+int JS_IsBool_Wrapper(JSValue val) { return JS_IsBool(val); }
+int JS_IsNull_Wrapper(JSValue val) { return JS_IsNull(val); }
+int JS_IsUndefined_Wrapper(JSValue val) { return JS_IsUndefined(val); }
+int JS_IsException_Wrapper(JSValue val) { return JS_IsException(val); }
+int JS_IsUninitialized_Wrapper(JSValue val) { return JS_IsUninitialized(val); }
+int JS_IsString_Wrapper(JSValue val) { return JS_IsString(val); }
+int JS_IsSymbol_Wrapper(JSValue val) { return JS_IsSymbol(val); }
+int JS_IsObject_Wrapper(JSValue val) { return JS_IsObject(val); }
+
+// Value tag access macro -> function
 int ValueGetTag(JSValueConst v) {
     return JS_VALUE_GET_TAG(v);
 }
 
+// Property flags (For class.go)
+int GetPropertyWritableConfigurable() { return JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE; }
+int GetPropertyConfigurable() { return JS_PROP_CONFIGURABLE; }
+
+// TypedArray enum values (For context.go)
+int GetTypedArrayInt8() { return JS_TYPED_ARRAY_INT8; }
+int GetTypedArrayUint8() { return JS_TYPED_ARRAY_UINT8; }
+int GetTypedArrayUint8C() { return JS_TYPED_ARRAY_UINT8C; }
+int GetTypedArrayInt16() { return JS_TYPED_ARRAY_INT16; }
+int GetTypedArrayUint16() { return JS_TYPED_ARRAY_UINT16; }
+int GetTypedArrayInt32() { return JS_TYPED_ARRAY_INT32; }
+int GetTypedArrayUint32() { return JS_TYPED_ARRAY_UINT32; }
+int GetTypedArrayFloat32() { return JS_TYPED_ARRAY_FLOAT32; }
+int GetTypedArrayFloat64() { return JS_TYPED_ARRAY_FLOAT64; }
+int GetTypedArrayBigInt64() { return JS_TYPED_ARRAY_BIG_INT64; }
+int GetTypedArrayBigUint64() { return JS_TYPED_ARRAY_BIG_UINT64; }
+
+// Evaluation flags (For context.go)
+int GetEvalTypeGlobal() { return JS_EVAL_TYPE_GLOBAL; }
+int GetEvalTypeModule() { return JS_EVAL_TYPE_MODULE; }
+int GetEvalFlagStrict() { return JS_EVAL_FLAG_STRICT; }
+int GetEvalFlagCompileOnly() { return JS_EVAL_FLAG_COMPILE_ONLY; }
+
+// Read/Write object flags
+int GetReadObjBytecode() { return JS_READ_OBJ_BYTECODE; }
+int GetWriteObjBytecode() { return JS_WRITE_OBJ_BYTECODE; }
+
+// Function type enums (For class.go)
+int GetCFuncGeneric() { return JS_CFUNC_generic; }
+int GetCFuncGenericMagic() { return JS_CFUNC_generic_magic; }
+int GetCFuncConstructor() { return JS_CFUNC_constructor; }
+int GetCFuncConstructorMagic() { return JS_CFUNC_constructor_magic; }
+int GetCFuncGetterMagic() { return JS_CFUNC_getter_magic; }
+int GetCFuncSetterMagic() { return JS_CFUNC_setter_magic; }
+
+// Promise states (For value.go)
+int GetPromisePending() { return JS_PROMISE_PENDING; }
+int GetPromiseFulfilled() { return JS_PROMISE_FULFILLED; }
+int GetPromiseRejected() { return JS_PROMISE_REJECTED; }
+
+// Class ID
+int GetInvalidClassID() { return JS_INVALID_CLASS_ID; }
+
+// ============================================================================
+// HELPER FUNCTIONS 
+// ============================================================================
+
 // Helper functions for safe opaque data handling
-// These avoid pointer arithmetic in Go code
 void* IntToOpaque(int32_t id) {
     return (void*)(intptr_t)id;
 }

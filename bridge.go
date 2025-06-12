@@ -304,7 +304,8 @@ func goClassSetterProxy(ctx *C.JSContext, thisVal C.JSValue,
 func goClassFinalizerProxy(rt *C.JSRuntime, val C.JSValue) {
 	// Get class ID for the object being finalized
 	classID := C.JS_GetClassID(val)
-	if classID == C.JS_INVALID_CLASS_ID {
+	invalidClassID := C.uint32_t(C.GetInvalidClassID())
+	if classID == invalidClassID {
 		return // Not a class instance
 	}
 
