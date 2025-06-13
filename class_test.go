@@ -38,7 +38,7 @@ func getFinalizeCount() int64 {
 	return atomic.LoadInt64(&finalizeCallCount)
 }
 
-// createPointClass creates a Point class for testing
+// createPointClass creates a Point class for testing with simplified NewInstance
 func createPointClass(ctx *Context) (Value, uint32, error) {
 	return NewClass("Point").
 		Constructor(func(ctx *Context, newTarget Value, args []Value) Value {
@@ -51,10 +51,11 @@ func createPointClass(ctx *Context) (Value, uint32, error) {
 			}
 
 			point := &Point{X: x, Y: y}
-			return ctx.CreateInstanceFromNewTarget(newTarget, pointClassID, point)
+			// Use simplified NewInstance (automatic classID retrieval)
+			return newTarget.NewInstance(point)
 		}).
 		Method("norm", func(ctx *Context, this Value, args []Value) Value {
-			obj, err := ctx.GetInstanceData(this)
+			obj, err := this.GetGoObject()
 			if err != nil {
 				return ctx.ThrowError(err)
 			}
@@ -63,7 +64,7 @@ func createPointClass(ctx *Context) (Value, uint32, error) {
 			return ctx.Float64(norm)
 		}).
 		Method("toString", func(ctx *Context, this Value, args []Value) Value {
-			obj, err := ctx.GetInstanceData(this)
+			obj, err := this.GetGoObject()
 			if err != nil {
 				return ctx.ThrowError(err)
 			}
@@ -72,7 +73,7 @@ func createPointClass(ctx *Context) (Value, uint32, error) {
 		}).
 		Property("x",
 			func(ctx *Context, this Value) Value { // getter
-				obj, err := ctx.GetInstanceData(this)
+				obj, err := this.GetGoObject()
 				if err != nil {
 					return ctx.ThrowError(err)
 				}
@@ -80,7 +81,7 @@ func createPointClass(ctx *Context) (Value, uint32, error) {
 				return ctx.Float64(point.X)
 			},
 			func(ctx *Context, this Value, value Value) Value { // setter
-				obj, err := ctx.GetInstanceData(this)
+				obj, err := this.GetGoObject()
 				if err != nil {
 					return ctx.ThrowError(err)
 				}
@@ -90,7 +91,7 @@ func createPointClass(ctx *Context) (Value, uint32, error) {
 			}).
 		Property("y",
 			func(ctx *Context, this Value) Value { // getter
-				obj, err := ctx.GetInstanceData(this)
+				obj, err := this.GetGoObject()
 				if err != nil {
 					return ctx.ThrowError(err)
 				}
@@ -98,7 +99,7 @@ func createPointClass(ctx *Context) (Value, uint32, error) {
 				return ctx.Float64(point.Y)
 			},
 			func(ctx *Context, this Value, value Value) Value { // setter
-				obj, err := ctx.GetInstanceData(this)
+				obj, err := this.GetGoObject()
 				if err != nil {
 					return ctx.ThrowError(err)
 				}
@@ -107,7 +108,8 @@ func createPointClass(ctx *Context) (Value, uint32, error) {
 				return ctx.Undefined()
 			}).
 		StaticMethod("zero", func(ctx *Context, this Value, args []Value) Value {
-			return ctx.CreateInstanceFromNewTarget(this, pointClassID, &Point{X: 0, Y: 0})
+			// Use simplified NewInstance for static method as well
+			return this.NewInstance(&Point{X: 0, Y: 0})
 		}).
 		StaticProperty("PI",
 			func(ctx *Context, this Value) Value { // static getter
@@ -116,8 +118,6 @@ func createPointClass(ctx *Context) (Value, uint32, error) {
 			nil). // no setter, read-only
 		Build(ctx)
 }
-
-var pointClassID uint32 // Global class ID for testing
 
 // TestBasicClassCreation tests basic class creation and registration
 func TestBasicClassCreation(t *testing.T) {
@@ -128,13 +128,10 @@ func TestBasicClassCreation(t *testing.T) {
 	defer context.Close()
 
 	// Create Point class
-	pointConstructor, classID, err := createPointClass(context)
+	pointConstructor, _, err := createPointClass(context)
 	if err != nil {
 		t.Fatalf("Failed to create Point class: %v", err)
 	}
-
-	// Store classID for other functions
-	pointClassID = classID
 
 	// Register Point class globally
 	// Note: Once set as global property, Globals will manage the memory automatically
@@ -142,9 +139,9 @@ func TestBasicClassCreation(t *testing.T) {
 
 	// Test basic constructor call
 	result, err := context.Eval(`
-	    let p = new Point(3, 4);
-	    p.norm();
-	`)
+        let p = new Point(3, 4);
+        p.norm();
+    `)
 	if err != nil {
 		t.Fatalf("Failed to evaluate basic constructor test: %v", err)
 	}
@@ -165,11 +162,10 @@ func TestConstructorFunctionality(t *testing.T) {
 	defer context.Close()
 
 	// Create and register Point class
-	pointConstructor, classID, err := createPointClass(context)
+	pointConstructor, _, err := createPointClass(context)
 	if err != nil {
 		t.Fatalf("Failed to create Point class: %v", err)
 	}
-	pointClassID = classID
 
 	// Register Point class globally
 	// Note: Globals will manage the memory automatically
@@ -215,11 +211,10 @@ func TestInstanceMethods(t *testing.T) {
 	defer context.Close()
 
 	// Create and register Point class
-	pointConstructor, classID, err := createPointClass(context)
+	pointConstructor, _, err := createPointClass(context)
 	if err != nil {
 		t.Fatalf("Failed to create Point class: %v", err)
 	}
-	pointClassID = classID
 
 	// Register Point class globally
 	// Note: Globals will manage the memory automatically
@@ -264,11 +259,10 @@ func TestProperties(t *testing.T) {
 	defer context.Close()
 
 	// Create and register Point class
-	pointConstructor, classID, err := createPointClass(context)
+	pointConstructor, _, err := createPointClass(context)
 	if err != nil {
 		t.Fatalf("Failed to create Point class: %v", err)
 	}
-	pointClassID = classID
 
 	// Register Point class globally
 	// Note: Globals will manage the memory automatically
@@ -316,11 +310,10 @@ func TestStaticMethods(t *testing.T) {
 	defer context.Close()
 
 	// Create and register Point class
-	pointConstructor, classID, err := createPointClass(context)
+	pointConstructor, _, err := createPointClass(context)
 	if err != nil {
 		t.Fatalf("Failed to create Point class: %v", err)
 	}
-	pointClassID = classID
 
 	// Register Point class globally
 	// Note: Globals will manage the memory automatically
@@ -351,11 +344,10 @@ func TestStaticProperties(t *testing.T) {
 	defer context.Close()
 
 	// Create and register Point class
-	pointConstructor, classID, err := createPointClass(context)
+	pointConstructor, _, err := createPointClass(context)
 	if err != nil {
 		t.Fatalf("Failed to create Point class: %v", err)
 	}
-	pointClassID = classID
 
 	// Register Point class globally
 	// Note: Globals will manage the memory automatically
@@ -382,11 +374,10 @@ func TestInheritanceAndNewTarget(t *testing.T) {
 	defer context.Close()
 
 	// Create and register Point class
-	pointConstructor, classID, err := createPointClass(context)
+	pointConstructor, _, err := createPointClass(context)
 	if err != nil {
 		t.Fatalf("Failed to create Point class: %v", err)
 	}
-	pointClassID = classID
 
 	// Register Point class globally
 	// Note: Globals will manage the memory automatically
@@ -442,11 +433,10 @@ func TestClassInstanceChecking(t *testing.T) {
 	defer context.Close()
 
 	// Create and register Point class
-	pointConstructor, classID, err := createPointClass(context)
+	pointConstructor, pointClassID, err := createPointClass(context)
 	if err != nil {
 		t.Fatalf("Failed to create Point class: %v", err)
 	}
-	pointClassID = classID
 
 	// Register Point class globally
 	// Note: Globals will manage the memory automatically
@@ -465,12 +455,12 @@ func TestClassInstanceChecking(t *testing.T) {
 	}
 
 	// Test IsInstanceOfClass
-	if !instance.IsInstanceOfClass(pointClassID) {
+	if !instance.IsInstanceOfClassID(pointClassID) {
 		t.Errorf("Expected IsInstanceOfClass to return true for correct class ID")
 	}
 
 	// Test with wrong class ID
-	if instance.IsInstanceOfClass(999) {
+	if instance.IsInstanceOfClassID(999) {
 		t.Errorf("Expected IsInstanceOfClass to return false for wrong class ID")
 	}
 
@@ -500,8 +490,8 @@ func TestClassInstanceChecking(t *testing.T) {
 	}
 }
 
-// TestGetInstanceData tests retrieving Go objects from JS instances
-func TestGetInstanceData(t *testing.T) {
+// TestGetGoObject tests retrieving Go objects from JS instances
+func TestGetGoObject(t *testing.T) {
 	rt := NewRuntime()
 	defer rt.Close()
 
@@ -509,11 +499,10 @@ func TestGetInstanceData(t *testing.T) {
 	defer context.Close()
 
 	// Create and register Point class
-	pointConstructor, classID, err := createPointClass(context)
+	pointConstructor, _, err := createPointClass(context)
 	if err != nil {
 		t.Fatalf("Failed to create Point class: %v", err)
 	}
-	pointClassID = classID
 
 	// Register Point class globally
 	// Note: Globals will manage the memory automatically
@@ -526,8 +515,8 @@ func TestGetInstanceData(t *testing.T) {
 	}
 	defer instance.Free()
 
-	// Use context.GetInstanceData to retrieve Go object
-	obj, err := context.GetInstanceData(instance)
+	// Use GetGoObject to retrieve Go object
+	obj, err := instance.GetGoObject()
 	if err != nil {
 		t.Fatalf("Failed to get instance data: %v", err)
 	}
@@ -541,8 +530,8 @@ func TestGetInstanceData(t *testing.T) {
 		t.Errorf("Expected Point(3.14, 2.71), got Point(%f, %f)", point.X, point.Y)
 	}
 
-	// Test GetInstanceData via Context method again for consistency
-	obj2, err := context.GetInstanceData(instance)
+	// Test GetGoObject via Context method again for consistency
+	obj2, err := instance.GetGoObject()
 	if err != nil {
 		t.Fatalf("Failed to get instance data via context: %v", err)
 	}
@@ -569,11 +558,10 @@ func TestFinalizerInterface(t *testing.T) {
 	resetFinalizeCounter()
 
 	// Create and register Point class
-	pointConstructor, classID, err := createPointClass(context)
+	pointConstructor, _, err := createPointClass(context)
 	if err != nil {
 		t.Fatalf("Failed to create Point class: %v", err)
 	}
-	pointClassID = classID
 
 	// Register Point class globally
 	// Note: Globals will manage the memory automatically
@@ -638,25 +626,26 @@ func TestErrorHandling(t *testing.T) {
 		t.Errorf("Expected error for missing constructor")
 	}
 
-	// Test GetInstanceData on non-class object
+	// Test GetGoObject on non-class object
 	regularObj, err := context.Eval(`({})`)
 	if err != nil {
 		t.Fatalf("Failed to create regular object: %v", err)
 	}
 	defer regularObj.Free()
 
-	// Use context.GetInstanceData to test error handling
-	_, err = context.GetInstanceData(regularObj)
+	// Use GetGoObject to test error handling
+	_, err = regularObj.GetGoObject()
+
 	if err == nil {
 		t.Errorf("Expected error when getting instance data from regular object")
 	}
 
-	// Test GetInstanceData on non-object
+	// Test GetGoObject on non-object
 	numberValue := context.Float64(42.0)
 	defer numberValue.Free()
 
-	// Use context.GetInstanceData to test error handling
-	_, err = context.GetInstanceData(numberValue)
+	// Use GetGoObject to test error handling
+	_, err = numberValue.GetGoObject()
 	if err == nil {
 		t.Errorf("Expected error when getting instance data from number")
 	}
@@ -679,7 +668,8 @@ func TestMemoryManagement(t *testing.T) {
 		constructor, _, err := NewClass(className).
 			Constructor(func(ctx *Context, newTarget Value, args []Value) Value {
 				point := &Point{X: float64(i), Y: float64(i * 2)}
-				return ctx.CreateInstanceFromNewTarget(newTarget, pointClassID, point)
+				// Use simplified NewInstance
+				return newTarget.NewInstance(point)
 			}).
 			Method("getValue", func(ctx *Context, this Value, args []Value) Value {
 				return ctx.Float64(float64(i))
@@ -722,11 +712,10 @@ func TestComplexClassHierarchy(t *testing.T) {
 	defer context.Close()
 
 	// Create Point class
-	pointConstructor, classID, err := createPointClass(context)
+	pointConstructor, _, err := createPointClass(context)
 	if err != nil {
 		t.Fatalf("Failed to create Point class: %v", err)
 	}
-	pointClassID = classID
 
 	// Register Point class globally
 	// Note: Globals will manage the memory automatically
@@ -813,11 +802,10 @@ func TestConcurrentAccess(t *testing.T) {
 	defer context.Close()
 
 	// Create Point class
-	pointConstructor, classID, err := createPointClass(context)
+	pointConstructor, _, err := createPointClass(context)
 	if err != nil {
 		t.Fatalf("Failed to create Point class: %v", err)
 	}
-	pointClassID = classID
 
 	// Register Point class globally
 	// Note: Globals will manage the memory automatically
@@ -836,5 +824,67 @@ func TestConcurrentAccess(t *testing.T) {
 			t.Fatalf("Failed on iteration %d: %v", i, err)
 		}
 		result.Free()
+	}
+}
+
+// TestUnifiedConstructorMapping tests the unified constructor -> classID mapping
+func TestUnifiedConstructorMapping(t *testing.T) {
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	// Test manual class creation
+	manualConstructor, manualClassID, err := createPointClass(ctx)
+	if err != nil {
+		t.Fatalf("Failed to create manual Point class: %v", err)
+	}
+
+	// Test reflection class creation
+	reflectConstructor, reflectClassID, err := ctx.BindClass(&Point{})
+	if err != nil {
+		t.Fatalf("Failed to create reflected Point class: %v", err)
+	}
+
+	// Verify both constructors are registered in the unified mapping
+	manualRetrievedID, exists := getConstructorClassID(manualConstructor.ref)
+	if !exists {
+		t.Errorf("Manual constructor not found in unified mapping")
+	}
+	if manualRetrievedID != manualClassID {
+		t.Errorf("Manual constructor classID mismatch: expected %d, got %d", manualClassID, manualRetrievedID)
+	}
+
+	reflectRetrievedID, exists := getConstructorClassID(reflectConstructor.ref)
+	if !exists {
+		t.Errorf("Reflection constructor not found in unified mapping")
+	}
+	if reflectRetrievedID != reflectClassID {
+		t.Errorf("Reflection constructor classID mismatch: expected %d, got %d", reflectClassID, reflectRetrievedID)
+	}
+
+	// Test that both can create instances with the simplified API
+	ctx.Globals().Set("ManualPoint", manualConstructor)
+	ctx.Globals().Set("ReflectPoint", reflectConstructor)
+
+	result, err := ctx.Eval(`
+        let manual = new ManualPoint(1, 2);
+        let reflect = new ReflectPoint();
+        reflect.X = 3;
+        reflect.Y = 4;
+        [manual.x, manual.y, reflect.X, reflect.Y];
+    `)
+	if err != nil {
+		t.Fatalf("Failed to test unified mapping: %v", err)
+	}
+	defer result.Free()
+
+	if result.GetIdx(0).Float64() != 1.0 || result.GetIdx(1).Float64() != 2.0 {
+		t.Errorf("Manual constructor instance incorrect: got (%f, %f)",
+			result.GetIdx(0).Float64(), result.GetIdx(1).Float64())
+	}
+	if result.GetIdx(2).Float64() != 3.0 || result.GetIdx(3).Float64() != 4.0 {
+		t.Errorf("Reflection constructor instance incorrect: got (%f, %f)",
+			result.GetIdx(2).Float64(), result.GetIdx(3).Float64())
 	}
 }

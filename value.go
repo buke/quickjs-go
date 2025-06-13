@@ -9,10 +9,13 @@ import (
 	"errors"
 	"math"
 	"math/big"
+	"reflect"
 	"unsafe"
 )
 
-// JSValue represents a Javascript value which can be a primitive type or an object. Reference counting is used, so it is important to explicitly duplicate (JS_DupValue(), increment the reference count) or free (JS_FreeValue(), decrement the reference count) JSValues.
+// Value represents a Javascript value which can be a primitive type or an object.
+// Reference counting is used, so it is important to explicitly duplicate (JS_DupValue(),
+// increment the reference count) or free (JS_FreeValue(), decrement the reference count) JSValues.
 type Value struct {
 	ctx *Context
 	ref C.JSValue
@@ -26,7 +29,7 @@ func (v Value) Free() {
 	C.JS_FreeValue(v.ctx.ref, v.ref)
 }
 
-// Context represents a Javascript context.
+// Context returns the context of the value.
 func (v Value) Context() *Context {
 	return v.ctx
 }
@@ -76,7 +79,7 @@ func (v Value) ToByteArray(size uint) ([]byte, error) {
 	return C.GoBytes(unsafe.Pointer(outBuf), C.int(size)), nil
 }
 
-// IsByteArray return true if the value is array buffer
+// IsByteArray returns true if the value is array buffer
 func (v Value) IsByteArray() bool {
 	return v.IsObject() && v.GlobalInstanceof("ArrayBuffer") || v.String() == "[object ArrayBuffer]"
 }
@@ -212,12 +215,12 @@ func (v Value) Execute(this Value, args ...Value) Value {
 	return val
 }
 
-// Call Class Constructor
+// New calls the constructor with the given arguments.
 func (v Value) New(args ...Value) Value {
 	return v.CallConstructor(args...)
 }
 
-// Call calls the constructor with the given arguments.
+// CallConstructor calls the constructor with the given arguments.
 func (v Value) CallConstructor(args ...Value) Value {
 	cargs := []C.JSValue{}
 	for _, x := range args {
@@ -703,10 +706,6 @@ func (v Value) Await() (Value, error) {
 // IsClassInstance checks if the value is an instance of any user-defined class
 // This method uses opaque data validation for maximum reliability
 func (v Value) IsClassInstance() bool {
-	if !v.IsObject() {
-		return false // Only objects can be class instances
-	}
-
 	// The most reliable method: check for valid opaque data
 	// All our class instances have opaque data pointing to HandleStore entries
 	return v.HasInstanceData()
@@ -721,10 +720,6 @@ func (v Value) HasInstanceData() bool {
 
 	// Get class ID first
 	classID := C.JS_GetClassID(v.ref)
-	invalidClassID := C.uint32_t(C.GetInvalidClassID())
-	if classID == invalidClassID {
-		return false
-	}
 
 	// Use JS_GetOpaque2 for type-safe check (like point.c methods)
 	opaque := C.JS_GetOpaque2(v.ctx.ref, v.ref, classID)
@@ -738,71 +733,56 @@ func (v Value) HasInstanceData() bool {
 	return exists
 }
 
-// IsInstanceOfClass checks if the value is an instance of a specific class ID
+// IsInstanceOfClassID checks if the value is an instance of a specific class ID
 // This provides type-safe class instance checking with double validation
-func (v Value) IsInstanceOfClass(expectedClassID uint32) bool {
+func (v Value) IsInstanceOfClassID(expectedClassID uint32) bool {
 	if !v.IsObject() {
 		return false
 	}
 
-	// First check: class ID must match
+	// Only check class ID match - no opaque data requirement
 	objClassID := uint32(C.JS_GetClassID(v.ref))
-	invalidClassID := uint32(C.GetInvalidClassID())
-	if objClassID != expectedClassID || objClassID == invalidClassID {
-		return false
-	}
-
-	// Second check: must have valid instance data using type-safe retrieval
-	opaque := C.JS_GetOpaque2(v.ctx.ref, v.ref, C.JSClassID(expectedClassID))
-	if opaque == nil {
-		return false
-	}
-
-	// Third check: validate handle exists in store
-	handleID := int32(C.OpaqueToInt(opaque))
-	_, exists := v.ctx.handleStore.Load(handleID)
-	return exists
+	return objClassID == expectedClassID
 }
 
 // GetClassID returns the class ID of the value if it's a class instance
 // Returns JS_INVALID_CLASS_ID (0) if not a class instance
 func (v Value) GetClassID() uint32 {
-	if !v.IsObject() {
-		return uint32(C.GetInvalidClassID())
-	}
 	return uint32(C.JS_GetClassID(v.ref))
+}
+
+// GetGoObject retrieves Go object from JavaScript class instance
+// This method extracts the opaque data stored by NewInstance
+func (v Value) GetGoObject() (interface{}, error) {
+	// First check if the value is an object
+	if !v.IsObject() {
+		return nil, errors.New("value is not an object")
+	}
+
+	// Get class ID to ensure we have a class instance
+	classID := C.JS_GetClassID(v.ref)
+
+	// Use JS_GetOpaque2 for type-safe retrieval with context validation
+	// This corresponds to point.c: s = JS_GetOpaque2(ctx, this_val, js_point_class_id)
+	opaque := C.JS_GetOpaque2(v.ctx.ref, v.ref, classID)
+	if opaque == nil {
+		return nil, errors.New("no instance data found")
+	}
+
+	// Use C helper function to safely convert opaque pointer back to int32
+	handleID := int32(C.OpaqueToInt(opaque))
+
+	// Retrieve Go object from HandleStore
+	if obj, exists := v.ctx.handleStore.Load(handleID); exists {
+		return obj, nil
+	}
+
+	return nil, errors.New("instance data not found in handle store")
 }
 
 // =============================================================================
 // SPECIALIZED CLASS TYPE CHECKING METHODS
 // =============================================================================
-
-// These methods can be used to check for specific known class types
-// They serve as examples of how to implement type checking for custom classes
-
-// IsCustomClass checks if the value is an instance of a class with given name
-// This method uses the constructor.name property for identification
-func (v Value) IsCustomClass(className string) bool {
-	if !v.IsObject() {
-		return false
-	}
-
-	// Get constructor
-	constructor := v.Get("constructor")
-	if constructor.IsUndefined() {
-		return false
-	}
-	defer constructor.Free()
-
-	// Get constructor name
-	name := constructor.Get("name")
-	if name.IsUndefined() {
-		return false
-	}
-	defer name.Free()
-
-	return name.ToString() == className
-}
 
 // IsInstanceOfConstructor checks if the value is an instance of a specific constructor
 // This uses JavaScript's instanceof operator semantics
@@ -815,87 +795,52 @@ func (v Value) IsInstanceOfConstructor(constructor Value) bool {
 }
 
 // =============================================================================
-// UTILITY METHODS FOR CLASS INSTANCES
+// CLASS INSTANCE CREATION METHODS
 // =============================================================================
 
-// CallMethod calls a method on the class instance with given arguments
-// This is equivalent to obj.methodName(args...) in JavaScript
-func (v Value) CallMethod(methodName string, args ...Value) Value {
-	return v.Call(methodName, args...)
-}
-
-// GetProperty gets a property value from the class instance
-// This is equivalent to obj.propertyName in JavaScript
-func (v Value) GetProperty(propertyName string) Value {
-	return v.Get(propertyName)
-}
-
-// SetProperty sets a property value on the class instance
-// This is equivalent to obj.propertyName = value in JavaScript
-func (v Value) SetProperty(propertyName string, value Value) {
-	v.Set(propertyName, value)
-}
-
-// HasMethod checks if the class instance has a method with given name
-// This checks if the property exists and is a function
-func (v Value) HasMethod(methodName string) bool {
-	if !v.Has(methodName) {
-		return false
+// NewInstance creates a class instance using this value as new_target
+// This method should be called on constructor functions to create instances with proper inheritance support
+//
+// IMPORTANT: goObj must be a pointer type to ensure proper reference semantics and performance.
+//
+// Example usage in constructor functions:
+//
+//	func pointConstructor(ctx *Context, newTarget Value, args []Value) Value {
+//	    point := &Point{X: x, Y: y}  // Must be pointer
+//	    return newTarget.NewInstance(point)
+//	}
+func (v Value) NewInstance(goObj interface{}) Value {
+	// Validate that this value is a constructor function
+	if !v.IsConstructor() {
+		return v.ctx.ThrowTypeError("NewInstance can only be called on constructor functions")
 	}
 
-	method := v.Get(methodName)
-	defer method.Free()
+	// Validate pointer type for proper semantics
+	if err := validatePointerType(goObj); err != nil {
+		return v.ctx.ThrowTypeError(err.Error())
+	}
 
-	return method.IsFunction()
+	// Delegate to the context method for the actual implementation
+	return v.ctx.newInstanceFromNewTarget(v, goObj)
 }
 
-// HasProperty checks if the class instance has a property with given name
-// This is a wrapper around the existing Has method for consistency
-func (v Value) HasProperty(propertyName string) bool {
-	return v.Has(propertyName)
-}
-
-// =============================================================================
-// DEBUGGING AND INSPECTION METHODS
-// =============================================================================
-
-// GetClassName returns the class name of the value if it's a class instance
-// Returns empty string if not a class instance or name cannot be determined
-func (v Value) GetClassName() string {
-	if !v.IsObject() {
-		return ""
+func validatePointerType(obj interface{}) error {
+	// Case 1: obj is nil interface{} - allow it
+	if obj == nil {
+		return nil
 	}
 
-	constructor := v.Get("constructor")
-	if constructor.IsUndefined() {
-		return ""
-	}
-	defer constructor.Free()
+	objValue := reflect.ValueOf(obj)
 
-	name := constructor.Get("name")
-	if name.IsUndefined() {
-		return ""
-	}
-	defer name.Free()
-
-	return name.ToString()
-}
-
-// GetObjectInfo returns debugging information about the object
-// Useful for development and debugging class instances
-func (v Value) GetObjectInfo() map[string]interface{} {
-	info := make(map[string]interface{})
-
-	info["isObject"] = v.IsObject()
-	info["isClassInstance"] = v.IsClassInstance()
-	info["hasInstanceData"] = v.HasInstanceData()
-	info["classID"] = int(v.GetClassID())
-	info["className"] = v.GetClassName()
-
-	if v.IsFunction() {
-		info["isFunction"] = true
-		info["isConstructor"] = v.IsConstructor()
+	// Case 2: obj is a typed nil pointer (e.g., (*User)(nil)) - allow it
+	if objValue.Kind() == reflect.Ptr {
+		return nil // Allow both nil and non-nil pointers
 	}
 
-	return info
+	// Case 3: obj is a value type - reject it
+	if objValue.Kind() != reflect.Ptr {
+		return errors.New("goObj must be a pointer type for proper reference semantics")
+	}
+
+	return nil
 }

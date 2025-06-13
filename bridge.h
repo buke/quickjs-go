@@ -67,6 +67,7 @@ extern int GetInvalidClassID();
 extern void* IntToOpaque(int32_t id);
 extern int32_t OpaqueToInt(void* opaque);
 extern int ValueGetTag(JSValueConst v);
+extern void* JS_VALUE_GET_PTR_Wrapper(JSValue val); 
 extern int JS_DeletePropertyInt64(JSContext *ctx, JSValueConst obj, int64_t idx, int flags);
 
 // Function proxy for regular functions

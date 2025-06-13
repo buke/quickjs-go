@@ -41,6 +41,11 @@ int ValueGetTag(JSValueConst v) {
     return JS_VALUE_GET_TAG(v);
 }
 
+// Value pointer access macro -> function
+void* JS_VALUE_GET_PTR_Wrapper(JSValue val) {
+    return JS_VALUE_GET_PTR(val);
+}
+
 // Property flags (For class.go)
 int GetPropertyWritableConfigurable() { return JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE; }
 int GetPropertyConfigurable() { return JS_PROP_CONFIGURABLE; }

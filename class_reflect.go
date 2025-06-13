@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
-	"sync"
 	"unicode"
 	"unicode/utf8"
 )
@@ -60,41 +59,6 @@ func WithIgnoredFields(fields ...string) ReflectOption {
 	}
 }
 
-// Global registry for reflection class IDs using sync.Map for better performance
-var reflectionClassIDs = sync.Map{}
-
-// setReflectionClassID stores the class ID for a reflection class
-func setReflectionClassID(className string, classID uint32) {
-	reflectionClassIDs.Store(className, classID)
-}
-
-// getReflectionClassID retrieves the class ID for a reflection class
-func getReflectionClassID(className string) uint32 {
-	if id, ok := reflectionClassIDs.Load(className); ok {
-		return id.(uint32)
-	}
-	return 0
-}
-
-// ReflectionClassBuilder wraps ClassBuilder to provide classID capture functionality
-type ReflectionClassBuilder struct {
-	*ClassBuilder
-	className string
-}
-
-// Build overrides the ClassBuilder.Build to capture classID
-func (rcb *ReflectionClassBuilder) Build(ctx *Context) (Value, uint32, error) {
-	constructor, classID, err := rcb.ClassBuilder.Build(ctx)
-	if err != nil {
-		return constructor, classID, err
-	}
-
-	// Store the classID in the global registry for the constructor to use
-	setReflectionClassID(rcb.className, classID)
-
-	return constructor, classID, nil
-}
-
 // BindClass automatically creates and builds a JavaScript class from a Go struct type using reflection.
 // This is a convenience method that combines BindClassBuilder and Build.
 //
@@ -109,11 +73,12 @@ func (ctx *Context) BindClass(structType interface{}, options ...ReflectOption) 
 		return Value{}, 0, err
 	}
 
+	// Directly use ClassBuilder.Build, which automatically registers to unified mapping table
 	return builder.Build(ctx)
 }
 
-// BindClassBuilder automatically creates a ReflectionClassBuilder from a Go struct type using reflection.
-// Returns a ReflectionClassBuilder that can be further customized using chain methods before Build().
+// BindClassBuilder automatically creates a ClassBuilder from a Go struct type using reflection.
+// Returns a ClassBuilder that can be further customized using chain methods before Build().
 //
 // Example usage:
 //
@@ -128,7 +93,7 @@ func (ctx *Context) BindClass(structType interface{}, options ...ReflectOption) 
 //	    StaticMethod("Create", myCreateFunc).
 //	    ReadOnlyProperty("version", myVersionGetter).
 //	    Build(ctx)
-func (ctx *Context) BindClassBuilder(structType interface{}, options ...ReflectOption) (*ReflectionClassBuilder, error) {
+func (ctx *Context) BindClassBuilder(structType interface{}, options ...ReflectOption) (*ClassBuilder, error) {
 	// Parse options with defaults
 	opts := &ReflectOptions{
 		IncludePrivate: false,
@@ -153,18 +118,7 @@ func (ctx *Context) BindClassBuilder(structType interface{}, options ...ReflectO
 	}
 
 	// Build ClassBuilder using reflection analysis
-	builder, err := buildClassFromReflection(className, typ, opts)
-	if err != nil {
-		return nil, err
-	}
-
-	// Create wrapper that captures classID during Build
-	wrappedBuilder := &ReflectionClassBuilder{
-		ClassBuilder: builder,
-		className:    className,
-	}
-
-	return wrappedBuilder, nil
+	return buildClassFromReflection(className, typ, opts)
 }
 
 // getReflectType extracts reflect.Type from various input types (simplified)
@@ -217,10 +171,8 @@ func buildClassFromReflection(className string, typ reflect.Type, opts *ReflectO
 			}
 		}
 
-		// Get the classID from the global registry
-		classID := getReflectionClassID(className)
-
-		return ctx.CreateInstanceFromNewTarget(newTarget, classID, instance)
+		// Use simplified NewInstance (automatic classID retrieval)
+		return newTarget.NewInstance(instance)
 	})
 
 	// Add properties
@@ -421,7 +373,7 @@ func addReflectionProperties(builder *ClassBuilder, typ reflect.Type, opts *Refl
 func createMethodWrapper(method reflect.Method) ClassMethodFunc {
 	return func(ctx *Context, this Value, args []Value) Value {
 		// Get the Go object from the JavaScript instance
-		obj, err := ctx.GetInstanceData(this)
+		obj, err := this.GetGoObject()
 		if err != nil {
 			return ctx.ThrowError(fmt.Errorf("failed to get instance data: %w", err))
 		}
@@ -475,7 +427,8 @@ func createMethodWrapper(method reflect.Method) ClassMethodFunc {
 func createFieldGetter(field reflect.StructField, fieldIndex int) ClassGetterFunc {
 	return func(ctx *Context, this Value) Value {
 		// Get the Go object from the JavaScript instance
-		obj, err := ctx.GetInstanceData(this)
+		obj, err := this.GetGoObject()
+
 		if err != nil {
 			return ctx.ThrowError(fmt.Errorf("failed to get instance data: %w", err))
 		}
@@ -522,7 +475,7 @@ func createFieldGetter(field reflect.StructField, fieldIndex int) ClassGetterFun
 func createFieldSetter(field reflect.StructField, fieldIndex int) ClassSetterFunc {
 	return func(ctx *Context, this Value, value Value) Value {
 		// Get the Go object from the JavaScript instance
-		obj, err := ctx.GetInstanceData(this)
+		obj, err := this.GetGoObject()
 		if err != nil {
 			return ctx.ThrowError(fmt.Errorf("failed to get instance data: %w", err))
 		}

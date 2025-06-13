@@ -744,3 +744,128 @@ func TestValueAwait(t *testing.T) {
 		require.True(t, result3.IsException())
 	}
 }
+
+// TestValueClassInstanceEdgeCases tests uncovered branches in class instance methods
+func TestValueClassInstanceEdgeCases(t *testing.T) {
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	// Test non-object values to cover !v.IsObject() branches
+	nonObjects := []struct {
+		name      string
+		createVal func() Value
+	}{
+		{"String", func() Value { return ctx.String("test") }},
+		{"Number", func() Value { return ctx.Int32(42) }},
+		{"Null", func() Value { return ctx.Null() }},
+		{"Undefined", func() Value { return ctx.Undefined() }},
+	}
+
+	for _, no := range nonObjects {
+		t.Run("HasInstanceData_"+no.name, func(t *testing.T) {
+			val := no.createVal()
+			defer val.Free()
+			// Cover: if !v.IsObject() return false branch in HasInstanceData
+			require.False(t, val.HasInstanceData())
+		})
+
+		t.Run("IsInstanceOfClassID_"+no.name, func(t *testing.T) {
+			val := no.createVal()
+			defer val.Free()
+			// Cover: if !v.IsObject() return false branch in IsInstanceOfClassID
+			require.False(t, val.IsInstanceOfClassID(123))
+		})
+
+		t.Run("GetGoObject"+no.name, func(t *testing.T) {
+			val := no.createVal()
+			defer val.Free()
+			// Cover: if !v.IsObject() return error branch in GetGoObject
+			_, err := val.GetGoObject()
+			require.Error(t, err)
+			require.Contains(t, err.Error(), "value is not an object")
+		})
+
+		t.Run("IsInstanceOfConstructor_NonObject_"+no.name, func(t *testing.T) {
+			val := no.createVal()
+			defer val.Free()
+
+			fn := ctx.Function(func(ctx *Context, this Value, args []Value) Value {
+				return ctx.Null()
+			})
+			defer fn.Free()
+
+			// Cover: if !v.IsObject() part of condition in IsInstanceOfConstructor
+			require.False(t, val.IsInstanceOfConstructor(fn))
+		})
+	}
+
+	// Test IsInstanceOfConstructor with non-function constructor
+	t.Run("IsInstanceOfConstructor_NonFunction", func(t *testing.T) {
+		obj := ctx.Object()
+		defer obj.Free()
+
+		nonFunc := ctx.String("not a function")
+		defer nonFunc.Free()
+
+		// Cover: !constructor.IsFunction() part of condition in IsInstanceOfConstructor
+		require.False(t, obj.IsInstanceOfConstructor(nonFunc))
+	})
+
+	// Test IsInstanceOfConstructor with valid object and function (no inheritance)
+	t.Run("IsInstanceOfConstructor_NoInheritance", func(t *testing.T) {
+		obj := ctx.Object()
+		defer obj.Free()
+
+		fn := ctx.Function(func(ctx *Context, this Value, args []Value) Value {
+			return ctx.Null()
+		})
+		defer fn.Free()
+
+		// Cover: C.JS_IsInstanceOf call returning 0 (false) in IsInstanceOfConstructor
+		require.False(t, obj.IsInstanceOfConstructor(fn))
+	})
+
+	// Test GetGoObject "instance data not found in handle store" branch
+	t.Run("GetGoObject_HandleStoreManipulation", func(t *testing.T) {
+		// Create a function to get a valid object with opaque data
+		fn := ctx.Function(func(ctx *Context, this Value, args []Value) Value {
+			return ctx.String("test")
+		})
+		defer fn.Free()
+
+		// Get the handle ID from the function (functions have opaque data)
+		var handleID int32
+		var originalHandle interface{}
+		ctx.handleStore.handles.Range(func(key, value interface{}) bool {
+			handleID = key.(int32)
+			originalHandle = value
+			return false // Stop after first item
+		})
+
+		// Remove the handle from the store while keeping the opaque data in the object
+		ctx.handleStore.handles.Delete(handleID)
+
+		// Now try to get instance data - should hit "instance data not found in handle store" branch
+		_, err := fn.GetGoObject()
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "instance data not found in handle store")
+
+		// Restore the handle for proper cleanup
+		ctx.handleStore.handles.Store(handleID, originalHandle)
+
+		t.Log("Successfully triggered 'instance data not found in handle store' branch")
+	})
+
+	// Alternative approach: Test with regular JS objects (no opaque data)
+	t.Run("GetGoObject_NoOpaqueData", func(t *testing.T) {
+		// Regular objects should have no opaque data, covering "no instance data found"
+		obj := ctx.Object()
+		defer obj.Free()
+
+		_, err := obj.GetGoObject()
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "no instance data found")
+	})
+}

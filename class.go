@@ -6,8 +6,44 @@ package quickjs
 import "C"
 import (
 	"errors"
+	"sync"
 	"unsafe"
 )
+
+// =============================================================================
+// GLOBAL CONSTRUCTOR REGISTRY FOR UNIFIED MAPPING
+// =============================================================================
+
+// Global constructor to class ID mapping table for unified management
+var globalConstructorRegistry = sync.Map{} // constructor hash -> classID
+
+// Helper function to create a stable key from JSValue
+// For constructor functions, we use the object pointer as a unique identifier
+func jsValueToKey(jsVal C.JSValue) uint64 {
+	// Constructors are JavaScript objects, so we use the object pointer
+	// This is stable and unique for each JavaScript object instance
+	objPtr := C.JS_VALUE_GET_PTR_Wrapper(jsVal)
+	return uint64(uintptr(objPtr))
+}
+
+// registerConstructorClassID stores the constructor -> classID mapping
+func registerConstructorClassID(constructor C.JSValue, classID uint32) {
+	constructorKey := jsValueToKey(constructor)
+	globalConstructorRegistry.Store(constructorKey, classID)
+}
+
+// getConstructorClassID retrieves the classID for a given constructor
+func getConstructorClassID(constructor C.JSValue) (uint32, bool) {
+	constructorKey := jsValueToKey(constructor)
+	if classIDInterface, ok := globalConstructorRegistry.Load(constructorKey); ok {
+		return classIDInterface.(uint32), true
+	}
+	return 0, false
+}
+
+// =============================================================================
+// CLASS BINDING CONFIGURATION CONSTANTS
+// =============================================================================
 
 // Constants for class binding configuration
 const (
@@ -30,12 +66,20 @@ func getPropertyConfigurable() C.int {
 	return C.int(C.GetPropertyConfigurable())
 }
 
+// =============================================================================
+// CLASS FINALIZER INTERFACE
+// =============================================================================
+
 // Optional cleanup interface for class instances
 // Objects implementing this interface will have Finalize() called automatically
 // when the JavaScript object is garbage collected
 type ClassFinalizer interface {
 	Finalize()
 }
+
+// =============================================================================
+// CLASS-RELATED FUNCTION TYPES
+// =============================================================================
 
 // Class-related function types with consistent Class prefix
 // These correspond exactly to QuickJS C API function pointer types
@@ -60,6 +104,10 @@ type ClassGetterFunc func(ctx *Context, this Value) Value
 // Corresponds to QuickJS JSCFunctionType.setter_magic
 type ClassSetterFunc func(ctx *Context, this Value, value Value) Value
 
+// =============================================================================
+// CLASS BINDING CONFIGURATION STRUCTURES
+// =============================================================================
+
 // MethodEntry represents a method binding configuration
 type MethodEntry struct {
 	Name   string          // Method name in JavaScript
@@ -75,6 +123,10 @@ type PropertyEntry struct {
 	Setter ClassSetterFunc // Optional setter function
 	Static bool            // true for static properties, false for instance properties
 }
+
+// =============================================================================
+// CLASS BUILDER - FLUENT API FOR BUILDING JAVASCRIPT CLASSES
+// =============================================================================
 
 // ClassBuilder provides a fluent API for building JavaScript classes
 // Uses builder pattern for easy and readable class definition
@@ -94,6 +146,10 @@ func NewClass(name string) *ClassBuilder {
 		properties: make([]PropertyEntry, 0),
 	}
 }
+
+// =============================================================================
+// CLASSBUILDER FLUENT API METHODS
+// =============================================================================
 
 // Constructor sets the constructor function for the class
 // The constructor function will be called when creating new instances
@@ -196,10 +252,14 @@ func (cb *ClassBuilder) StaticReadOnlyProperty(name string, getter ClassGetterFu
 }
 
 // Build creates and registers the JavaScript class in the given context
-// Returns the constructor function and classID for CreateInstanceFromNewTarget
+// Returns the constructor function and classID for NewInstance
 func (cb *ClassBuilder) Build(ctx *Context) (Value, uint32, error) {
 	return ctx.createClass(cb)
 }
+
+// =============================================================================
+// CLASS CREATION IMPLEMENTATION
+// =============================================================================
 
 // validateClassBuilder validates ClassBuilder configuration
 func validateClassBuilder(builder *ClassBuilder) error {
@@ -280,9 +340,16 @@ func (ctx *Context) createClass(builder *ClassBuilder) (Value, uint32, error) {
 		return Value{}, 0, err
 	}
 
+	// Step 10: Register constructor -> classID mapping for unified access
+	registerConstructorClassID(constructor, uint32(classID))
+
 	// Return constructor and classID
 	return Value{ctx: ctx, ref: constructor}, uint32(classID), nil
 }
+
+// =============================================================================
+// HELPER FUNCTIONS FOR CLASS CREATION
+// =============================================================================
 
 // createCFunction creates a C function with the specified type and parameters
 // This is a common helper that reduces code duplication

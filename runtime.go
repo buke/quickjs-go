@@ -7,6 +7,7 @@ package quickjs
 import "C"
 import (
 	"runtime"
+	"sync"
 	"unsafe"
 )
 
@@ -138,16 +139,22 @@ func (r *Runtime) RunGC() {
 
 // Close will free the runtime pointer with proper cleanup.
 func (r *Runtime) Close() {
-	// Clear interrupt handler before closing
+	// Step 1: Clear interrupt handler before closing
 	r.ClearInterruptHandler()
 
-	// Unregister runtime mapping
+	// Step 2: Clean up global constructor registry efficiently
+	// Reset the entire map since all JSValues will be invalid after runtime closes
+	globalConstructorRegistry = sync.Map{}
+
+	// Step 3: Unregister runtime mapping
 	unregisterRuntime(r.ref)
 
-	C.JS_FreeRuntime(r.ref)
+	// Step 4: Clear context mapping
 	clearContextMapping()
 
-	// Remove pinner.Unpin() - no longer needed
+	// Step 5: Free QuickJS runtime
+	C.JS_FreeRuntime(r.ref)
+
 }
 
 // SetCanBlock will set the runtime's can block; default is true

@@ -347,6 +347,7 @@ func (ctx *Context) AtomIdx(idx uint32) Atom {
 }
 
 // Invoke invokes a function with given this value and arguments.
+// Deprecated: Use Value.Execute() instead for better API consistency.
 func (ctx *Context) Invoke(fn Value, this Value, args ...Value) Value {
 	cargs := []C.JSValue{}
 	for _, x := range args {
@@ -734,18 +735,25 @@ func (ctx *Context) Promise(executor func(resolve, reject func(Value))) Value {
 // CLASS BINDING METHODS
 // =============================================================================
 
-// CreateClass creates and registers a JavaScript class using the ClassBuilder pattern
-// This method delegates to the class.go implementation for consistency
-func (ctx *Context) CreateClass(builder *ClassBuilder) (Value, uint32, error) {
-	return ctx.createClass(builder)
-}
+// newInstanceFromNewTarget creates a class instance using new_target and automatic classID lookup
+// This method implements the standard pattern from point.c constructor with unified mapping
+func (ctx *Context) newInstanceFromNewTarget(newTarget Value, goObj interface{}) Value {
+	// Try to get classID directly from the constructor
+	classID, exists := getConstructorClassID(newTarget.ref)
 
-// CreateInstanceFromNewTarget creates a class instance using new_target and classID
-// This helper method implements the standard pattern from point.c constructor
-// and supports inheritance through proper prototype chain setup
-func (ctx *Context) CreateInstanceFromNewTarget(newTarget Value, classID uint32, goObj interface{}) Value {
+	// If not found directly, try inheritance fallback by checking prototype chain
+	if !exists {
+		classID, exists = ctx.resolveClassIDFromInheritance(newTarget)
+	}
+
+	if !exists {
+		return ctx.ThrowError(errors.New("constructor not registered in global class registry"))
+	}
+
 	// Store Go object in HandleStore for automatic memory management
 	handleID := ctx.handleStore.Store(goObj)
+
+	fmt.Printf("Creating new instance of class with ID %d using new_target %s (handle ID: %d)\n", classID, newTarget.String(), handleID)
 
 	// Get prototype from new_target (supports inheritance)
 	// This corresponds to point.c: proto = JS_GetPropertyStr(ctx, new_target, "prototype")
@@ -772,77 +780,61 @@ func (ctx *Context) CreateInstanceFromNewTarget(newTarget Value, classID uint32,
 	return Value{ctx: ctx, ref: jsObj}
 }
 
-// GetInstanceData retrieves Go object from JavaScript class instance
-// This method extracts the opaque data stored by CreateInstanceFromNewTarget
-func (ctx *Context) GetInstanceData(val Value) (interface{}, error) {
-	// First check if the value is an object
-	if !val.IsObject() {
-		return nil, errors.New("value is not an object")
+// resolveClassIDFromInheritance attempts to resolve classID by checking if this constructor
+// extends a registered class and should use the parent's classID
+func (ctx *Context) resolveClassIDFromInheritance(constructor Value) (uint32, bool) {
+	// Simple and efficient approach: use JavaScript to traverse the prototype chain
+	script := `
+        (function(child) {
+            // Walk up the prototype chain and collect all parent constructors
+            let constructors = [];
+            let current = child;
+            
+            // Traverse up to 10 levels to prevent infinite loops
+            for (let i = 0; i < 10; i++) {
+                if (!current || !current.prototype) break;
+                
+                let parentProto = Object.getPrototypeOf(current.prototype);
+                if (!parentProto || parentProto === Object.prototype) break;
+                
+                let parentConstructor = parentProto.constructor;
+                if (!parentConstructor || parentConstructor === current) break;
+                
+                constructors.push(parentConstructor);
+                current = parentConstructor;
+            }
+            
+            return constructors;
+        })
+    `
+
+	traverser, err := ctx.Eval(script)
+	if err != nil {
+		return 0, false
+	}
+	defer traverser.Free()
+
+	// Get all parent constructors
+	parents := traverser.Execute(ctx.Undefined(), constructor)
+	defer parents.Free()
+
+	if parents.IsException() || parents.IsNull() || parents.IsUndefined() {
+		return 0, false
 	}
 
-	// Get class ID to ensure we have a class instance
-	classID := C.JS_GetClassID(val.ref)
-	invalidClassID := C.uint32_t(C.GetInvalidClassID())
-	if classID == invalidClassID {
-		return nil, errors.New("value is not a class instance")
+	// Check each parent to see if it's registered
+	lengthVal := parents.Get("length")
+	defer lengthVal.Free()
+
+	length := int(lengthVal.Int32())
+	for i := 0; i < length; i++ {
+		parent := parents.GetIdx(int64(i))
+		defer parent.Free()
+
+		if classID, exists := getConstructorClassID(parent.ref); exists {
+			return classID, true
+		}
 	}
 
-	// Use JS_GetOpaque2 for type-safe retrieval with context validation
-	// This corresponds to point.c: s = JS_GetOpaque2(ctx, this_val, js_point_class_id)
-	opaque := C.JS_GetOpaque2(ctx.ref, val.ref, classID)
-	if opaque == nil {
-		return nil, errors.New("no instance data found")
-	}
-
-	// Use C helper function to safely convert opaque pointer back to int32
-	handleID := int32(C.OpaqueToInt(opaque))
-
-	// Retrieve Go object from HandleStore
-	if obj, exists := ctx.handleStore.Load(handleID); exists {
-		return obj, nil
-	}
-
-	return nil, errors.New("instance data not found in handle store")
-}
-
-// GetInstanceDataTyped retrieves Go object from JavaScript class instance with type assertion
-// This is a convenience method that combines GetInstanceData with type assertion
-func (ctx *Context) GetInstanceDataTyped(val Value, expectedClassID uint32) (interface{}, error) {
-	// First verify this is the expected class type
-	if !val.IsInstanceOfClass(expectedClassID) {
-		return nil, errors.New("value is not an instance of expected class")
-	}
-
-	// Use JS_GetOpaque2 with specific class ID for maximum type safety
-	// This corresponds to point.c pattern: s = JS_GetOpaque2(ctx, this_val, js_point_class_id)
-	opaque := C.JS_GetOpaque2(ctx.ref, val.ref, C.JSClassID(expectedClassID))
-	if opaque == nil {
-		return nil, errors.New("no instance data found for expected class")
-	}
-
-	// Use C helper function to safely convert opaque pointer back to int32
-	handleID := int32(C.OpaqueToInt(opaque))
-
-	// Retrieve Go object from HandleStore
-	if obj, exists := ctx.handleStore.Load(handleID); exists {
-		return obj, nil
-	}
-
-	return nil, errors.New("instance data not found in handle store")
-}
-
-// IsInstanceOf checks if a JavaScript value is an instance of a given class
-// This provides a Go-friendly wrapper around JS_GetClassID comparison
-func (ctx *Context) IsInstanceOf(val Value, expectedClassID uint32) bool {
-	if !val.IsObject() {
-		return false
-	}
-
-	objClassID := C.JS_GetClassID(val.ref)
-	invalidClassID := C.uint32_t(C.GetInvalidClassID())
-	if objClassID == invalidClassID {
-		return false
-	}
-
-	return uint32(objClassID) == expectedClassID
+	return 0, false
 }
