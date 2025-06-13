@@ -93,6 +93,12 @@ extern JSValue GoClassSetterProxy(JSContext *ctx, JSValueConst this_val,
 // Finalizer proxy - unified cleanup handler
 extern void GoClassFinalizerProxy(JSRuntime *rt, JSValue val);
 
+// NewInstance helper function - encapsulates object creation logic
+// This function handles the complex prototype/object creation logic from NewInstance
+// Returns JS_EXCEPTION on any error, proper JSValue on success
+extern JSValue CreateClassInstance(JSContext *ctx, JSValue constructor, 
+                                  JSClassID class_id, int32_t handle_id);
+
 extern int ValueGetTag(JSValueConst v);
 extern JSValue LoadModuleBytecode(JSContext *ctx, const uint8_t *buf, size_t buf_len, int load_only);
 

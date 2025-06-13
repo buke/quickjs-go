@@ -820,8 +820,83 @@ func (v Value) NewInstance(goObj interface{}) Value {
 		return v.ctx.ThrowTypeError(err.Error())
 	}
 
-	// Delegate to the context method for the actual implementation
-	return v.ctx.newInstanceFromNewTarget(v, goObj)
+	// Try to get classID directly from the constructor
+	classID, exists := getConstructorClassID(v.ref)
+
+	// If not found directly, try inheritance fallback by checking prototype chain
+	if !exists {
+		classID, exists = v.resolveClassIDFromInheritance()
+	}
+
+	if !exists {
+		return v.ctx.ThrowError(errors.New("constructor not registered in global class registry"))
+	}
+
+	// Store Go object in HandleStore for automatic memory management
+	handleID := v.ctx.handleStore.Store(goObj)
+
+	// Use C helper function to create the class instance
+	// This encapsulates all the complex prototype/object creation logic
+	jsObj := C.CreateClassInstance(v.ctx.ref, v.ref, C.JSClassID(classID), C.int32_t(handleID))
+
+	// Check if creation failed and clean up if necessary
+	if C.JS_IsException(jsObj) != 0 {
+		v.ctx.handleStore.Delete(handleID)
+		return Value{ctx: v.ctx, ref: jsObj}
+	}
+	return Value{ctx: v.ctx, ref: jsObj}
+}
+
+// resolveClassIDFromInheritance attempts to resolve classID by checking if this constructor
+// extends a registered class and should use the parent's classID
+func (v Value) resolveClassIDFromInheritance() (uint32, bool) {
+	// Simple and efficient approach: use JavaScript to traverse the prototype chain
+	script := `
+        (function(child) {
+            // Walk up the prototype chain and collect all parent constructors
+            let constructors = [];
+            let current = child;
+            
+            // Traverse up to 10 levels to prevent infinite loops
+            for (let i = 0; i < 10; i++) {
+                if (!current || !current.prototype) break;
+                
+                let parentProto = Object.getPrototypeOf(current.prototype);
+                if (!parentProto || parentProto === Object.prototype) break;
+                
+                let parentConstructor = parentProto.constructor;
+                if (!parentConstructor || parentConstructor === current) break;
+                
+                constructors.push(parentConstructor);
+                current = parentConstructor;
+            }
+            
+            return constructors;
+        })
+    `
+
+	traverser, _ := v.ctx.Eval(script)
+	defer traverser.Free()
+
+	// Get all parent constructors
+	parents := traverser.Execute(v.ctx.Undefined(), v)
+	defer parents.Free()
+
+	// Check each parent to see if it's registered
+	lengthVal := parents.Get("length")
+	defer lengthVal.Free()
+
+	length := int(lengthVal.Int32())
+	for i := 0; i < length; i++ {
+		parent := parents.GetIdx(int64(i))
+		defer parent.Free()
+
+		if classID, exists := getConstructorClassID(parent.ref); exists {
+			return classID, true
+		}
+	}
+
+	return 0, false
 }
 
 func validatePointerType(obj interface{}) error {
@@ -832,15 +907,11 @@ func validatePointerType(obj interface{}) error {
 
 	objValue := reflect.ValueOf(obj)
 
-	// Case 2: obj is a typed nil pointer (e.g., (*User)(nil)) - allow it
+	// Case 2: obj is a pointer type (including typed nil pointers) - allow it
 	if objValue.Kind() == reflect.Ptr {
 		return nil // Allow both nil and non-nil pointers
 	}
 
 	// Case 3: obj is a value type - reject it
-	if objValue.Kind() != reflect.Ptr {
-		return errors.New("goObj must be a pointer type for proper reference semantics")
-	}
-
-	return nil
+	return errors.New("goObj must be a pointer type for proper reference semantics")
 }

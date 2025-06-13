@@ -24,7 +24,7 @@ JSValue ThrowReferenceError(JSContext *ctx, const char *fmt) { return JS_ThrowRe
 JSValue ThrowRangeError(JSContext *ctx, const char *fmt) { return JS_ThrowRangeError(ctx, "%s", fmt); }
 JSValue ThrowInternalError(JSContext *ctx, const char *fmt) { return JS_ThrowInternalError(ctx, "%s", fmt); }
 
-// Type checking macros -> functions (这些在 Go 代码中大量使用)
+// Type checking macros -> functions (these are heavily used in Go code)
 int JS_IsNumber_Wrapper(JSValue val) { return JS_IsNumber(val); }
 int JS_IsBigInt_Wrapper(JSContext *ctx, JSValue val) { return JS_IsBigInt(ctx, val); }
 int JS_IsBool_Wrapper(JSValue val) { return JS_IsBool(val); }
@@ -144,6 +144,55 @@ void GoClassFinalizerProxy(JSRuntime *rt, JSValue val) {
     goClassFinalizerProxy(rt, val);
 }
 
+// ============================================================================
+// NEWINSTANCE HELPER FUNCTION
+// ============================================================================
+
+// CreateClassInstance - encapsulates the object creation logic from NewInstance
+// This function handles:
+// 1. Getting prototype from constructor
+// 2. Creating JS object with correct prototype and class
+// 3. Setting opaque data
+// 4. Error handling and cleanup
+// 
+// Returns JS_EXCEPTION on any error, proper JSValue on success
+// This corresponds to the logic in point.c example
+JSValue CreateClassInstance(JSContext *ctx, JSValue constructor, 
+                           JSClassID class_id, int32_t handle_id) {
+    JSValue proto, obj;
+    
+    // Get prototype from constructor 
+    // Corresponds to point.c: proto = JS_GetPropertyStr(ctx, new_target, "prototype")
+    proto = JS_GetPropertyStr(ctx, constructor, "prototype");
+    if (JS_IsException(proto)) {
+        // Return the exception directly, caller will handle cleanup
+        return proto;
+    }
+    
+    // Create JS object with correct prototype and class
+    // Corresponds to point.c: obj = JS_NewObjectProtoClass(ctx, proto, js_point_class_id)
+    obj = JS_NewObjectProtoClass(ctx, proto, class_id);
+    
+    // Free prototype reference (always needed, regardless of obj creation result)
+    JS_FreeValue(ctx, proto);
+    
+    if (JS_IsException(obj)) {
+        // Return the exception directly, caller will handle cleanup
+        return obj;
+    }
+    
+    // Associate Go object with JS object
+    // Corresponds to point.c: JS_SetOpaque(obj, s)
+    // Use helper function to safely convert int32 to opaque pointer
+    JS_SetOpaque(obj, IntToOpaque(handle_id));
+    
+    return obj;
+}
+
+// ============================================================================
+// INTERRUPT HANDLERS
+// ============================================================================
+
 // Simplified interrupt handler (no handlerArgs complexity)
 int interruptHandler(JSRuntime *rt, void *opaque) {
     JSRuntime *runtimePtr = (JSRuntime*)opaque;
@@ -189,6 +238,10 @@ void SetExecuteTimeout(JSRuntime *rt, time_t timeout) {
     ts->timeout = timeout;
     JS_SetInterruptHandler(rt, timeoutHandler, ts);
 }
+
+// ============================================================================
+// MODULE LOADING
+// ============================================================================
 
 // LoadModuleBytecode implementation (unchanged)
 JSValue LoadModuleBytecode(JSContext *ctx, const uint8_t *buf, size_t buf_len, int load_only) {

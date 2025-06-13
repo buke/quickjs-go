@@ -869,3 +869,371 @@ func TestValueClassInstanceEdgeCases(t *testing.T) {
 		require.Contains(t, err.Error(), "no instance data found")
 	})
 }
+
+// TestValueNewInstanceEdgeCases tests edge cases and error conditions in NewInstance
+func TestValueNewInstanceEdgeCases(t *testing.T) {
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	// Test Case 1: NewInstance called on non-constructor value
+	t.Run("NewInstance_NonConstructor", func(t *testing.T) {
+		// Test with regular object (not a constructor)
+		obj := ctx.Object()
+		defer obj.Free()
+
+		// This should trigger: "NewInstance can only be called on constructor functions"
+		result := obj.NewInstance(&Point{X: 1, Y: 2})
+		defer result.Free()
+
+		// Verify it returns an error/exception
+		require.True(t, result.IsException())
+	})
+
+	// Test Case 2: NewInstance called on string (definitely not a constructor)
+	t.Run("NewInstance_String", func(t *testing.T) {
+		str := ctx.String("not a constructor")
+		defer str.Free()
+
+		// This should trigger: "NewInstance can only be called on constructor functions"
+		result := str.NewInstance(&Point{X: 1, Y: 2})
+		defer result.Free()
+
+		// Verify it returns an error/exception
+		require.True(t, result.IsException())
+	})
+
+	// Test Case 3: validatePointerType with nil interface{}
+	t.Run("NewInstance_NilInterface", func(t *testing.T) {
+		// Create a valid constructor first
+		pointConstructor, _, err := createPointClass(ctx)
+		defer pointConstructor.Free()
+		require.NoError(t, err)
+
+		// Call NewInstance with nil - this should trigger the nil case in validatePointerType
+		result := pointConstructor.NewInstance(nil)
+		defer result.Free()
+
+		// This should succeed (nil is allowed)
+		require.False(t, result.IsException())
+		require.True(t, result.IsObject())
+	})
+
+	// Test Case 4: validatePointerType with value type (not pointer)
+	t.Run("NewInstance_ValueType", func(t *testing.T) {
+		// Create a valid constructor first
+		pointConstructor, _, err := createPointClass(ctx)
+		defer pointConstructor.Free()
+		require.NoError(t, err)
+
+		// Call NewInstance with value type (not pointer) - this should trigger the error case
+		valueTypePoint := Point{X: 1, Y: 2} // This is a value, not a pointer
+		result := pointConstructor.NewInstance(valueTypePoint)
+		defer result.Free()
+
+		// This should trigger: "goObj must be a pointer type for proper reference semantics"
+		require.True(t, result.IsException())
+	})
+
+	// Test Case 5: validatePointerType with typed nil pointer
+	t.Run("NewInstance_TypedNilPointer", func(t *testing.T) {
+		// Create a valid constructor first
+		pointConstructor, _, err := createPointClass(ctx)
+		defer pointConstructor.Free()
+		require.NoError(t, err)
+
+		// Call NewInstance with typed nil pointer - this should be allowed
+		var nilPoint *Point = nil
+		result := pointConstructor.NewInstance(nilPoint)
+		defer result.Free()
+
+		// This should succeed (typed nil pointer is allowed)
+		require.False(t, result.IsException())
+		require.True(t, result.IsObject())
+	})
+
+	// Test Case 6: NewInstance with various non-pointer types to ensure comprehensive coverage
+	t.Run("NewInstance_VariousValueTypes", func(t *testing.T) {
+		// Create a valid constructor first
+		pointConstructor, _, err := createPointClass(ctx)
+		defer pointConstructor.Free()
+		require.NoError(t, err)
+
+		// Test with different value types
+		testCases := []struct {
+			name string
+			obj  interface{}
+		}{
+			{"int", 42},
+			{"string", "test"},
+			{"bool", true},
+			{"slice", []int{1, 2, 3}},
+			{"map", map[string]int{"a": 1}},
+			{"struct", Point{X: 1, Y: 2}}, // struct value
+		}
+
+		for _, tc := range testCases {
+			t.Run(tc.name, func(t *testing.T) {
+				result := pointConstructor.NewInstance(tc.obj)
+				defer result.Free()
+
+				// All of these should trigger the pointer type validation error
+				require.True(t, result.IsException())
+			})
+		}
+	})
+
+	// ===== NEW TEST CASES: Cover the three specific check branches =====
+
+	// Test Case 7: Constructor not registered in global class registry
+	t.Run("NewInstance_ConstructorNotRegistered", func(t *testing.T) {
+		// Create a constructor function that's not registered in our class system
+		unregisteredConstructor, err := ctx.Eval(`
+            function UnregisteredClass(value) {
+                this.value = value;
+            }
+            UnregisteredClass;
+        `)
+		require.NoError(t, err)
+		defer unregisteredConstructor.Free()
+
+		// This should trigger: "constructor not registered in global class registry"
+		result := unregisteredConstructor.NewInstance(&Point{X: 1, Y: 2})
+		defer result.Free()
+
+		require.True(t, result.IsException())
+		// Verify error message contains expected text
+		errorStr := ctx.Exception().Error()
+		require.Contains(t, errorStr, "constructor not registered")
+	})
+
+	// Test Case 8: Proto get exception (corrupted prototype)
+	t.Run("NewInstance_ProtoException", func(t *testing.T) {
+		// Create a constructor wrapped in a Proxy that throws on prototype access
+		proxyConstructor, err := ctx.Eval(`
+			function BaseClass() {}
+			
+			const ProxyConstructor = new Proxy(BaseClass, {
+				get: function(target, prop) {
+					if (prop === 'prototype') {
+						throw new Error("Proxy prototype access denied");
+					}
+					return target[prop];
+				}
+			});
+			
+			ProxyConstructor;
+		`)
+		require.NoError(t, err)
+		defer proxyConstructor.Free()
+
+		// Register this constructor to pass the first check
+		fakeClassID := uint32(12345)
+		registerConstructorClassID(proxyConstructor.ref, fakeClassID)
+
+		// This should trigger the proto.IsException() branch
+		result := proxyConstructor.NewInstance(&Point{X: 1, Y: 2})
+		defer result.Free()
+
+		require.True(t, result.IsException())
+	})
+
+	// // Test Case 9: Object creation exception (simulate C.JS_NewObjectProtoClass failure)
+	// t.Run("NewInstance_ObjectCreationException", func(t *testing.T) {
+	// 	// Create a constructor and manually register it with an invalid setup
+	// 	invalidConstructor, err := ctx.Eval(`
+	//         function InvalidClass() {}
+	//         // Create an invalid prototype that might cause object creation to fail
+	//         InvalidClass.prototype = null;
+	//         InvalidClass;
+	//     `)
+	// 	require.NoError(t, err)
+	// 	defer invalidConstructor.Free()
+
+	// 	// Register this constructor with a potentially problematic class ID
+	// 	// Use a very large class ID that might cause C.JS_NewObjectProtoClass to fail
+	// 	fakeClassID := uint32(99999)
+	// 	registerConstructorClassID(invalidConstructor.ref, fakeClassID)
+
+	// 	result := invalidConstructor.NewInstance(&Point{X: 1, Y: 2})
+	// 	defer result.Free()
+
+	// 	// This should trigger either object creation exception or other error
+	// 	require.True(t, result.IsException())
+	// })
+
+	// // Test Case 10: Test memory cleanup in error scenarios
+	// t.Run("NewInstance_MemoryCleanup", func(t *testing.T) {
+	// 	// Create a valid constructor
+	// 	pointConstructor, _, err := createPointClass(ctx)
+	// 	require.NoError(t, err)
+
+	// 	// Get initial handle count for comparison
+	// 	initialCount := 0
+	// 	ctx.handleStore.handles.Range(func(key, value interface{}) bool {
+	// 		initialCount++
+	// 		return true
+	// 	})
+
+	// 	// Set up a scenario that will fail after handleStore.Store() but trigger cleanup
+	// 	ctx.Globals().Set("TestConstructorForCleanup", pointConstructor)
+
+	// 	// Corrupt prototype to trigger cleanup path
+	// 	_, err = ctx.Eval(`
+	//         Object.defineProperty(TestConstructorForCleanup, 'prototype', {
+	//             get: function() {
+	//                 throw new Error("Cleanup test error");
+	//             }
+	//         });
+	//     `)
+	// 	require.NoError(t, err)
+
+	// 	// This should store the object, then fail, then clean up
+	// 	result := pointConstructor.NewInstance(&Point{X: 1, Y: 2})
+	// 	defer result.Free()
+
+	// 	require.True(t, result.IsException())
+
+	// 	// Verify that handleStore was cleaned up (count should be same as initial)
+	// 	finalCount := 0
+	// 	ctx.handleStore.handles.Range(func(key, value interface{}) bool {
+	// 		finalCount++
+	// 		return true
+	// 	})
+
+	// 	// The failed handle should have been cleaned up
+	// 	require.Equal(t, initialCount, finalCount, "HandleStore should be cleaned up after NewInstance failure")
+	// })
+
+	// // Test Case 11: Alternative approach for C.JS_NewObjectProtoClass failure
+	// t.Run("NewInstance_InvalidClassID", func(t *testing.T) {
+	// 	// Create constructor with completely invalid setup
+	// 	weirdConstructor, err := ctx.Eval(`
+	//         function WeirdClass() {}
+	//         // Try to make prototype chain very unusual
+	//         WeirdClass.prototype = Object.create(null);
+	//         WeirdClass.prototype.constructor = WeirdClass;
+	//         WeirdClass;
+	//     `)
+	// 	require.NoError(t, err)
+	// 	defer weirdConstructor.Free()
+
+	// 	// Register with an extreme class ID
+	// 	extremeClassID := uint32(4294967295) // Max uint32
+	// 	registerConstructorClassID(weirdConstructor.ref, extremeClassID)
+
+	// 	result := weirdConstructor.NewInstance(&Point{X: 1, Y: 2})
+	// 	defer result.Free()
+
+	// 	// This might trigger C.JS_NewObjectProtoClass failure
+	// 	require.True(t, result.IsException())
+	// })
+
+	// Test Case 12: Successful NewInstance with proper pointer for comparison
+	t.Run("NewInstance_Success", func(t *testing.T) {
+		// Create a valid constructor first
+		pointConstructor, _, err := createPointClass(ctx)
+		defer pointConstructor.Free()
+		require.NoError(t, err)
+
+		// Call NewInstance with proper pointer type - this should succeed
+		point := &Point{X: 3.14, Y: 2.71}
+		result := pointConstructor.NewInstance(point)
+		defer result.Free()
+
+		// This should succeed
+		require.False(t, result.IsException())
+		require.True(t, result.IsObject())
+
+		// Verify we can retrieve the Go object back
+		retrievedObj, err := result.GetGoObject()
+		require.NoError(t, err)
+
+		retrievedPoint, ok := retrievedObj.(*Point)
+		require.True(t, ok)
+		require.Equal(t, 3.14, retrievedPoint.X)
+		require.Equal(t, 2.71, retrievedPoint.Y)
+	})
+}
+
+// TestResolveClassIDFromInheritance tests the inheritance resolution logic
+func TestResolveClassIDFromInheritance(t *testing.T) {
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	// Test Case 1: No inheritance - should return false
+	t.Run("NoInheritance", func(t *testing.T) {
+		standaloneConstructor, err := ctx.Eval(`
+            function StandaloneClass() {}
+            StandaloneClass;
+        `)
+		require.NoError(t, err)
+		defer standaloneConstructor.Free()
+
+		classID, exists := standaloneConstructor.resolveClassIDFromInheritance()
+		require.False(t, exists)
+		require.Equal(t, uint32(0), classID)
+	})
+
+	// Test Case 2: Inherits from unregistered class - should return false
+	t.Run("UnregisteredParent", func(t *testing.T) {
+		childConstructor, err := ctx.Eval(`
+            function UnregisteredBase() {}
+            function Child() {}
+            Child.prototype = Object.create(UnregisteredBase.prototype);
+            Child.prototype.constructor = Child;
+            Child;
+        `)
+		require.NoError(t, err)
+		defer childConstructor.Free()
+
+		classID, exists := childConstructor.resolveClassIDFromInheritance()
+		require.False(t, exists)
+		require.Equal(t, uint32(0), classID)
+	})
+
+	// Test Case 3: Inherits from standard Error - should return false
+	t.Run("InheritsFromError", func(t *testing.T) {
+		errorChildConstructor, err := ctx.Eval(`
+            function MyError() {}
+            MyError.prototype = Object.create(Error.prototype);
+            MyError.prototype.constructor = MyError;
+            MyError;
+        `)
+		require.NoError(t, err)
+		defer errorChildConstructor.Free()
+
+		classID, exists := errorChildConstructor.resolveClassIDFromInheritance()
+		require.False(t, exists)
+		require.Equal(t, uint32(0), classID)
+	})
+
+	// Test Case 4: Successful inheritance (for comparison)
+	t.Run("ValidInheritance", func(t *testing.T) {
+		// Create and register a base class
+		baseConstructor, baseClassID, err := createPointClass(ctx)
+		require.NoError(t, err)
+
+		// Set base constructor in global scope
+		ctx.Globals().Set("Point", baseConstructor)
+
+		// Create child class that properly inherits from Point
+		childConstructor, err := ctx.Eval(`
+            function ColoredPoint(x, y, color) {
+                this.color = color;
+            }
+            ColoredPoint.prototype = Object.create(Point.prototype);
+            ColoredPoint.prototype.constructor = ColoredPoint;
+            ColoredPoint;
+        `)
+		require.NoError(t, err)
+		defer childConstructor.Free()
+
+		classID, exists := childConstructor.resolveClassIDFromInheritance()
+		require.True(t, exists)
+		require.Equal(t, baseClassID, classID)
+	})
+}
