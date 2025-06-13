@@ -99,6 +99,12 @@ extern void GoClassFinalizerProxy(JSRuntime *rt, JSValue val);
 extern JSValue CreateClassInstance(JSContext *ctx, JSValue constructor, 
                                   JSClassID class_id, int32_t handle_id);
 
+// CreateCFunction - encapsulates C function creation logic
+// Parameters match JS_NewCFunction2: ctx, name, length, cproto, magic
+// Returns JS_EXCEPTION on any error, proper JSValue on success
+extern JSValue CreateCFunction(JSContext *ctx, const char *name, 
+                              int length, int func_type, int32_t handler_id);
+
 extern int ValueGetTag(JSValueConst v);
 extern JSValue LoadModuleBytecode(JSContext *ctx, const uint8_t *buf, size_t buf_len, int load_only);
 

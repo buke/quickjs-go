@@ -7,6 +7,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
 )
 
 // Point represents a 2D point class for testing basic functionality
@@ -40,7 +42,7 @@ func getFinalizeCount() int64 {
 
 // createPointClass creates a Point class for testing with simplified NewInstance
 func createPointClass(ctx *Context) (Value, uint32, error) {
-	return NewClass("Point").
+	return NewClassBuilder("Point").
 		Constructor(func(ctx *Context, newTarget Value, args []Value) Value {
 			x, y := 0.0, 0.0
 			if len(args) > 0 {
@@ -611,7 +613,7 @@ func TestErrorHandling(t *testing.T) {
 	defer context.Close()
 
 	// Test creating class with empty name
-	_, _, err := NewClass("").
+	_, _, err := NewClassBuilder("").
 		Constructor(func(ctx *Context, newTarget Value, args []Value) Value {
 			return ctx.Undefined()
 		}).
@@ -621,7 +623,7 @@ func TestErrorHandling(t *testing.T) {
 	}
 
 	// Test creating class without constructor
-	_, _, err = NewClass("TestClass").Build(context)
+	_, _, err = NewClassBuilder("TestClass").Build(context)
 	if err == nil {
 		t.Errorf("Expected error for missing constructor")
 	}
@@ -665,7 +667,7 @@ func TestMemoryManagement(t *testing.T) {
 	// Create multiple classes to test handle store management
 	for i := 0; i < 5; i++ {
 		className := fmt.Sprintf("TestClass%d", i)
-		constructor, _, err := NewClass(className).
+		constructor, _, err := NewClassBuilder(className).
 			Constructor(func(ctx *Context, newTarget Value, args []Value) Value {
 				point := &Point{X: float64(i), Y: float64(i * 2)}
 				// Use simplified NewInstance
@@ -887,4 +889,138 @@ func TestUnifiedConstructorMapping(t *testing.T) {
 		t.Errorf("Reflection constructor instance incorrect: got (%f, %f)",
 			result.GetIdx(2).Float64(), result.GetIdx(3).Float64())
 	}
+}
+
+// TestReadOnlyAndWriteOnlyProperties tests readonly and writeonly property functionality
+func TestReadOnlyAndWriteOnlyProperties(t *testing.T) {
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	// Test ReadOnlyProperty
+	constructor1, _, err := NewClassBuilder("ReadOnlyTest").
+		Constructor(func(ctx *Context, newTarget Value, args []Value) Value {
+			return newTarget.NewInstance(&Point{X: 10, Y: 20})
+		}).
+		ReadOnlyProperty("readOnlyX", func(ctx *Context, this Value) Value {
+			obj, _ := this.GetGoObject()
+			point := obj.(*Point)
+			return ctx.Float64(point.X)
+		}).
+		Build(ctx)
+
+	if err != nil {
+		t.Fatalf("Failed to create ReadOnlyTest class: %v", err)
+	}
+
+	ctx.Globals().Set("ReadOnlyTest", constructor1)
+
+	// Test reading works, writing doesn't change value
+	result, err := ctx.Eval(`
+        let obj1 = new ReadOnlyTest();
+        let original = obj1.readOnlyX;
+        obj1.readOnlyX = 999; // Should not change
+        [original, obj1.readOnlyX];
+    `)
+	if err != nil {
+		t.Fatalf("ReadOnly property test failed: %v", err)
+	}
+	defer result.Free()
+
+	if result.GetIdx(0).Float64() != 10.0 || result.GetIdx(1).Float64() != 10.0 {
+		t.Errorf("ReadOnly property failed: expected [10, 10], got [%f, %f]",
+			result.GetIdx(0).Float64(), result.GetIdx(1).Float64())
+	}
+
+	// Test WriteOnlyProperty
+	constructor2, _, err := NewClassBuilder("WriteOnlyTest").
+		Constructor(func(ctx *Context, newTarget Value, args []Value) Value {
+			return newTarget.NewInstance(&Point{X: 0, Y: 0})
+		}).
+		WriteOnlyProperty("writeOnlyX", func(ctx *Context, this Value, value Value) Value {
+			obj, _ := this.GetGoObject()
+			point := obj.(*Point)
+			point.X = value.Float64()
+			return ctx.Undefined()
+		}).
+		ReadOnlyProperty("getX", func(ctx *Context, this Value) Value {
+			obj, _ := this.GetGoObject()
+			point := obj.(*Point)
+			return ctx.Float64(point.X)
+		}).
+		Build(ctx)
+
+	if err != nil {
+		t.Fatalf("Failed to create WriteOnlyTest class: %v", err)
+	}
+
+	ctx.Globals().Set("WriteOnlyTest", constructor2)
+
+	// Test writing works, reading returns undefined
+	result2, err := ctx.Eval(`
+        let obj2 = new WriteOnlyTest();
+        obj2.writeOnlyX = 42;
+        [obj2.getX, obj2.writeOnlyX]; // getX should show 42, writeOnlyX should be undefined
+    `)
+	if err != nil {
+		t.Fatalf("WriteOnly property test failed: %v", err)
+	}
+	defer result2.Free()
+
+	if result2.GetIdx(0).Float64() != 42.0 || !result2.GetIdx(1).IsUndefined() {
+		t.Errorf("WriteOnly property failed: expected [42, undefined], got [%f, %v]",
+			result2.GetIdx(0).Float64(), result2.GetIdx(1).String())
+	}
+
+	// Test StaticReadOnlyProperty
+	constructor3, _, err := NewClassBuilder("StaticReadOnlyTest").
+		Constructor(func(ctx *Context, newTarget Value, args []Value) Value {
+			return newTarget.NewInstance(&Point{X: 0, Y: 0})
+		}).
+		StaticReadOnlyProperty("VERSION", func(ctx *Context, this Value) Value {
+			return ctx.String("1.0.0")
+		}).
+		Build(ctx)
+
+	if err != nil {
+		t.Fatalf("Failed to create StaticReadOnlyTest class: %v", err)
+	}
+
+	ctx.Globals().Set("StaticReadOnlyTest", constructor3)
+
+	// Test static readonly property
+	result3, err := ctx.Eval(`
+        let original3 = StaticReadOnlyTest.VERSION;
+        StaticReadOnlyTest.VERSION = "2.0.0"; // Should not change
+        [original3, StaticReadOnlyTest.VERSION];
+    `)
+	if err != nil {
+		t.Fatalf("StaticReadOnly property test failed: %v", err)
+	}
+	defer result3.Free()
+
+	if result3.GetIdx(0).String() != "1.0.0" || result3.GetIdx(1).String() != "1.0.0" {
+		t.Errorf("StaticReadOnly property failed: expected ['1.0.0', '1.0.0'], got ['%s', '%s']",
+			result3.GetIdx(0).String(), result3.GetIdx(1).String())
+	}
+}
+
+// TestCreateCFunctionWithCustomHandler tests createCFunction with various handler types
+func TestCreateCFunctionError(t *testing.T) {
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	t.Run("UnsupportedFunctionType", func(st *testing.T) {
+		methodFunc, _, err := ctx.createCFunction("UnsupportedFunctionType", func(ctx *Context, this Value, args []Value) Value {
+			return ctx.Undefined()
+		}, uint32(999), 0)
+		defer methodFunc.Free()
+
+		require.True(t, methodFunc.IsException())
+		require.Error(t, err)
+	})
+
 }

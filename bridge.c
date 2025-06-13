@@ -190,6 +190,57 @@ JSValue CreateClassInstance(JSContext *ctx, JSValue constructor,
 }
 
 // ============================================================================
+// CREATECFUNCTION HELPER FUNCTION
+// ============================================================================
+
+// CreateCFunction - encapsulates C function creation logic
+// This function handles:
+// 1. Function type validation and proxy selection
+// 2. JS_NewCFunction2 call with proper parameters
+// 3. Error handling
+// 
+// Parameters match JS_NewCFunction2: ctx, name, length, cproto, magic
+// Returns JS_EXCEPTION on any error, proper JSValue on success
+JSValue CreateCFunction(JSContext *ctx, const char *name, 
+                       int length, int func_type, int32_t handler_id) {
+    // Get magic enum values for comparison
+    int constructor_magic = GetCFuncConstructorMagic();
+    int generic_magic = GetCFuncGenericMagic();
+    int getter_magic = GetCFuncGetterMagic();
+    int setter_magic = GetCFuncSetterMagic();
+    
+    // Create the C function based on type - each type needs proper casting
+    JSValue jsFunc;
+    
+    if (func_type == constructor_magic) {
+        // Constructor function: JSValue (*)(JSContext *, JSValueConst, int, JSValueConst *, int)
+        jsFunc = JS_NewCFunction2(ctx, (JSCFunction *)GoClassConstructorProxy, name, length, 
+                                 (JSCFunctionEnum)func_type, handler_id);
+    } else if (func_type == generic_magic) {
+        // Generic method: JSValue (*)(JSContext *, JSValueConst, int, JSValueConst *, int)
+        jsFunc = JS_NewCFunction2(ctx, (JSCFunction *)GoClassMethodProxy, name, length, 
+                                 (JSCFunctionEnum)func_type, handler_id);
+    } else if (func_type == getter_magic) {
+        // Getter function: JSValue (*)(JSContext *, JSValueConst, int)
+        // Note: QuickJS will handle the signature mismatch internally based on the JSCFunctionEnum
+        jsFunc = JS_NewCFunction2(ctx, (JSCFunction *)GoClassGetterProxy, name, length, 
+                                 (JSCFunctionEnum)func_type, handler_id);
+    } else if (func_type == setter_magic) {
+        // Setter function: JSValue (*)(JSContext *, JSValueConst, JSValueConst, int)
+        // Note: QuickJS will handle the signature mismatch internally based on the JSCFunctionEnum
+        jsFunc = JS_NewCFunction2(ctx, (JSCFunction *)GoClassSetterProxy, name, length, 
+                                 (JSCFunctionEnum)func_type, handler_id);
+    } else {
+        // Return exception for unsupported function type
+        return JS_ThrowTypeError(ctx, "unsupported function type: %d", func_type);
+    }
+    
+    // JS_NewCFunction2 returns JS_EXCEPTION on failure
+    // No need to check explicitly, just return the result
+    return jsFunc;
+}
+
+// ============================================================================
 // INTERRUPT HANDLERS
 // ============================================================================
 

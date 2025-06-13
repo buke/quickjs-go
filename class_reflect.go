@@ -157,7 +157,7 @@ func getReflectType(structType interface{}) (reflect.Type, error) {
 
 // buildClassFromReflection creates a ClassBuilder from reflection analysis
 func buildClassFromReflection(className string, typ reflect.Type, opts *ReflectOptions) (*ClassBuilder, error) {
-	builder := NewClass(className)
+	builder := NewClassBuilder(className)
 
 	// Add default constructor with mixed parameter support
 	builder.Constructor(func(ctx *Context, newTarget Value, args []Value) Value {
