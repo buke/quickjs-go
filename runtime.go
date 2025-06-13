@@ -7,7 +7,6 @@ package quickjs
 import "C"
 import (
 	"runtime"
-	"sync"
 	"unsafe"
 )
 
@@ -142,9 +141,12 @@ func (r *Runtime) Close() {
 	// Step 1: Clear interrupt handler before closing
 	r.ClearInterruptHandler()
 
-	// Step 2: Clean up global constructor registry efficiently
-	// Reset the entire map since all JSValues will be invalid after runtime closes
-	globalConstructorRegistry = sync.Map{}
+	// Step 2: Clean up global constructor registry safely
+	// Use Range + Delete to avoid potential race conditions with map replacement
+	globalConstructorRegistry.Range(func(key, value interface{}) bool {
+		globalConstructorRegistry.Delete(key)
+		return true // continue iteration
+	})
 
 	// Step 3: Unregister runtime mapping
 	unregisterRuntime(r.ref)

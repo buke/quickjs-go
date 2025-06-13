@@ -31,7 +31,11 @@ func unregisterContext(cCtx *C.JSContext) {
 
 // clearContextMapping clears all registered contexts (internal use)
 func clearContextMapping() {
-	contextMapping = sync.Map{} // Reset the map for efficient cleanup
+	// Clear all mappings
+	contextMapping.Range(func(key, value interface{}) bool {
+		contextMapping.Delete(key)
+		return true // continue iteration
+	})
 }
 
 // getContextFromJS gets Go Context from C JSContext (internal use)
