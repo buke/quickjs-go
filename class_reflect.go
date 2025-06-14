@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"slices"
 	"strings"
 )
 
@@ -220,66 +221,27 @@ func initializeFromObjectArgs(instance interface{}, obj Value, typ reflect.Type,
 			continue
 		}
 
-		// Get JavaScript property name using same logic as marshal.go
-		propName, skip := parseFieldTagForProperty(field)
-		if skip {
+		// Use unified tag parsing from marshal.go
+		tagInfo := parseFieldTag(field)
+		if tagInfo.Skip {
 			continue // Field marked with "-" tag
 		}
 
 		// Check if object has this property and set field value
-		if obj.Has(propName) {
-			propValue := obj.Get(propName)
+		if obj.Has(tagInfo.Name) {
+			propValue := obj.Get(tagInfo.Name)
 			defer propValue.Free()
 
 			fieldValue := val.Field(i)
 			if fieldValue.CanSet() {
 				if err := ctx.unmarshal(propValue, fieldValue); err != nil {
-					return fmt.Errorf("failed to set field %s from property %s: %w", field.Name, propName, err)
+					return fmt.Errorf("failed to set field %s from property %s: %w", field.Name, tagInfo.Name, err)
 				}
 			}
 		}
 	}
 
 	return nil
-}
-
-// parseFieldTagForProperty parses struct field tags for property names
-// This reuses the same logic as marshal.go for consistency
-func parseFieldTagForProperty(field reflect.StructField) (string, bool) {
-	// Check "js" tag first
-	if tag := field.Tag.Get("js"); tag != "" {
-		if tag == "-" {
-			return "", true // skip this field
-		}
-		// Parse "name,options" format if needed
-		if idx := strings.Index(tag, ","); idx != -1 {
-			name := tag[:idx]
-			if name == "" {
-				return strings.ToLower(field.Name[:1]) + field.Name[1:], false
-			}
-			return name, false
-		}
-		return tag, false
-	}
-
-	// Check "json" tag as fallback
-	if tag := field.Tag.Get("json"); tag != "" {
-		if tag == "-" {
-			return "", true // skip this field
-		}
-		// Parse "name,omitempty" format
-		if idx := strings.Index(tag, ","); idx != -1 {
-			name := tag[:idx]
-			if name == "" {
-				return strings.ToLower(field.Name[:1]) + field.Name[1:], false
-			}
-			return name, false
-		}
-		return tag, false
-	}
-
-	// No tag found, use camelCase field name
-	return strings.ToLower(field.Name[:1]) + field.Name[1:], false
 }
 
 // addReflectionMethods scans struct methods and adds them to the ClassBuilder
@@ -311,9 +273,9 @@ func addReflectionProperties(builder *ClassBuilder, typ reflect.Type, opts *Refl
 			continue
 		}
 
-		// Get property configuration from struct tags
-		propName, skip := parseFieldTagForProperty(field)
-		if skip {
+		// Use unified tag parsing from marshal.go
+		tagInfo := parseFieldTag(field)
+		if tagInfo.Skip {
 			continue // Field marked with "-" tag
 		}
 
@@ -322,7 +284,7 @@ func addReflectionProperties(builder *ClassBuilder, typ reflect.Type, opts *Refl
 		setter := createFieldSetter(field, i)
 
 		// Add property to builder (instance properties by default)
-		builder.Property(propName, getter, setter)
+		builder.Property(tagInfo.Name, getter, setter)
 	}
 }
 
@@ -353,7 +315,7 @@ func shouldSkipMethod(method reflect.Method, opts *ReflectOptions) bool {
 	}
 
 	// Check ignored list
-	if contains(opts.IgnoredMethods, method.Name) {
+	if slices.Contains(opts.IgnoredMethods, method.Name) {
 		return true
 	}
 
@@ -369,7 +331,7 @@ func shouldSkipField(field reflect.StructField, opts *ReflectOptions) bool {
 	}
 
 	// Check ignored list
-	return contains(opts.IgnoredFields, field.Name)
+	return slices.Contains(opts.IgnoredFields, field.Name)
 }
 
 // createMethodWrapper creates a ClassMethodFunc wrapper around a reflect.Method
@@ -520,16 +482,6 @@ func convertMethodResults(results []reflect.Value, ctx *Context) Value {
 // =============================================================================
 // UTILITY FUNCTIONS
 // =============================================================================
-
-// contains checks if a slice contains a specific string
-func contains(slice []string, item string) bool {
-	for _, s := range slice {
-		if s == item {
-			return true
-		}
-	}
-	return false
-}
 
 // specialMethods contains method names that should be skipped during reflection binding
 // Using map for O(1) lookup performance instead of slice

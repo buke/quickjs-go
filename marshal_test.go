@@ -3,6 +3,7 @@ package quickjs
 import (
 	"errors"
 	"fmt"
+	"math"
 	"math/big"
 	"reflect"
 	"testing"
@@ -66,6 +67,37 @@ type TestStruct struct {
 type NestedStruct struct {
 	Name  string `js:"name"`
 	Value int    `js:"value"`
+}
+
+// Test struct for comprehensive tag parsing tests - extended to cover all missing branches
+type TagParsingTestStruct struct {
+	// Test different tag formats
+	JSTag        string `js:"js_name"`
+	JSONTag      string `json:"json_name"`
+	JSPriority   string `js:"js_priority" json:"json_priority"` // js should win
+	EmptyJSTag   string `js:""`                                 // should use camelCase
+	EmptyJSONTag string `json:""`                               // should use camelCase
+	CommaJSTag   string `js:",omitempty"`                       // empty name with option
+	CommaJSONTag string `json:",omitempty"`                     // empty name with option
+	SkipJS       string `js:"-"`                                // should be skipped
+	SkipJSON     string `json:"-"`                              // should be skipped
+	NoTag        string // should use camelCase
+
+	// Test omitempty functionality - extended to cover all isEmptyValue branches
+	OmitEmptyString  string            `js:"omit_str,omitempty"`
+	OmitEmptyInt     int               `js:"omit_int,omitempty"`
+	OmitEmptyBool    bool              `js:"omit_bool,omitempty"`
+	OmitEmptySlice   []string          `js:"omit_slice,omitempty"`
+	OmitEmptyMap     map[string]string `js:"omit_map,omitempty"`
+	OmitEmptyPtr     *string           `js:"omit_ptr,omitempty"`
+	OmitEmptyArray   [0]int            `js:"omit_array,omitempty"`   // Zero-length array
+	OmitEmptyUint    uint              `js:"omit_uint,omitempty"`    // Cover v.Uint() == 0 branch
+	OmitEmptyUint8   uint8             `js:"omit_uint8,omitempty"`   // Cover v.Uint() == 0 branch
+	OmitEmptyUint16  uint16            `js:"omit_uint16,omitempty"`  // Cover v.Uint() == 0 branch
+	OmitEmptyUint32  uint32            `js:"omit_uint32,omitempty"`  // Cover v.Uint() == 0 branch
+	OmitEmptyUint64  uint64            `js:"omit_uint64,omitempty"`  // Cover v.Uint() == 0 branch
+	OmitEmptyFloat32 float32           `js:"omit_float32,omitempty"` // Cover v.Float() == 0 branch
+	OmitEmptyFloat64 float64           `js:"omit_float64,omitempty"` // Cover v.Float() == 0 branch
 }
 
 // Time wrapper for custom marshal/unmarshal
@@ -160,6 +192,342 @@ func TestMarshalBasicTypes(t *testing.T) {
 		require.True(t, jsVal2.IsString())
 		require.Equal(t, "test string", jsVal2.ToString())
 	})
+
+	// Merged BigInt edge cases
+	t.Run("BigIntEdgeCases", func(t *testing.T) {
+		// Test valid BigInt that can be converted to int64
+		jsVal, err := ctx.Eval("BigInt('123456789')")
+		require.NoError(t, err)
+		defer jsVal.Free()
+
+		var result int64
+		err = ctx.Unmarshal(jsVal, &result)
+		require.NoError(t, err)
+		require.Equal(t, int64(123456789), result)
+
+		// Test valid BigInt that can be converted to uint64
+		jsVal2, err := ctx.Eval("BigInt('18446744073709551615')") // max uint64
+		require.NoError(t, err)
+		defer jsVal2.Free()
+
+		var result2 uint64
+		err = ctx.Unmarshal(jsVal2, &result2)
+		require.NoError(t, err)
+		require.Equal(t, uint64(18446744073709551615), result2)
+
+		// Test positive number to uint64
+		jsVal3 := ctx.Float64(123456789.0)
+		defer jsVal3.Free()
+
+		var result3 uint64
+		err = ctx.Unmarshal(jsVal3, &result3)
+		require.NoError(t, err)
+		require.Equal(t, uint64(123456789), result3)
+	})
+}
+
+func TestFieldTagParsing(t *testing.T) {
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	t.Run("TagPriority", func(t *testing.T) {
+		data := TagParsingTestStruct{
+			JSTag:      "js_value",
+			JSONTag:    "json_value",
+			JSPriority: "priority_test",
+		}
+
+		jsVal, err := ctx.Marshal(data)
+		require.NoError(t, err)
+		defer jsVal.Free()
+
+		// Test js tag takes priority over json tag
+		require.True(t, jsVal.Has("js_name"))
+		require.True(t, jsVal.Has("json_name"))
+		require.True(t, jsVal.Has("js_priority"))
+		require.False(t, jsVal.Has("json_priority")) // json should be ignored when js exists
+
+		jsName := jsVal.Get("js_name")
+		defer jsName.Free()
+		require.Equal(t, "js_value", jsName.ToString())
+
+		priority := jsVal.Get("js_priority")
+		defer priority.Free()
+		require.Equal(t, "priority_test", priority.ToString())
+	})
+
+	t.Run("EmptyTagNames", func(t *testing.T) {
+		data := TagParsingTestStruct{
+			EmptyJSTag:   "empty_js",
+			EmptyJSONTag: "empty_json",
+			CommaJSTag:   "comma_js",
+			CommaJSONTag: "comma_json",
+			NoTag:        "no_tag",
+		}
+
+		jsVal, err := ctx.Marshal(data)
+		require.NoError(t, err)
+		defer jsVal.Free()
+
+		// Empty tag names should use camelCase field names
+		require.True(t, jsVal.Has("emptyJSTag"))
+		require.True(t, jsVal.Has("emptyJSONTag"))
+		require.True(t, jsVal.Has("commaJSTag"))
+		require.True(t, jsVal.Has("commaJSONTag"))
+		require.True(t, jsVal.Has("noTag"))
+
+		// Verify values
+		tests := []struct {
+			key      string
+			expected string
+		}{
+			{"emptyJSTag", "empty_js"},
+			{"emptyJSONTag", "empty_json"},
+			{"commaJSTag", "comma_js"},
+			{"commaJSONTag", "comma_json"},
+			{"noTag", "no_tag"},
+		}
+
+		for _, tt := range tests {
+			val := jsVal.Get(tt.key)
+			require.Equal(t, tt.expected, val.ToString())
+			val.Free()
+		}
+	})
+
+	t.Run("SkippedFields", func(t *testing.T) {
+		data := TagParsingTestStruct{
+			SkipJS:   "should_not_appear",
+			SkipJSON: "should_not_appear",
+		}
+
+		jsVal, err := ctx.Marshal(data)
+		require.NoError(t, err)
+		defer jsVal.Free()
+
+		// Fields with "-" tag should be skipped
+		require.False(t, jsVal.Has("SkipJS"))
+		require.False(t, jsVal.Has("SkipJSON"))
+		require.False(t, jsVal.Has("skipJS"))
+		require.False(t, jsVal.Has("skipJSON"))
+	})
+
+	t.Run("OmitEmpty", func(t *testing.T) {
+		// Test with empty values - extended to cover all isEmptyValue branches
+		emptyData := TagParsingTestStruct{
+			OmitEmptyString:  "",
+			OmitEmptyInt:     0,
+			OmitEmptyBool:    false,
+			OmitEmptySlice:   []string{},
+			OmitEmptyMap:     map[string]string{},
+			OmitEmptyPtr:     nil,
+			OmitEmptyArray:   [0]int{}, // Zero-length array
+			OmitEmptyUint:    0,
+			OmitEmptyUint8:   0,
+			OmitEmptyUint16:  0,
+			OmitEmptyUint32:  0,
+			OmitEmptyUint64:  0,
+			OmitEmptyFloat32: 0.0,
+			OmitEmptyFloat64: 0.0,
+		}
+
+		jsVal, err := ctx.Marshal(emptyData)
+		require.NoError(t, err)
+		defer jsVal.Free()
+
+		// All empty values with omitempty should be omitted
+		expectedOmittedFields := []string{
+			"omit_str", "omit_int", "omit_bool", "omit_slice", "omit_map", "omit_ptr", "omit_array",
+			"omit_uint", "omit_uint8", "omit_uint16", "omit_uint32", "omit_uint64",
+			"omit_float32", "omit_float64",
+		}
+
+		for _, field := range expectedOmittedFields {
+			require.False(t, jsVal.Has(field), "Field %s should be omitted", field)
+		}
+
+		// Test with non-empty values
+		nonEmptyValue := "test"
+		nonEmptyData := TagParsingTestStruct{
+			OmitEmptyString:  "not_empty",
+			OmitEmptyInt:     42,
+			OmitEmptyBool:    true,
+			OmitEmptySlice:   []string{"item"},
+			OmitEmptyMap:     map[string]string{"key": "value"},
+			OmitEmptyPtr:     &nonEmptyValue,
+			OmitEmptyUint:    1,
+			OmitEmptyUint8:   2,
+			OmitEmptyUint16:  3,
+			OmitEmptyUint32:  4,
+			OmitEmptyUint64:  5,
+			OmitEmptyFloat32: 3.14,
+			OmitEmptyFloat64: 2.718,
+			// OmitEmptyArray remains [0]int{} - still empty
+		}
+
+		jsVal2, err := ctx.Marshal(nonEmptyData)
+		require.NoError(t, err)
+		defer jsVal2.Free()
+
+		// Non-empty values should be included
+		expectedIncludedFields := []string{
+			"omit_str", "omit_int", "omit_bool", "omit_slice", "omit_map", "omit_ptr",
+			"omit_uint", "omit_uint8", "omit_uint16", "omit_uint32", "omit_uint64",
+			"omit_float32", "omit_float64",
+		}
+
+		for _, field := range expectedIncludedFields {
+			require.True(t, jsVal2.Has(field), "Field %s should be included", field)
+		}
+
+		// Array field should still be omitted as [0]int{} has length 0
+		require.False(t, jsVal2.Has("omit_array"))
+
+		// Test edge case: negative zero for floats
+		negativeZeroData := TagParsingTestStruct{
+			OmitEmptyFloat32: float32(math.Copysign(0, -1)), // -0.0
+			OmitEmptyFloat64: math.Copysign(0, -1),          // -0.0
+		}
+
+		jsVal3, err := ctx.Marshal(negativeZeroData)
+		require.NoError(t, err)
+		defer jsVal3.Free()
+
+		// Negative zero should still be considered empty
+		require.False(t, jsVal3.Has("omit_float32"))
+		require.False(t, jsVal3.Has("omit_float64"))
+	})
+
+	// Test fieldNameToCamelCase edge case coverage
+	t.Run("CamelCaseEdgeCases", func(t *testing.T) {
+		// Test the fieldNameToCamelCase function indirectly
+		// Since Go field names can't be empty, we test via tag parsing
+		testCases := []struct {
+			input    string
+			expected string
+		}{
+			{"", ""},                   // Cover len(fieldName) == 0 branch
+			{"A", "a"},                 // Single character
+			{"TestField", "testField"}, // Normal case
+			{"XMLParser", "xMLParser"}, // Acronym case
+		}
+
+		for _, tc := range testCases {
+			result := fieldNameToCamelCase(tc.input)
+			require.Equal(t, tc.expected, result, "fieldNameToCamelCase(%q) should return %q", tc.input, tc.expected)
+		}
+	})
+}
+
+func TestCamelCaseConversion(t *testing.T) {
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	// Test various field name patterns
+	type CamelCaseTest struct {
+		SimpleField    string
+		ALLCAPS        string
+		MixedCASEField string
+		Field123       string
+		A              string
+		AB             string
+		XMLHttpRequest string
+		HTMLParser     string
+	}
+
+	data := CamelCaseTest{
+		SimpleField:    "simple",
+		ALLCAPS:        "allcaps",
+		MixedCASEField: "mixed",
+		Field123:       "field123",
+		A:              "a",
+		AB:             "ab",
+		XMLHttpRequest: "xml",
+		HTMLParser:     "html",
+	}
+
+	jsVal, err := ctx.Marshal(data)
+	require.NoError(t, err)
+	defer jsVal.Free()
+
+	// Test camelCase conversion
+	expectedFields := map[string]string{
+		"simpleField":    "simple",
+		"aLLCAPS":        "allcaps",
+		"mixedCASEField": "mixed",
+		"field123":       "field123",
+		"a":              "a",
+		"aB":             "ab",
+		"xMLHttpRequest": "xml",
+		"hTMLParser":     "html",
+	}
+
+	for field, expected := range expectedFields {
+		require.True(t, jsVal.Has(field), "Field %s should exist", field)
+		val := jsVal.Get(field)
+		require.Equal(t, expected, val.ToString(), "Field %s should have correct value", field)
+		val.Free()
+	}
+}
+
+func TestRoundTripWithNewTagParsing(t *testing.T) {
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	// Test round-trip with the new tag parsing logic
+	original := TagParsingTestStruct{
+		JSTag:            "js_test",
+		JSONTag:          "json_test",
+		JSPriority:       "priority_test",
+		EmptyJSTag:       "empty_js_test",
+		EmptyJSONTag:     "empty_json_test",
+		CommaJSTag:       "comma_js_test",
+		CommaJSONTag:     "comma_json_test",
+		NoTag:            "no_tag_test",
+		OmitEmptyString:  "not_empty",
+		OmitEmptyInt:     42,
+		OmitEmptyBool:    true,
+		OmitEmptySlice:   []string{"item1", "item2"},
+		OmitEmptyMap:     map[string]string{"key": "value"},
+		OmitEmptyUint:    1,
+		OmitEmptyUint32:  2,
+		OmitEmptyFloat64: 3.14,
+	}
+
+	// Marshal to JavaScript
+	jsVal, err := ctx.Marshal(original)
+	require.NoError(t, err)
+	defer jsVal.Free()
+
+	// Unmarshal back to Go
+	var result TagParsingTestStruct
+	err = ctx.Unmarshal(jsVal, &result)
+	require.NoError(t, err)
+
+	// Verify round-trip accuracy
+	require.Equal(t, original.JSTag, result.JSTag)
+	require.Equal(t, original.JSONTag, result.JSONTag)
+	require.Equal(t, original.JSPriority, result.JSPriority)
+	require.Equal(t, original.EmptyJSTag, result.EmptyJSTag)
+	require.Equal(t, original.EmptyJSONTag, result.EmptyJSONTag)
+	require.Equal(t, original.CommaJSTag, result.CommaJSTag)
+	require.Equal(t, original.CommaJSONTag, result.CommaJSONTag)
+	require.Equal(t, original.NoTag, result.NoTag)
+	require.Equal(t, original.OmitEmptyString, result.OmitEmptyString)
+	require.Equal(t, original.OmitEmptyInt, result.OmitEmptyInt)
+	require.Equal(t, original.OmitEmptyBool, result.OmitEmptyBool)
+	require.Equal(t, original.OmitEmptySlice, result.OmitEmptySlice)
+	require.Equal(t, original.OmitEmptyMap, result.OmitEmptyMap)
+
+	// Skipped fields should remain zero values
+	require.Equal(t, "", result.SkipJS)
+	require.Equal(t, "", result.SkipJSON)
 }
 
 func TestTypedArrays(t *testing.T) {
@@ -694,6 +1062,9 @@ func TestErrorCases(t *testing.T) {
 			[1]chan int{make(chan int)},                         // array with unsupported element
 			map[string]chan int{"key": make(chan int)},          // map with unsupported value
 			struct{ UnsupportedField chan int }{make(chan int)}, // struct with unsupported field
+			// Merged test cases for marshal error paths in arrays/slices
+			[2]interface{}{"valid", make(chan int)}, // array with error element
+			[]interface{}{"valid", make(chan int)},  // slice with error element
 		}
 
 		for i, data := range errorTests {
@@ -702,6 +1073,23 @@ func TestErrorCases(t *testing.T) {
 				require.Error(t, err)
 				require.Contains(t, err.Error(), "unsupported type")
 			})
+		}
+	})
+
+	t.Run("DefaultCase", func(t *testing.T) {
+		// Test with types that don't have specific cases
+		testCases := []interface{}{
+			complex64(1 + 2i),     // Complex number
+			make(chan int),        // Channel
+			func() {},             // Function
+			struct{ X int }{X: 1}, // Struct
+		}
+
+		for _, testCase := range testCases {
+			rv := reflect.ValueOf(testCase)
+			result := isEmptyValue(rv)
+			// For most unsupported types, we expect false (non-empty)
+			require.False(t, result)
 		}
 	})
 
@@ -812,8 +1200,12 @@ func TestErrorCases(t *testing.T) {
 			{"ArrayElement", `[1, "invalid", 3]`, &[3]int{}, "array element"},
 			{"MapValue", `({"key": function() {}})`, &map[string]string{}, "map value"},
 			{"StructField", `({exported: function() {}})`, &TestStruct{}, "struct field"},
-			{"UnsupportedInArray", `[1, Symbol('test'), 3]`, &[]interface{}{}, "unsupported JavaScript type"},
-			{"UnsupportedInObject", `({"key": function() {}})`, &map[string]interface{}{}, "unsupported JavaScript type"},
+
+			// Add interface unmarshal error tests here - they test the same error paths
+			{"InterfaceArrayError", `[1, Symbol('test'), 3]`, &[]interface{}{}, "unsupported JavaScript type"},
+			{"InterfaceObjectError", `({"key": Symbol('error')})`, &map[string]interface{}{}, "unsupported JavaScript type"},
+			{"InterfaceNestedArrayError", `[[1, 2], [Symbol('nested')]]`, &[]interface{}{}, "unsupported JavaScript type"},
+			{"InterfaceNestedObjectError", `({"outer": {"inner": Symbol('deep')}})`, &map[string]interface{}{}, "unsupported JavaScript type"},
 		}
 
 		for _, tt := range errorCases {
@@ -852,107 +1244,6 @@ func TestErrorCases(t *testing.T) {
 		if err != nil {
 			t.Logf("✓ Covered ToByteArray error in unmarshalInterface: %v", err)
 		}
-	})
-}
-
-// New test functions to cover missing branches
-func TestBigIntUnmarshaling(t *testing.T) {
-	rt := NewRuntime()
-	defer rt.Close()
-	ctx := rt.NewContext()
-	defer ctx.Close()
-
-	t.Run("ValidBigIntToInt64", func(t *testing.T) {
-		// Test valid BigInt that can be converted to int64
-		jsVal, err := ctx.Eval("BigInt('123456789')")
-		require.NoError(t, err)
-		defer jsVal.Free()
-
-		var result int64
-		err = ctx.Unmarshal(jsVal, &result)
-		require.NoError(t, err)
-		require.Equal(t, int64(123456789), result)
-	})
-
-	t.Run("ValidPositiveNumberToUint64", func(t *testing.T) {
-		// Test positive number that can be converted to uint64
-		jsVal := ctx.Float64(123456789.0)
-		defer jsVal.Free()
-
-		var result uint64
-		err := ctx.Unmarshal(jsVal, &result)
-		require.NoError(t, err)
-		require.Equal(t, uint64(123456789), result)
-	})
-
-	t.Run("ValidBigIntToUint64", func(t *testing.T) {
-		// Test valid BigInt that can be converted to uint64
-		jsVal, err := ctx.Eval("BigInt('18446744073709551615')") // max uint64
-		require.NoError(t, err)
-		defer jsVal.Free()
-
-		var result uint64
-		err = ctx.Unmarshal(jsVal, &result)
-		require.NoError(t, err)
-		require.Equal(t, uint64(18446744073709551615), result)
-	})
-}
-
-func TestArrayMarshalCoverage(t *testing.T) {
-	rt := NewRuntime()
-	defer rt.Close()
-	ctx := rt.NewContext()
-	defer ctx.Close()
-
-	t.Run("ArrayWithErrorElements", func(t *testing.T) {
-		// Test array with elements that cause marshal errors
-		// This should cover the error path in marshalArray where arr.Free() is called
-		data := [2]interface{}{"valid", make(chan int)} // channel is unsupported
-
-		_, err := ctx.Marshal(data)
-		require.Error(t, err)
-		require.Contains(t, err.Error(), "unsupported type")
-	})
-
-	t.Run("SliceWithErrorElements", func(t *testing.T) {
-		// Test slice with elements that cause marshal errors
-		// This should cover the error path in marshalGenericArray where arr.Free() is called
-		data := []interface{}{"valid", make(chan int)} // channel is unsupported
-
-		_, err := ctx.Marshal(data)
-		require.Error(t, err)
-		require.Contains(t, err.Error(), "unsupported type")
-	})
-}
-
-func TestUnmarshalInterfaceErrors(t *testing.T) {
-	rt := NewRuntime()
-	defer rt.Close()
-	ctx := rt.NewContext()
-	defer ctx.Close()
-
-	t.Run("ArrayWithErrorElements", func(t *testing.T) {
-		// Create an array with elements that will cause unmarshal errors
-		jsVal, err := ctx.Eval(`[1, Symbol('error'), 3]`)
-		require.NoError(t, err)
-		defer jsVal.Free()
-
-		var result interface{}
-		err = ctx.Unmarshal(jsVal, &result)
-		require.Error(t, err)
-		require.Contains(t, err.Error(), "unsupported JavaScript type")
-	})
-
-	t.Run("ObjectWithErrorValues", func(t *testing.T) {
-		// Create an object with values that will cause unmarshal errors
-		jsVal, err := ctx.Eval(`({valid: 1, error: Symbol('error')})`)
-		require.NoError(t, err)
-		defer jsVal.Free()
-
-		var result interface{}
-		err = ctx.Unmarshal(jsVal, &result)
-		require.Error(t, err)
-		require.Contains(t, err.Error(), "unsupported JavaScript type")
 	})
 }
 

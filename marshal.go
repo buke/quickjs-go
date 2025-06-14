@@ -19,6 +19,94 @@ type Unmarshaler interface {
 	UnmarshalJS(ctx *Context, val Value) error
 }
 
+// FieldTagInfo contains parsed field tag information
+type FieldTagInfo struct {
+	Name      string // JavaScript property name
+	Skip      bool   // Whether to skip this field
+	OmitEmpty bool   // Whether to omit empty values (for serialization)
+}
+
+// parseFieldTag parses struct field tags, handling both "js" and "json" tags
+// This function provides unified tag parsing logic for both marshal and class reflection
+func parseFieldTag(field reflect.StructField) FieldTagInfo {
+	// Check "js" tag first (higher priority)
+	if tag := field.Tag.Get("js"); tag != "" {
+		return parseTagString(tag, field.Name)
+	}
+
+	// Fallback to "json" tag
+	if tag := field.Tag.Get("json"); tag != "" {
+		return parseTagString(tag, field.Name)
+	}
+
+	// No tag found, use camelCase field name
+	return FieldTagInfo{
+		Name:      fieldNameToCamelCase(field.Name),
+		Skip:      false,
+		OmitEmpty: false,
+	}
+}
+
+// parseTagString parses tag string in format "name,option1,option2"
+func parseTagString(tag, fieldName string) FieldTagInfo {
+	if tag == "-" {
+		return FieldTagInfo{Skip: true}
+	}
+
+	parts := strings.Split(tag, ",")
+	info := FieldTagInfo{
+		Name: parts[0],
+		Skip: false,
+	}
+
+	// If name is empty, use camelCase field name
+	if info.Name == "" {
+		info.Name = fieldNameToCamelCase(fieldName)
+	}
+
+	// Parse options
+	for _, option := range parts[1:] {
+		switch strings.TrimSpace(option) {
+		case "omitempty":
+			info.OmitEmpty = true
+		}
+	}
+
+	return info
+}
+
+// fieldNameToCamelCase converts field name to camelCase
+func fieldNameToCamelCase(fieldName string) string {
+	if len(fieldName) == 0 {
+		return ""
+	}
+	return strings.ToLower(fieldName[:1]) + fieldName[1:]
+}
+
+// isEmptyValue checks if a value is empty (for omitempty logic)
+func isEmptyValue(v reflect.Value) bool {
+	switch v.Kind() {
+	case reflect.Array, reflect.Map, reflect.Slice, reflect.String:
+		return v.Len() == 0
+	case reflect.Bool:
+		return !v.Bool()
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return v.Int() == 0
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+		return v.Uint() == 0
+	case reflect.Float32, reflect.Float64:
+		return v.Float() == 0
+	case reflect.Complex64, reflect.Complex128:
+		return v.Complex() == 0
+	case reflect.Interface, reflect.Ptr:
+		return v.IsNil()
+	case reflect.Chan, reflect.Func, reflect.UnsafePointer:
+		return v.IsNil()
+	default:
+		return false
+	}
+}
+
 // Marshal returns the JavaScript value encoding of v.
 // It traverses the value v recursively and creates corresponding JavaScript values.
 //
@@ -519,24 +607,15 @@ func (ctx *Context) marshalStruct(rv reflect.Value) (Value, error) {
 			continue
 		}
 
-		// Get field name from tag or use field name
-		name := field.Name
-		if tag := field.Tag.Get("js"); tag != "" {
-			if tag == "-" {
-				continue // Skip this field
-			}
-			name = tag
-		} else if tag := field.Tag.Get("json"); tag != "" {
-			if tag == "-" {
-				continue // Skip this field
-			}
-			// Parse json tag (handle "name,omitempty" format)
-			if idx := strings.Index(tag, ","); idx != -1 {
-				name = tag[:idx]
-				// TODO: Handle omitempty option
-			} else {
-				name = tag
-			}
+		// Use unified tag parsing
+		tagInfo := parseFieldTag(field)
+		if tagInfo.Skip {
+			continue
+		}
+
+		// Handle omitempty option
+		if tagInfo.OmitEmpty && isEmptyValue(fieldValue) {
+			continue
 		}
 
 		val, err := ctx.marshal(fieldValue)
@@ -544,7 +623,7 @@ func (ctx *Context) marshalStruct(rv reflect.Value) (Value, error) {
 			obj.Free()
 			return ctx.Null(), err
 		}
-		obj.Set(name, val)
+		obj.Set(tagInfo.Name, val)
 		// Do NOT free val here - ownership transferred to object
 	}
 
@@ -900,26 +979,14 @@ func (ctx *Context) unmarshalStruct(jsVal Value, rv reflect.Value) error {
 			continue
 		}
 
-		// Get field name from tag
-		name := field.Name
-		if tag := field.Tag.Get("js"); tag != "" {
-			if tag == "-" {
-				continue
-			}
-			name = tag
-		} else if tag := field.Tag.Get("json"); tag != "" {
-			if tag == "-" {
-				continue
-			}
-			if idx := strings.Index(tag, ","); idx != -1 {
-				name = tag[:idx]
-			} else {
-				name = tag
-			}
+		// Use unified tag parsing
+		tagInfo := parseFieldTag(field)
+		if tagInfo.Skip {
+			continue
 		}
 
-		if jsVal.Has(name) {
-			prop := jsVal.Get(name)
+		if jsVal.Has(tagInfo.Name) {
+			prop := jsVal.Get(tagInfo.Name)
 			defer prop.Free()
 
 			if err := ctx.unmarshal(prop, fieldValue); err != nil {
