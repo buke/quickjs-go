@@ -15,9 +15,13 @@ var (
 	// Global context mapping using sync.Map for lock-free performance
 	contextMapping sync.Map // map[*C.JSContext]*Context
 
-	// Global runtime mapping for interrupt handler access (new addition)
+	// Global runtime mapping for interrupt handler access
 	runtimeMapping sync.Map // map[*C.JSRuntime]*Runtime
 )
+
+// =============================================================================
+// CONTEXT AND RUNTIME MAPPING FUNCTIONS
+// =============================================================================
 
 // registerContext registers Go Context with C JSContext (internal use)
 func registerContext(cCtx *C.JSContext, goCtx *Context) {
@@ -46,12 +50,12 @@ func getContextFromJS(cCtx *C.JSContext) *Context {
 	return nil
 }
 
-// registerRuntime registers Runtime for interrupt handler access (new addition)
+// registerRuntime registers Runtime for interrupt handler access
 func registerRuntime(cRt *C.JSRuntime, goRt *Runtime) {
 	runtimeMapping.Store(cRt, goRt)
 }
 
-// unregisterRuntime removes Runtime mapping when closed (new addition)
+// unregisterRuntime removes Runtime mapping when closed
 func unregisterRuntime(cRt *C.JSRuntime) {
 	runtimeMapping.Delete(cRt)
 }
@@ -63,6 +67,10 @@ func getRuntimeFromJS(cRt *C.JSRuntime) *Runtime {
 	}
 	return nil
 }
+
+// =============================================================================
+// COMMON HELPER FUNCTIONS
+// =============================================================================
 
 // convertCArgsToGoValues converts C arguments to Go Value slice (unified helper)
 // Reused by all proxy functions for consistent parameter conversion
@@ -83,6 +91,67 @@ func convertCArgsToGoValues(argc C.int, argv *C.JSValue, ctx *Context) []Value {
 	return goArgs
 }
 
+// =============================================================================
+// COMMON PROXY HELPER FUNCTIONS
+// =============================================================================
+
+// proxyError represents a standardized error for proxy functions
+type proxyError struct {
+	errorType string
+	message   string
+}
+
+// Common proxy errors with consistent error messages
+var (
+	errContextNotFound        = proxyError{"InternalError", "Context not found"}
+	errFunctionNotFound       = proxyError{"InternalError", "Function not found"}
+	errConstructorNotFound    = proxyError{"InternalError", "Constructor function not found"}
+	errMethodNotFound         = proxyError{"InternalError", "Method function not found"}
+	errGetterNotFound         = proxyError{"InternalError", "Getter function not found"}
+	errSetterNotFound         = proxyError{"InternalError", "Setter function not found"}
+	errInvalidFunctionType    = proxyError{"TypeError", "Invalid function type"}
+	errInvalidConstructorType = proxyError{"TypeError", "Invalid constructor function type"}
+	errInvalidMethodType      = proxyError{"TypeError", "Invalid method function type"}
+	errInvalidGetterType      = proxyError{"TypeError", "Invalid getter function type"}
+	errInvalidSetterType      = proxyError{"TypeError", "Invalid setter function type"}
+)
+
+// throwProxyError creates and returns a JavaScript error
+func throwProxyError(ctx *C.JSContext, err proxyError) C.JSValue {
+	msg := C.CString(err.message)
+	defer C.free(unsafe.Pointer(msg))
+
+	switch err.errorType {
+	case "TypeError":
+		return C.ThrowTypeError(ctx, msg)
+	default:
+		return C.ThrowInternalError(ctx, msg)
+	}
+}
+
+// getContextAndFunction retrieves context and function from HandleStore
+// Returns (context, function, error). If error is not nil, caller should return throwProxyError(ctx, error)
+func getContextAndFunction(ctx *C.JSContext, magic C.int, notFoundErr proxyError) (*Context, interface{}, *proxyError) {
+	// Get Go Context from global mapping
+	goCtx := getContextFromJS(ctx)
+	if goCtx == nil {
+		return nil, nil, &errContextNotFound
+	}
+
+	// Get function from HandleStore using magic parameter
+	funcID := int32(magic)
+	fn := goCtx.loadFunctionFromHandleID(funcID)
+	if fn == nil {
+		return nil, nil, &notFoundErr
+	}
+
+	return goCtx, fn, nil
+}
+
+// =============================================================================
+// INTERRUPT HANDLER
+// =============================================================================
+
 // Simplified interrupt handler export (no cgo.Handle complexity)
 //
 //export goInterruptHandler
@@ -98,42 +167,30 @@ func goInterruptHandler(runtimePtr *C.JSRuntime) C.int {
 	return C.int(r)
 }
 
+// =============================================================================
+// OPTIMIZED PROXY FUNCTIONS
+// =============================================================================
+
 // New efficient proxy function for regular functions using HandleStore
 //
 //export goFunctionProxy
 func goFunctionProxy(ctx *C.JSContext, thisVal C.JSValueConst,
 	argc C.int, argv *C.JSValueConst, magic C.int) C.JSValue {
 
-	// Get Go Context from global mapping (lock-free with sync.Map)
-	goCtx := getContextFromJS(ctx)
-	if goCtx == nil {
-		msg := C.CString("Context not found")
-		defer C.free(unsafe.Pointer(msg))
-		return C.ThrowInternalError(ctx, msg)
-	}
-
-	// Get function from Context's HandleStore using magic parameter
-	funcID := int32(magic)
-	fn := goCtx.loadFunctionFromHandleID(funcID)
-	if fn == nil {
-		msg := C.CString("Function not found")
-		defer C.free(unsafe.Pointer(msg))
-		return C.ThrowInternalError(ctx, msg)
+	// Get context and function using common helper
+	goCtx, fn, err := getContextAndFunction(ctx, magic, errFunctionNotFound)
+	if err != nil {
+		return throwProxyError(ctx, *err)
 	}
 
 	// Type assertion to function signature
 	goFn, ok := fn.(func(*Context, Value, []Value) Value)
 	if !ok {
-		msg := C.CString("Invalid function type")
-		defer C.free(unsafe.Pointer(msg))
-		return C.ThrowTypeError(ctx, msg)
+		return throwProxyError(ctx, errInvalidFunctionType)
 	}
 
-	// Convert arguments using unified helper (optimized)
-	// Note: Safe cast from JSValueConst to JSValue since we only read values
+	// Convert arguments and call function
 	args := convertCArgsToGoValues(argc, (*C.JSValue)(argv), goCtx)
-
-	// Call Go function directly (no intermediate JavaScript execution)
 	result := goFn(goCtx, Value{ctx: goCtx, ref: thisVal}, args)
 	return result.ref
 }
@@ -145,36 +202,21 @@ func goFunctionProxy(ctx *C.JSContext, thisVal C.JSValueConst,
 func goClassConstructorProxy(ctx *C.JSContext, newTarget C.JSValue,
 	argc C.int, argv *C.JSValue, magic C.int) C.JSValue {
 
-	// Get Go Context from global mapping
-	goCtx := getContextFromJS(ctx)
-	if goCtx == nil {
-		msg := C.CString("Context not found")
-		defer C.free(unsafe.Pointer(msg))
-		return C.ThrowInternalError(ctx, msg)
-	}
-
-	// Get constructor function from HandleStore using magic parameter
-	funcID := int32(magic)
-	fn := goCtx.loadFunctionFromHandleID(funcID)
-	if fn == nil {
-		msg := C.CString("Constructor function not found")
-		defer C.free(unsafe.Pointer(msg))
-		return C.ThrowInternalError(ctx, msg)
+	// Get context and constructor using common helper
+	goCtx, fn, err := getContextAndFunction(ctx, magic, errConstructorNotFound)
+	if err != nil {
+		return throwProxyError(ctx, *err)
 	}
 
 	// Type assertion to ClassConstructorFunc signature
 	constructor, ok := fn.(ClassConstructorFunc)
 	if !ok {
-		msg := C.CString("Invalid constructor function type")
-		defer C.free(unsafe.Pointer(msg))
-		return C.ThrowTypeError(ctx, msg)
+		return throwProxyError(ctx, errInvalidConstructorType)
 	}
 
-	// Convert parameters using unified helper
+	// Convert parameters and call constructor
 	newTargetValue := Value{ctx: goCtx, ref: newTarget}
 	args := convertCArgsToGoValues(argc, argv, goCtx)
-
-	// Call Go constructor function with new_target and arguments
 	result := constructor(goCtx, newTargetValue, args)
 	return result.ref
 }
@@ -186,36 +228,21 @@ func goClassConstructorProxy(ctx *C.JSContext, newTarget C.JSValue,
 func goClassMethodProxy(ctx *C.JSContext, thisVal C.JSValue,
 	argc C.int, argv *C.JSValue, magic C.int) C.JSValue {
 
-	// Get Go Context from global mapping
-	goCtx := getContextFromJS(ctx)
-	if goCtx == nil {
-		msg := C.CString("Context not found")
-		defer C.free(unsafe.Pointer(msg))
-		return C.ThrowInternalError(ctx, msg)
-	}
-
-	// Get method function from HandleStore using magic parameter
-	funcID := int32(magic)
-	fn := goCtx.loadFunctionFromHandleID(funcID)
-	if fn == nil {
-		msg := C.CString("Method function not found")
-		defer C.free(unsafe.Pointer(msg))
-		return C.ThrowInternalError(ctx, msg)
+	// Get context and method using common helper
+	goCtx, fn, err := getContextAndFunction(ctx, magic, errMethodNotFound)
+	if err != nil {
+		return throwProxyError(ctx, *err)
 	}
 
 	// Type assertion to ClassMethodFunc signature
 	method, ok := fn.(ClassMethodFunc)
 	if !ok {
-		msg := C.CString("Invalid method function type")
-		defer C.free(unsafe.Pointer(msg))
-		return C.ThrowTypeError(ctx, msg)
+		return throwProxyError(ctx, errInvalidMethodType)
 	}
 
-	// Convert parameters using unified helper
+	// Convert parameters and call method
 	thisValue := Value{ctx: goCtx, ref: thisVal}
 	args := convertCArgsToGoValues(argc, argv, goCtx)
-
-	// Call Go method function with this and arguments
 	result := method(goCtx, thisValue, args)
 	return result.ref
 }
@@ -226,32 +253,19 @@ func goClassMethodProxy(ctx *C.JSContext, thisVal C.JSValue,
 //export goClassGetterProxy
 func goClassGetterProxy(ctx *C.JSContext, thisVal C.JSValue, magic C.int) C.JSValue {
 
-	// Get Go Context from global mapping
-	goCtx := getContextFromJS(ctx)
-	if goCtx == nil {
-		msg := C.CString("Context not found")
-		defer C.free(unsafe.Pointer(msg))
-		return C.ThrowInternalError(ctx, msg)
-	}
-
-	// Get getter function from HandleStore using magic parameter
-	funcID := int32(magic)
-	fn := goCtx.loadFunctionFromHandleID(funcID)
-	if fn == nil {
-		msg := C.CString("Getter function not found")
-		defer C.free(unsafe.Pointer(msg))
-		return C.ThrowInternalError(ctx, msg)
+	// Get context and getter using common helper
+	goCtx, fn, err := getContextAndFunction(ctx, magic, errGetterNotFound)
+	if err != nil {
+		return throwProxyError(ctx, *err)
 	}
 
 	// Type assertion to ClassGetterFunc signature
 	getter, ok := fn.(ClassGetterFunc)
 	if !ok {
-		msg := C.CString("Invalid getter function type")
-		defer C.free(unsafe.Pointer(msg))
-		return C.ThrowTypeError(ctx, msg)
+		return throwProxyError(ctx, errInvalidGetterType)
 	}
 
-	// Call Go getter function with this value only
+	// Call getter with this value only
 	thisValue := Value{ctx: goCtx, ref: thisVal}
 	result := getter(goCtx, thisValue)
 	return result.ref
@@ -264,32 +278,19 @@ func goClassGetterProxy(ctx *C.JSContext, thisVal C.JSValue, magic C.int) C.JSVa
 func goClassSetterProxy(ctx *C.JSContext, thisVal C.JSValue,
 	val C.JSValue, magic C.int) C.JSValue {
 
-	// Get Go Context from global mapping
-	goCtx := getContextFromJS(ctx)
-	if goCtx == nil {
-		msg := C.CString("Context not found")
-		defer C.free(unsafe.Pointer(msg))
-		return C.ThrowInternalError(ctx, msg)
-	}
-
-	// Get setter function from HandleStore using magic parameter
-	funcID := int32(magic)
-	fn := goCtx.loadFunctionFromHandleID(funcID)
-	if fn == nil {
-		msg := C.CString("Setter function not found")
-		defer C.free(unsafe.Pointer(msg))
-		return C.ThrowInternalError(ctx, msg)
+	// Get context and setter using common helper
+	goCtx, fn, err := getContextAndFunction(ctx, magic, errSetterNotFound)
+	if err != nil {
+		return throwProxyError(ctx, *err)
 	}
 
 	// Type assertion to ClassSetterFunc signature
 	setter, ok := fn.(ClassSetterFunc)
 	if !ok {
-		msg := C.CString("Invalid setter function type")
-		defer C.free(unsafe.Pointer(msg))
-		return C.ThrowTypeError(ctx, msg)
+		return throwProxyError(ctx, errInvalidSetterType)
 	}
 
-	// Call Go setter function with this value and new value
+	// Call setter with this value and new value
 	thisValue := Value{ctx: goCtx, ref: thisVal}
 	setValue := Value{ctx: goCtx, ref: val}
 	result := setter(goCtx, thisValue, setValue)
@@ -304,10 +305,6 @@ func goClassSetterProxy(ctx *C.JSContext, thisVal C.JSValue,
 func goClassFinalizerProxy(rt *C.JSRuntime, val C.JSValue) {
 	// Get class ID for the object being finalized
 	classID := C.JS_GetClassID(val)
-	invalidClassID := C.uint32_t(C.GetInvalidClassID())
-	if classID == invalidClassID {
-		return // Not a class instance
-	}
 
 	// Get opaque data from JS object using JS_GetOpaque (like point.c finalizer)
 	// This corresponds to point.c: s = JS_GetOpaque(val, js_point_class_id)
@@ -347,11 +344,8 @@ func goClassFinalizerProxy(rt *C.JSRuntime, val C.JSValue) {
 			// Call user-defined cleanup method
 			func() {
 				defer func() {
-					// Recover from panic in user finalizer to prevent crashes
-					if r := recover(); r != nil {
-						// Note: Cannot use normal logging here as this is called from GC
-						// In production, this could be sent to error monitoring
-					}
+					// Silently recover to prevent GC crashes
+					recover()
 				}()
 				finalizer.Finalize()
 			}()

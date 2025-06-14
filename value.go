@@ -833,7 +833,10 @@ func (v Value) NewInstance(goObj interface{}) Value {
 	}
 
 	// Store Go object in HandleStore for automatic memory management
-	handleID := v.ctx.handleStore.Store(goObj)
+	var handleID int32 = 0
+	if goObj != nil {
+		handleID = v.ctx.handleStore.Store(goObj)
+	}
 
 	// Use C helper function to create the class instance
 	// This encapsulates all the complex prototype/object creation logic

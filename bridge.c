@@ -184,7 +184,9 @@ JSValue CreateClassInstance(JSContext *ctx, JSValue constructor,
     // Associate Go object with JS object
     // Corresponds to point.c: JS_SetOpaque(obj, s)
     // Use helper function to safely convert int32 to opaque pointer
-    JS_SetOpaque(obj, IntToOpaque(handle_id));
+    if (handle_id != 0) {
+        JS_SetOpaque(obj, IntToOpaque(handle_id));
+    }
     
     return obj;
 }
