@@ -744,3 +744,405 @@ func TestValueAwait(t *testing.T) {
 		require.True(t, result3.IsException())
 	}
 }
+
+// TestValueClassInstanceEdgeCases tests uncovered branches in class instance methods
+func TestValueClassInstanceEdgeCases(t *testing.T) {
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	// Test non-object values to cover !v.IsObject() branches
+	nonObjects := []struct {
+		name      string
+		createVal func() Value
+	}{
+		{"String", func() Value { return ctx.String("test") }},
+		{"Number", func() Value { return ctx.Int32(42) }},
+		{"Null", func() Value { return ctx.Null() }},
+		{"Undefined", func() Value { return ctx.Undefined() }},
+	}
+
+	for _, no := range nonObjects {
+		t.Run("HasInstanceData_"+no.name, func(t *testing.T) {
+			val := no.createVal()
+			defer val.Free()
+			// Cover: if !v.IsObject() return false branch in HasInstanceData
+			require.False(t, val.HasInstanceData())
+		})
+
+		t.Run("IsInstanceOfClassID_"+no.name, func(t *testing.T) {
+			val := no.createVal()
+			defer val.Free()
+			// Cover: if !v.IsObject() return false branch in IsInstanceOfClassID
+			require.False(t, val.IsInstanceOfClassID(123))
+		})
+
+		t.Run("GetGoObject"+no.name, func(t *testing.T) {
+			val := no.createVal()
+			defer val.Free()
+			// Cover: if !v.IsObject() return error branch in GetGoObject
+			_, err := val.GetGoObject()
+			require.Error(t, err)
+			require.Contains(t, err.Error(), "value is not an object")
+		})
+
+		t.Run("IsInstanceOfConstructor_NonObject_"+no.name, func(t *testing.T) {
+			val := no.createVal()
+			defer val.Free()
+
+			fn := ctx.Function(func(ctx *Context, this Value, args []Value) Value {
+				return ctx.Null()
+			})
+			defer fn.Free()
+
+			// Cover: if !v.IsObject() part of condition in IsInstanceOfConstructor
+			require.False(t, val.IsInstanceOfConstructor(fn))
+		})
+	}
+
+	// Test IsInstanceOfConstructor with non-function constructor
+	t.Run("IsInstanceOfConstructor_NonFunction", func(t *testing.T) {
+		obj := ctx.Object()
+		defer obj.Free()
+
+		nonFunc := ctx.String("not a function")
+		defer nonFunc.Free()
+
+		// Cover: !constructor.IsFunction() part of condition in IsInstanceOfConstructor
+		require.False(t, obj.IsInstanceOfConstructor(nonFunc))
+	})
+
+	// Test IsInstanceOfConstructor with valid object and function (no inheritance)
+	t.Run("IsInstanceOfConstructor_NoInheritance", func(t *testing.T) {
+		obj := ctx.Object()
+		defer obj.Free()
+
+		fn := ctx.Function(func(ctx *Context, this Value, args []Value) Value {
+			return ctx.Null()
+		})
+		defer fn.Free()
+
+		// Cover: C.JS_IsInstanceOf call returning 0 (false) in IsInstanceOfConstructor
+		require.False(t, obj.IsInstanceOfConstructor(fn))
+	})
+
+	// Test GetGoObject "instance data not found in handle store" branch
+	t.Run("GetGoObject_HandleStoreManipulation", func(t *testing.T) {
+		// Create a function to get a valid object with opaque data
+		fn := ctx.Function(func(ctx *Context, this Value, args []Value) Value {
+			return ctx.String("test")
+		})
+		defer fn.Free()
+
+		// Get the handle ID from the function (functions have opaque data)
+		var handleID int32
+		var originalHandle interface{}
+		ctx.handleStore.handles.Range(func(key, value interface{}) bool {
+			handleID = key.(int32)
+			originalHandle = value
+			return false // Stop after first item
+		})
+
+		// Remove the handle from the store while keeping the opaque data in the object
+		ctx.handleStore.handles.Delete(handleID)
+
+		// Now try to get instance data - should hit "instance data not found in handle store" branch
+		_, err := fn.GetGoObject()
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "instance data not found in handle store")
+
+		// Restore the handle for proper cleanup
+		ctx.handleStore.handles.Store(handleID, originalHandle)
+
+		t.Log("Successfully triggered 'instance data not found in handle store' branch")
+	})
+
+	// Alternative approach: Test with regular JS objects (no opaque data)
+	t.Run("GetGoObject_NoOpaqueData", func(t *testing.T) {
+		// Regular objects should have no opaque data, covering "no instance data found"
+		obj := ctx.Object()
+		defer obj.Free()
+
+		_, err := obj.GetGoObject()
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "no instance data found")
+	})
+}
+
+// TestValueNewInstanceEdgeCases tests edge cases and error conditions in NewInstance
+func TestValueNewInstanceEdgeCases(t *testing.T) {
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	// Test Case 1: NewInstance called on non-constructor value
+	t.Run("NewInstance_NonConstructor", func(t *testing.T) {
+		// Test with regular object (not a constructor)
+		obj := ctx.Object()
+		defer obj.Free()
+
+		// This should trigger: "NewInstance can only be called on constructor functions"
+		result := obj.NewInstance(&Point{X: 1, Y: 2})
+		defer result.Free()
+
+		// Verify it returns an error/exception
+		require.True(t, result.IsException())
+	})
+
+	// Test Case 2: NewInstance called on string (definitely not a constructor)
+	t.Run("NewInstance_String", func(t *testing.T) {
+		str := ctx.String("not a constructor")
+		defer str.Free()
+
+		// This should trigger: "NewInstance can only be called on constructor functions"
+		result := str.NewInstance(&Point{X: 1, Y: 2})
+		defer result.Free()
+
+		// Verify it returns an error/exception
+		require.True(t, result.IsException())
+	})
+
+	// Test Case 3: validatePointerType with nil interface{}
+	t.Run("NewInstance_NilInterface", func(t *testing.T) {
+		// Create a valid constructor first
+		pointConstructor, _, err := createPointClass(ctx)
+		defer pointConstructor.Free()
+		require.NoError(t, err)
+
+		// Call NewInstance with nil - this should trigger the nil case in validatePointerType
+		result := pointConstructor.NewInstance(nil)
+		defer result.Free()
+
+		// This should succeed (nil is allowed)
+		require.False(t, result.IsException())
+		require.True(t, result.IsObject())
+	})
+
+	// Test Case 4: validatePointerType with value type (not pointer)
+	t.Run("NewInstance_ValueType", func(t *testing.T) {
+		// Create a valid constructor first
+		pointConstructor, _, err := createPointClass(ctx)
+		defer pointConstructor.Free()
+		require.NoError(t, err)
+
+		// Call NewInstance with value type (not pointer) - this should trigger the error case
+		valueTypePoint := Point{X: 1, Y: 2} // This is a value, not a pointer
+		result := pointConstructor.NewInstance(valueTypePoint)
+		defer result.Free()
+
+		// This should trigger: "goObj must be a pointer type for proper reference semantics"
+		require.True(t, result.IsException())
+	})
+
+	// Test Case 5: validatePointerType with typed nil pointer
+	t.Run("NewInstance_TypedNilPointer", func(t *testing.T) {
+		// Create a valid constructor first
+		pointConstructor, _, err := createPointClass(ctx)
+		defer pointConstructor.Free()
+		require.NoError(t, err)
+
+		// Call NewInstance with typed nil pointer - this should be allowed
+		var nilPoint *Point = nil
+		result := pointConstructor.NewInstance(nilPoint)
+		defer result.Free()
+
+		// This should succeed (typed nil pointer is allowed)
+		require.False(t, result.IsException())
+		require.True(t, result.IsObject())
+	})
+
+	// Test Case 6: NewInstance with various non-pointer types to ensure comprehensive coverage
+	t.Run("NewInstance_VariousValueTypes", func(t *testing.T) {
+		// Create a valid constructor first
+		pointConstructor, _, err := createPointClass(ctx)
+		defer pointConstructor.Free()
+		require.NoError(t, err)
+
+		// Test with different value types
+		testCases := []struct {
+			name string
+			obj  interface{}
+		}{
+			{"int", 42},
+			{"string", "test"},
+			{"bool", true},
+			{"slice", []int{1, 2, 3}},
+			{"map", map[string]int{"a": 1}},
+			{"struct", Point{X: 1, Y: 2}}, // struct value
+		}
+
+		for _, tc := range testCases {
+			t.Run(tc.name, func(t *testing.T) {
+				result := pointConstructor.NewInstance(tc.obj)
+				defer result.Free()
+
+				// All of these should trigger the pointer type validation error
+				require.True(t, result.IsException())
+			})
+		}
+	})
+
+	// ===== NEW TEST CASES: Cover the three specific check branches =====
+
+	// Test Case 7: Constructor not registered in global class registry
+	t.Run("NewInstance_ConstructorNotRegistered", func(t *testing.T) {
+		// Create a constructor function that's not registered in our class system
+		unregisteredConstructor, err := ctx.Eval(`
+            function UnregisteredClass(value) {
+                this.value = value;
+            }
+            UnregisteredClass;
+        `)
+		require.NoError(t, err)
+		defer unregisteredConstructor.Free()
+
+		// This should trigger: "constructor not registered in global class registry"
+		result := unregisteredConstructor.NewInstance(&Point{X: 1, Y: 2})
+		defer result.Free()
+
+		require.True(t, result.IsException())
+		// Verify error message contains expected text
+		errorStr := ctx.Exception().Error()
+		require.Contains(t, errorStr, "constructor not registered")
+	})
+
+	// Test Case 8: Proto get exception (corrupted prototype)
+	t.Run("NewInstance_ProtoException", func(t *testing.T) {
+		// Create a constructor wrapped in a Proxy that throws on prototype access
+		proxyConstructor, err := ctx.Eval(`
+			function BaseClass() {}
+			
+			const ProxyConstructor = new Proxy(BaseClass, {
+				get: function(target, prop) {
+					if (prop === 'prototype') {
+						throw new Error("Proxy prototype access denied");
+					}
+					return target[prop];
+				}
+			});
+			
+			ProxyConstructor;
+		`)
+		require.NoError(t, err)
+		defer proxyConstructor.Free()
+
+		// Register this constructor to pass the first check
+		fakeClassID := uint32(12345)
+		registerConstructorClassID(proxyConstructor.ref, fakeClassID)
+
+		// This should trigger the proto.IsException() branch
+		result := proxyConstructor.NewInstance(&Point{X: 1, Y: 2})
+		defer result.Free()
+
+		require.True(t, result.IsException())
+	})
+
+	// Test Case: Successful NewInstance with proper pointer for comparison
+	t.Run("NewInstance_Success", func(t *testing.T) {
+		// Create a valid constructor first
+		pointConstructor, _, err := createPointClass(ctx)
+		defer pointConstructor.Free()
+		require.NoError(t, err)
+
+		// Call NewInstance with proper pointer type - this should succeed
+		point := &Point{X: 3.14, Y: 2.71}
+		result := pointConstructor.NewInstance(point)
+		defer result.Free()
+
+		// This should succeed
+		require.False(t, result.IsException())
+		require.True(t, result.IsObject())
+
+		// Verify we can retrieve the Go object back
+		retrievedObj, err := result.GetGoObject()
+		require.NoError(t, err)
+
+		retrievedPoint, ok := retrievedObj.(*Point)
+		require.True(t, ok)
+		require.Equal(t, 3.14, retrievedPoint.X)
+		require.Equal(t, 2.71, retrievedPoint.Y)
+	})
+}
+
+// TestResolveClassIDFromInheritance tests the inheritance resolution logic
+func TestResolveClassIDFromInheritance(t *testing.T) {
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	// Test Case 1: No inheritance - should return false
+	t.Run("NoInheritance", func(t *testing.T) {
+		standaloneConstructor, err := ctx.Eval(`
+            function StandaloneClass() {}
+            StandaloneClass;
+        `)
+		require.NoError(t, err)
+		defer standaloneConstructor.Free()
+
+		classID, exists := standaloneConstructor.resolveClassIDFromInheritance()
+		require.False(t, exists)
+		require.Equal(t, uint32(0), classID)
+	})
+
+	// Test Case 2: Inherits from unregistered class - should return false
+	t.Run("UnregisteredParent", func(t *testing.T) {
+		childConstructor, err := ctx.Eval(`
+            function UnregisteredBase() {}
+            function Child() {}
+            Child.prototype = Object.create(UnregisteredBase.prototype);
+            Child.prototype.constructor = Child;
+            Child;
+        `)
+		require.NoError(t, err)
+		defer childConstructor.Free()
+
+		classID, exists := childConstructor.resolveClassIDFromInheritance()
+		require.False(t, exists)
+		require.Equal(t, uint32(0), classID)
+	})
+
+	// Test Case 3: Inherits from standard Error - should return false
+	t.Run("InheritsFromError", func(t *testing.T) {
+		errorChildConstructor, err := ctx.Eval(`
+            function MyError() {}
+            MyError.prototype = Object.create(Error.prototype);
+            MyError.prototype.constructor = MyError;
+            MyError;
+        `)
+		require.NoError(t, err)
+		defer errorChildConstructor.Free()
+
+		classID, exists := errorChildConstructor.resolveClassIDFromInheritance()
+		require.False(t, exists)
+		require.Equal(t, uint32(0), classID)
+	})
+
+	// Test Case 4: Successful inheritance (for comparison)
+	t.Run("ValidInheritance", func(t *testing.T) {
+		// Create and register a base class
+		baseConstructor, baseClassID, err := createPointClass(ctx)
+		require.NoError(t, err)
+
+		// Set base constructor in global scope
+		ctx.Globals().Set("Point", baseConstructor)
+
+		// Create child class that properly inherits from Point
+		childConstructor, err := ctx.Eval(`
+            function ColoredPoint(x, y, color) {
+                this.color = color;
+            }
+            ColoredPoint.prototype = Object.create(Point.prototype);
+            ColoredPoint.prototype.constructor = ColoredPoint;
+            ColoredPoint;
+        `)
+		require.NoError(t, err)
+		defer childConstructor.Free()
+
+		classID, exists := childConstructor.resolveClassIDFromInheritance()
+		require.True(t, exists)
+		require.Equal(t, baseClassID, classID)
+	})
+}

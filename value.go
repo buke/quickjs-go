@@ -9,10 +9,13 @@ import (
 	"errors"
 	"math"
 	"math/big"
+	"reflect"
 	"unsafe"
 )
 
-// JSValue represents a Javascript value which can be a primitive type or an object. Reference counting is used, so it is important to explicitly duplicate (JS_DupValue(), increment the reference count) or free (JS_FreeValue(), decrement the reference count) JSValues.
+// Value represents a Javascript value which can be a primitive type or an object.
+// Reference counting is used, so it is important to explicitly duplicate (JS_DupValue(),
+// increment the reference count) or free (JS_FreeValue(), decrement the reference count) JSValues.
 type Value struct {
 	ctx *Context
 	ref C.JSValue
@@ -20,10 +23,13 @@ type Value struct {
 
 // Free the value.
 func (v Value) Free() {
+	if v.ctx == nil || C.JS_IsUndefined_Wrapper(v.ref) == 1 {
+		return // No context or undefined value, nothing to free
+	}
 	C.JS_FreeValue(v.ctx.ref, v.ref)
 }
 
-// Context represents a Javascript context.
+// Context returns the context of the value.
 func (v Value) Context() *Context {
 	return v.ctx
 }
@@ -73,7 +79,7 @@ func (v Value) ToByteArray(size uint) ([]byte, error) {
 	return C.GoBytes(unsafe.Pointer(outBuf), C.int(size)), nil
 }
 
-// IsByteArray return true if the value is array buffer
+// IsByteArray returns true if the value is array buffer
 func (v Value) IsByteArray() bool {
 	return v.IsObject() && v.GlobalInstanceof("ArrayBuffer") || v.String() == "[object ArrayBuffer]"
 }
@@ -209,12 +215,12 @@ func (v Value) Execute(this Value, args ...Value) Value {
 	return val
 }
 
-// Call Class Constructor
+// New calls the constructor with the given arguments.
 func (v Value) New(args ...Value) Value {
 	return v.CallConstructor(args...)
 }
 
-// Call calls the constructor with the given arguments.
+// CallConstructor calls the constructor with the given arguments.
 func (v Value) CallConstructor(args ...Value) Value {
 	cargs := []C.JSValue{}
 	for _, x := range args {
@@ -616,28 +622,40 @@ func (v Value) ToBigUint64Array() ([]uint64, error) {
 	return result, nil
 }
 
-func (v Value) IsNumber() bool        { return C.JS_IsNumber(v.ref) == 1 }
-func (v Value) IsBigInt() bool        { return C.JS_IsBigInt(v.ctx.ref, v.ref) == 1 }
-func (v Value) IsBool() bool          { return C.JS_IsBool(v.ref) == 1 }
-func (v Value) IsNull() bool          { return C.JS_IsNull(v.ref) == 1 }
-func (v Value) IsUndefined() bool     { return C.JS_IsUndefined(v.ref) == 1 }
-func (v Value) IsException() bool     { return C.JS_IsException(v.ref) == 1 }
-func (v Value) IsUninitialized() bool { return C.JS_IsUninitialized(v.ref) == 1 }
-func (v Value) IsString() bool        { return C.JS_IsString(v.ref) == 1 }
-func (v Value) IsSymbol() bool        { return C.JS_IsSymbol(v.ref) == 1 }
-func (v Value) IsObject() bool        { return C.JS_IsObject(v.ref) == 1 }
+// =============================================================================
+// BASIC TYPE CHECKING METHODS (replaced macros with wrapper functions)
+// =============================================================================
+
+func (v Value) IsNumber() bool        { return C.JS_IsNumber_Wrapper(v.ref) == 1 }
+func (v Value) IsBigInt() bool        { return C.JS_IsBigInt_Wrapper(v.ctx.ref, v.ref) == 1 }
+func (v Value) IsBool() bool          { return C.JS_IsBool_Wrapper(v.ref) == 1 }
+func (v Value) IsNull() bool          { return C.JS_IsNull_Wrapper(v.ref) == 1 }
+func (v Value) IsUndefined() bool     { return C.JS_IsUndefined_Wrapper(v.ref) == 1 }
+func (v Value) IsException() bool     { return C.JS_IsException_Wrapper(v.ref) == 1 }
+func (v Value) IsUninitialized() bool { return C.JS_IsUninitialized_Wrapper(v.ref) == 1 }
+func (v Value) IsString() bool        { return C.JS_IsString_Wrapper(v.ref) == 1 }
+func (v Value) IsSymbol() bool        { return C.JS_IsSymbol_Wrapper(v.ref) == 1 }
+func (v Value) IsObject() bool        { return C.JS_IsObject_Wrapper(v.ref) == 1 }
 func (v Value) IsArray() bool         { return C.JS_IsArray(v.ctx.ref, v.ref) == 1 }
 func (v Value) IsError() bool         { return C.JS_IsError(v.ctx.ref, v.ref) == 1 }
 func (v Value) IsFunction() bool      { return C.JS_IsFunction(v.ctx.ref, v.ref) == 1 }
+func (v Value) IsConstructor() bool   { return C.JS_IsConstructor(v.ctx.ref, v.ref) == 1 }
+
+// =============================================================================
+// PROMISE SUPPORT METHODS (replaced constants with getter functions)
+// =============================================================================
+
 func (v Value) IsPromise() bool {
 	state := C.JS_PromiseState(v.ctx.ref, v.ref)
-	if state == C.JS_PROMISE_PENDING || state == C.JS_PROMISE_FULFILLED || state == C.JS_PROMISE_REJECTED {
+	pending := C.GetPromisePending()
+	fulfilled := C.GetPromiseFulfilled()
+	rejected := C.GetPromiseRejected()
+
+	if C.int(state) == pending || C.int(state) == fulfilled || C.int(state) == rejected {
 		return true
 	}
 	return false
 }
-
-func (v Value) IsConstructor() bool { return C.JS_IsConstructor(v.ctx.ref, v.ref) == 1 }
 
 // Promise state enumeration matching QuickJS
 type PromiseState int
@@ -651,14 +669,14 @@ const (
 // PromiseState returns the state of the Promise
 func (v Value) PromiseState() PromiseState {
 	if !v.IsPromise() {
-		return PromisePending // or return error
+		return PromisePending
 	}
 
 	state := C.JS_PromiseState(v.ctx.ref, v.ref)
 	switch state {
-	case C.JS_PROMISE_PENDING:
+	case C.JSPromiseStateEnum(C.GetPromisePending()):
 		return PromisePending
-	case C.JS_PROMISE_FULFILLED:
+	case C.JSPromiseStateEnum(C.GetPromiseFulfilled()):
 		return PromiseFulfilled
 	default:
 		return PromiseRejected
@@ -679,4 +697,224 @@ func (v Value) Await() (Value, error) {
 		return result, v.ctx.Exception()
 	}
 	return result, nil
+}
+
+// =============================================================================
+// CLASS INSTANCE SUPPORT METHODS (replaced invalid class ID constant)
+// =============================================================================
+
+// IsClassInstance checks if the value is an instance of any user-defined class
+// This method uses opaque data validation for maximum reliability
+func (v Value) IsClassInstance() bool {
+	// The most reliable method: check for valid opaque data
+	// All our class instances have opaque data pointing to HandleStore entries
+	return v.HasInstanceData()
+}
+
+// HasInstanceData checks if the value has associated Go object data
+// This is the most reliable way to identify our class instances
+func (v Value) HasInstanceData() bool {
+	if !v.IsObject() {
+		return false
+	}
+
+	// Get class ID first
+	classID := C.JS_GetClassID(v.ref)
+
+	// Use JS_GetOpaque2 for type-safe check (like point.c methods)
+	opaque := C.JS_GetOpaque2(v.ctx.ref, v.ref, classID)
+	if opaque == nil {
+		return false
+	}
+
+	// Validate that the handle ID exists in our HandleStore
+	handleID := int32(C.OpaqueToInt(opaque))
+	_, exists := v.ctx.handleStore.Load(handleID)
+	return exists
+}
+
+// IsInstanceOfClassID checks if the value is an instance of a specific class ID
+// This provides type-safe class instance checking with double validation
+func (v Value) IsInstanceOfClassID(expectedClassID uint32) bool {
+	if !v.IsObject() {
+		return false
+	}
+
+	// Only check class ID match - no opaque data requirement
+	objClassID := uint32(C.JS_GetClassID(v.ref))
+	return objClassID == expectedClassID
+}
+
+// GetClassID returns the class ID of the value if it's a class instance
+// Returns JS_INVALID_CLASS_ID (0) if not a class instance
+func (v Value) GetClassID() uint32 {
+	return uint32(C.JS_GetClassID(v.ref))
+}
+
+// GetGoObject retrieves Go object from JavaScript class instance
+// This method extracts the opaque data stored by NewInstance
+func (v Value) GetGoObject() (interface{}, error) {
+	// First check if the value is an object
+	if !v.IsObject() {
+		return nil, errors.New("value is not an object")
+	}
+
+	// Get class ID to ensure we have a class instance
+	classID := C.JS_GetClassID(v.ref)
+
+	// Use JS_GetOpaque2 for type-safe retrieval with context validation
+	// This corresponds to point.c: s = JS_GetOpaque2(ctx, this_val, js_point_class_id)
+	opaque := C.JS_GetOpaque2(v.ctx.ref, v.ref, classID)
+	if opaque == nil {
+		return nil, errors.New("no instance data found")
+	}
+
+	// Use C helper function to safely convert opaque pointer back to int32
+	handleID := int32(C.OpaqueToInt(opaque))
+
+	// Retrieve Go object from HandleStore
+	if obj, exists := v.ctx.handleStore.Load(handleID); exists {
+		return obj, nil
+	}
+
+	return nil, errors.New("instance data not found in handle store")
+}
+
+// =============================================================================
+// SPECIALIZED CLASS TYPE CHECKING METHODS
+// =============================================================================
+
+// IsInstanceOfConstructor checks if the value is an instance of a specific constructor
+// This uses JavaScript's instanceof operator semantics
+func (v Value) IsInstanceOfConstructor(constructor Value) bool {
+	if !v.IsObject() || !constructor.IsFunction() {
+		return false
+	}
+
+	return C.JS_IsInstanceOf(v.ctx.ref, v.ref, constructor.ref) == 1
+}
+
+// =============================================================================
+// CLASS INSTANCE CREATION METHODS
+// =============================================================================
+
+// NewInstance creates a class instance using this value as new_target
+// This method should be called on constructor functions to create instances with proper inheritance support
+//
+// IMPORTANT: goObj must be a pointer type to ensure proper reference semantics and performance.
+//
+// Example usage in constructor functions:
+//
+//	func pointConstructor(ctx *Context, newTarget Value, args []Value) Value {
+//	    point := &Point{X: x, Y: y}  // Must be pointer
+//	    return newTarget.NewInstance(point)
+//	}
+func (v Value) NewInstance(goObj interface{}) Value {
+	// Validate that this value is a constructor function
+	if !v.IsConstructor() {
+		return v.ctx.ThrowTypeError("NewInstance can only be called on constructor functions")
+	}
+
+	// Validate pointer type for proper semantics
+	if err := validatePointerType(goObj); err != nil {
+		return v.ctx.ThrowTypeError(err.Error())
+	}
+
+	// Try to get classID directly from the constructor
+	classID, exists := getConstructorClassID(v.ref)
+
+	// If not found directly, try inheritance fallback by checking prototype chain
+	if !exists {
+		classID, exists = v.resolveClassIDFromInheritance()
+	}
+
+	if !exists {
+		return v.ctx.ThrowError(errors.New("constructor not registered in global class registry"))
+	}
+
+	// Store Go object in HandleStore for automatic memory management
+	var handleID int32 = 0
+	if goObj != nil {
+		handleID = v.ctx.handleStore.Store(goObj)
+	}
+
+	// Use C helper function to create the class instance
+	// This encapsulates all the complex prototype/object creation logic
+	jsObj := C.CreateClassInstance(v.ctx.ref, v.ref, C.JSClassID(classID), C.int32_t(handleID))
+
+	// Check if creation failed and clean up if necessary
+	if C.JS_IsException(jsObj) != 0 {
+		v.ctx.handleStore.Delete(handleID)
+		return Value{ctx: v.ctx, ref: jsObj}
+	}
+	return Value{ctx: v.ctx, ref: jsObj}
+}
+
+// resolveClassIDFromInheritance attempts to resolve classID by checking if this constructor
+// extends a registered class and should use the parent's classID
+func (v Value) resolveClassIDFromInheritance() (uint32, bool) {
+	// Simple and efficient approach: use JavaScript to traverse the prototype chain
+	script := `
+        (function(child) {
+            // Walk up the prototype chain and collect all parent constructors
+            let constructors = [];
+            let current = child;
+            
+            // Traverse up to 10 levels to prevent infinite loops
+            for (let i = 0; i < 10; i++) {
+                if (!current || !current.prototype) break;
+                
+                let parentProto = Object.getPrototypeOf(current.prototype);
+                if (!parentProto || parentProto === Object.prototype) break;
+                
+                let parentConstructor = parentProto.constructor;
+                if (!parentConstructor || parentConstructor === current) break;
+                
+                constructors.push(parentConstructor);
+                current = parentConstructor;
+            }
+            
+            return constructors;
+        })
+    `
+
+	traverser, _ := v.ctx.Eval(script)
+	defer traverser.Free()
+
+	// Get all parent constructors
+	parents := traverser.Execute(v.ctx.Undefined(), v)
+	defer parents.Free()
+
+	// Check each parent to see if it's registered
+	lengthVal := parents.Get("length")
+	defer lengthVal.Free()
+
+	length := int(lengthVal.Int32())
+	for i := 0; i < length; i++ {
+		parent := parents.GetIdx(int64(i))
+		defer parent.Free()
+
+		if classID, exists := getConstructorClassID(parent.ref); exists {
+			return classID, true
+		}
+	}
+
+	return 0, false
+}
+
+func validatePointerType(obj interface{}) error {
+	// Case 1: obj is nil interface{} - allow it
+	if obj == nil {
+		return nil
+	}
+
+	objValue := reflect.ValueOf(obj)
+
+	// Case 2: obj is a pointer type (including typed nil pointers) - allow it
+	if objValue.Kind() == reflect.Ptr {
+		return nil // Allow both nil and non-nil pointers
+	}
+
+	// Case 3: obj is a value type - reject it
+	return errors.New("goObj must be a pointer type for proper reference semantics")
 }

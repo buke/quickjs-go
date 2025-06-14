@@ -35,45 +35,6 @@ Go 语言的 QuickJS 绑定库：快速、小型、可嵌入的 ES2020 JavaScrip
 | v0.2.x     | v2023-12-09 |
 | v0.1.x     | v2021-03-27 |
 
-## 破坏性变更
-
-### v0.5.x
-
-**移除 Collection API**：本项目的主要目标是提供 QuickJS C API 的绑定，因此 collection 相关的 API 将会被移除。以下方法不再可用：
-
-- `ctx.Array()` - 请使用 `ctx.Eval("[]")` 或 `ctx.Object()` 替代
-- `ctx.Map()` - 请使用 `ctx.Eval("new Map()")` 替代
-- `ctx.Set()` - 请使用 `ctx.Eval("new Set()")` 替代
-- `value.ToArray()` - 请直接使用 `Value` 操作替代
-- `value.ToMap()` - 请直接使用 `Value` 操作替代
-- `value.ToSet()` - 请直接使用 `Value` 操作替代
-- `value.IsMap()` - 请使用 `value.GlobalInstanceof("Map")` 替代
-- `value.IsSet()` - 请使用 `value.GlobalInstanceof("Set")` 替代
-
-**迁移指南：**
-
-```go
-// 之前的版本 (v0.4.x 及更早)
-arr := ctx.Array()
-arr.Set("0", ctx.String("item"))
-
-mapObj := ctx.Map()
-mapObj.Set("key", ctx.String("value"))
-
-setObj := ctx.Set()
-setObj.Add(ctx.String("item"))
-
-// 新版本 (v0.5.x)
-arr, _ := ctx.Eval("[]")
-arr.Set("0", ctx.String("item"))
-arr.Set("length", ctx.Int32(1))
-
-mapObj, _ := ctx.Eval("new Map()")
-mapObj.Call("set", ctx.String("key"), ctx.String("value"))
-
-setObj, _ := ctx.Eval("new Set()")
-setObj.Call("add", ctx.String("item"))
-```
 
 ## 功能
 
@@ -84,6 +45,7 @@ setObj.Call("add", ctx.String("item"))
 - 简单的异常抛出和捕获
 - **Go 值与 JavaScript 值的序列化和反序列化**
 - **完整的 TypedArray 支持 (Int8Array, Uint8Array, Float32Array 等)**
+- **手动和自动反射的类绑定功能**
 
 ## 指南
 
@@ -112,13 +74,7 @@ import (
 
 func main() {
     // Create a new runtime
-    rt := quickjs.NewRuntime(
-        quickjs.WithExecuteTimeout(30),
-        quickjs.WithMemoryLimit(128*1024),
-        quickjs.WithGCThreshold(256*1024),
-        quickjs.WithMaxStackSize(65534),
-        quickjs.WithCanBlock(true),
-    )
+    rt := quickjs.NewRuntime()
     defer rt.Close()
 
     // Create a new context
@@ -778,6 +734,349 @@ func main() {
 - `map[string]interface{}` 对应 Object
 - `*big.Int` 对应 BigInt
 - `[]byte` 对应 ArrayBuffer
+
+### 类绑定
+
+QuickJS-Go 提供强大的类绑定功能，允许您无缝地将 Go 结构体桥接到 JavaScript 类。
+
+#### 手动类绑定
+
+手动创建 JavaScript 类，完全控制方法和属性：
+
+```go
+package main
+
+import (
+    "fmt"
+    "math"
+    "github.com/buke/quickjs-go"
+)
+
+type Point struct {
+    X, Y float64
+}
+
+func (p *Point) Distance() float64 {
+    return math.Sqrt(p.X*p.X + p.Y*p.Y)
+}
+
+func (p *Point) Move(dx, dy float64) {
+    p.X += dx
+    p.Y += dy
+}
+
+func main() {
+    rt := quickjs.NewRuntime()
+    defer rt.Close()
+    ctx := rt.NewContext()
+    defer ctx.Close()
+
+    // 使用 ClassBuilder 创建 Point 类
+    pointConstructor, _, err := quickjs.NewClassBuilder("Point").
+        Constructor(func(ctx *quickjs.Context, newTarget quickjs.Value, args []quickjs.Value) quickjs.Value {
+            x, y := 0.0, 0.0
+            if len(args) > 0 { x = args[0].ToFloat64() }
+            if len(args) > 1 { y = args[1].ToFloat64() }
+            
+            point := &Point{X: x, Y: y}
+            return newTarget.NewInstance(point)
+        }).
+        Property("x", 
+            func(ctx *quickjs.Context, this quickjs.Value) quickjs.Value {
+                point, _ := this.GetGoObject()
+                return ctx.Float64(point.(*Point).X)
+            },
+            func(ctx *quickjs.Context, this quickjs.Value, value quickjs.Value) quickjs.Value {
+                point, _ := this.GetGoObject()
+                point.(*Point).X = value.ToFloat64()
+                return value
+            }).
+        Property("y",
+            func(ctx *quickjs.Context, this quickjs.Value) quickjs.Value {
+                point, _ := this.GetGoObject()
+                return ctx.Float64(point.(*Point).Y)
+            },
+            func(ctx *quickjs.Context, this quickjs.Value, value quickjs.Value) quickjs.Value {
+                point, _ := this.GetGoObject()
+                point.(*Point).Y = value.ToFloat64()
+                return value
+            }).
+        Method("distance", func(ctx *quickjs.Context, this quickjs.Value, args []quickjs.Value) quickjs.Value {
+            point, _ := this.GetGoObject()
+            return ctx.Float64(point.(*Point).Distance())
+        }).
+        Method("move", func(ctx *quickjs.Context, this quickjs.Value, args []quickjs.Value) quickjs.Value {
+            point, _ := this.GetGoObject()
+            dx, dy := 0.0, 0.0
+            if len(args) > 0 { dx = args[0].ToFloat64() }
+            if len(args) > 1 { dy = args[1].ToFloat64() }
+            point.(*Point).Move(dx, dy)
+            return ctx.Undefined()
+        }).
+        Build(ctx)
+
+    if err != nil {
+        panic(err)
+    }
+
+    // 注册类
+    ctx.Globals().Set("Point", pointConstructor)
+
+    // 在 JavaScript 中使用
+    result, _ := ctx.Eval(`
+        const p = new Point(3, 4);
+        const dist1 = p.distance();
+        p.move(1, 1);
+        const dist2 = p.distance();
+        
+        ({ 
+            initial: dist1, 
+            afterMove: dist2, 
+            x: p.x, 
+            y: p.y 
+        });
+    `)
+    defer result.Free()
+    
+    fmt.Println("结果:", result.JSONStringify())
+}
+```
+
+#### 自动反射类绑定
+
+使用反射自动从 Go 结构体生成 JavaScript 类：
+
+```go
+package main
+
+import (
+    "fmt"
+    "github.com/buke/quickjs-go"
+)
+
+type User struct {
+    ID        int64     `js:"id"`
+    Name      string    `js:"name"`
+    Email     string    `json:"email_address"`
+    Age       int       `js:"age"`
+    IsActive  bool      `js:"is_active"`
+    Scores    []float32 `js:"scores"`    // 变成 Float32Array
+    private   string    // 不可访问
+    Secret    string    `js:"-"`         // 明确忽略
+}
+
+func (u *User) GetFullInfo() string {
+    return fmt.Sprintf("%s (%s) - 年龄: %d", u.Name, u.Email, u.Age)
+}
+
+func (u *User) UpdateEmail(newEmail string) {
+    u.Email = newEmail
+}
+
+func (u *User) AddScore(score float32) {
+    u.Scores = append(u.Scores, score)
+}
+
+func main() {
+    rt := quickjs.NewRuntime()
+    defer rt.Close()
+    ctx := rt.NewContext()
+    defer ctx.Close()
+
+    // 自动从结构体创建 User 类
+    userConstructor, _, err := ctx.BindClass(&User{})
+    if err != nil {
+        panic(err)
+    }
+
+    ctx.Globals().Set("User", userConstructor)
+
+    // 使用位置参数
+    result1, _ := ctx.Eval(`
+        const user1 = new User(1, "小明", "xiaoming@example.com", 25, true, [95.5, 87.2]);
+        user1.GetFullInfo();
+    `)
+    defer result1.Free()
+    fmt.Println("位置参数:", result1.String())
+
+    // 使用命名参数（对象参数）
+    result2, _ := ctx.Eval(`
+        const user2 = new User({
+            id: 2,
+            name: "小红",
+            email_address: "xiaohong@example.com",
+            age: 30,
+            is_active: true,
+            scores: [88.0, 92.5, 85.0]
+        });
+        
+        // 调用方法
+        user2.UpdateEmail("xiaohong.new@example.com");
+        user2.AddScore(95.0);
+        
+        ({
+            info: user2.GetFullInfo(),
+            email: user2.email_address,
+            scoresType: user2.scores instanceof Float32Array,
+            scoresLength: user2.scores.length
+        });
+    `)
+    defer result2.Free()
+    fmt.Println("命名参数:", result2.JSONStringify())
+}
+```
+
+#### 高级反射选项
+
+使用过滤和配置选项自定义自动绑定：
+
+```go
+package main
+
+import (
+    "fmt"
+    "github.com/buke/quickjs-go"
+)
+
+type APIClient struct {
+    BaseURL    string `js:"baseUrl"`
+    APIKey     string `js:"-"`          // 从 JavaScript 隐藏
+    Version    string `js:"version"`
+    UserAgent  string `js:"userAgent"`
+}
+
+func (c *APIClient) Get(endpoint string) string {
+    return fmt.Sprintf("GET %s%s", c.BaseURL, endpoint)
+}
+
+func (c *APIClient) Post(endpoint string, data interface{}) string {
+    return fmt.Sprintf("POST %s%s with data", c.BaseURL, endpoint)
+}
+
+func (c *APIClient) InternalMethod() string {
+    return "这应该被隐藏"
+}
+
+func main() {
+    rt := quickjs.NewRuntime()
+    defer rt.Close()
+    ctx := rt.NewContext()
+    defer ctx.Close()
+
+    // 使用自定义选项创建类
+    clientConstructor, _, err := ctx.BindClass(&APIClient{},
+        quickjs.WithMethodPrefix("Get"), // 只包含 Get* 和 Post* 方法
+        quickjs.WithIgnoredMethods("InternalMethod"), // 明确忽略方法
+        quickjs.WithIgnoredFields("APIKey"), // 忽略标签之外的额外字段
+    )
+    if err != nil {
+        panic(err)
+    }
+
+    ctx.Globals().Set("APIClient", clientConstructor)
+
+    result, _ := ctx.Eval(`
+        const client = new APIClient({
+            baseUrl: "https://api.example.com/v1/",
+            version: "1.0",
+            userAgent: "MyApp/1.0"
+        });
+        
+        ({
+            get: client.Get("/users"),
+            post: typeof client.Post !== 'undefined' ? client.Post("/users", {name: "test"}) : "undefined",
+            hasInternal: typeof client.InternalMethod !== 'undefined',
+            hasAPIKey: typeof client.APIKey !== 'undefined'
+        });
+    `)
+    defer result.Free()
+    
+    fmt.Println("过滤绑定:", result.JSONStringify())
+}
+```
+
+#### 类继承支持
+
+JavaScript 类可以继承 Go 注册的类：
+
+```go
+package main
+
+import (
+    "fmt"
+    "github.com/buke/quickjs-go"
+)
+
+type Vehicle struct {
+    Brand string `js:"brand"`
+    Model string `js:"model"`
+}
+
+func (v *Vehicle) Start() string {
+    return fmt.Sprintf("启动 %s %s", v.Brand, v.Model)
+}
+
+func main() {
+    rt := quickjs.NewRuntime()
+    defer rt.Close()
+    ctx := rt.NewContext()
+    defer ctx.Close()
+
+    // 注册基础 Vehicle 类
+    vehicleConstructor, _, _ := ctx.BindClass(&Vehicle{})
+    ctx.Globals().Set("Vehicle", vehicleConstructor)
+
+    // 在 JavaScript 中创建继承 Vehicle 的 Car 类
+    _, err := ctx.Eval(`
+        class Car extends Vehicle {
+            constructor(brand, model, doors) {
+                super({ brand, model });
+                this.doors = doors;
+            }
+            
+            getInfo() {
+                return this.Start() + " 有 " + this.doors + " 个门";
+            }
+        }
+        
+        // 测试继承
+        const car = new Car("丰田", "凯美瑞", 4);
+        globalThis.result = car.getInfo();
+    `)
+    if err != nil {
+        panic(err)
+    }
+
+    result := ctx.Globals().Get("result")
+    defer result.Free()
+    fmt.Println("继承:", result.String())
+}
+```
+
+#### 功能特性
+
+**手动类绑定：**
+- 完全控制类结构和行为
+- 支持实例和静态方法/属性
+- 只读、只写和读写属性
+- 支持继承的 `new.target` 构造函数
+- 带有终结器的自动内存管理
+
+**自动反射绑定：**
+- 从 Go 结构体零样板代码生成类
+- 智能构造函数支持位置和命名参数
+- 带有 `js` 和 `json` 标签支持的自动属性映射
+- 方法绑定和正确的参数/返回值转换
+- 数值切片字段的 TypedArray 支持
+- 方法和字段的可配置过滤
+
+**共享功能：**
+- 完整的 JavaScript 继承支持
+- 与 Marshal/Unmarshal 系统无缝集成
+- 二进制数据的 TypedArray 支持
+- 自动内存管理
+- 线程安全操作
+- 类实例验证和类型检查
 
 ### Bytecode 编译和执行
 
