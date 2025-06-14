@@ -281,6 +281,11 @@ JSValue CreateClass(JSContext *ctx,
     if (!class_def || !class_def->class_name) {
         return JS_ThrowInternalError(ctx, "class_def or class_name is null");
     }
+
+    // Check for empty class name
+    if (strlen(class_def->class_name) == 0) {
+        return JS_ThrowInternalError(ctx, "class_name cannot be empty");
+    }
     
     // Step 2: Allocate class_id internally (corresponds to point.c: JS_NewClassID(&js_point_class_id))
     JS_NewClassID(class_id);

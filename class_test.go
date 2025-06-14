@@ -611,17 +611,41 @@ func TestErrorHandling(t *testing.T) {
 	defer context.Close()
 
 	// Test creating class with empty name
-	_, _, err := NewClassBuilder("").
+	ctor, _, err := NewClassBuilder("").
 		Constructor(func(ctx *Context, newTarget Value, args []Value) Value {
 			return ctx.Undefined()
 		}).
+		Method("getValue", func(ctx *Context, this Value, args []Value) Value {
+			return ctx.Float64(0)
+		}).
+		Property("y",
+			func(ctx *Context, this Value) Value { // getter
+				obj, err := this.GetGoObject()
+				if err != nil {
+					return ctx.ThrowError(err)
+				}
+				point := obj.(*Point)
+				return ctx.Float64(point.Y)
+			},
+			func(ctx *Context, this Value, value Value) Value { // setter
+				obj, err := this.GetGoObject()
+				if err != nil {
+					return ctx.ThrowError(err)
+				}
+				point := obj.(*Point)
+				point.Y = value.Float64()
+				return ctx.Undefined()
+			}).
 		Build(context)
+	defer ctor.Free()
+
 	if err == nil {
 		t.Errorf("Expected error for empty class name")
 	}
 
 	// Test creating class without constructor
-	_, _, err = NewClassBuilder("TestClass").Build(context)
+	ctor2, _, err := NewClassBuilder("TestClass").Build(context)
+	defer ctor2.Free()
 	if err == nil {
 		t.Errorf("Expected error for missing constructor")
 	}
@@ -1001,5 +1025,44 @@ func TestReadOnlyAndWriteOnlyProperties(t *testing.T) {
 	if result3.GetIdx(0).String() != "1.0.0" || result3.GetIdx(1).String() != "1.0.0" {
 		t.Errorf("StaticReadOnly property failed: expected ['1.0.0', '1.0.0'], got ['%s', '%s']",
 			result3.GetIdx(0).String(), result3.GetIdx(1).String())
+	}
+}
+
+// TestMethodLengthDefault tests the default method length parameter handling
+func TestMethodLengthDefault(t *testing.T) {
+	rt := NewRuntime()
+	defer rt.Close()
+
+	context := rt.NewContext()
+	defer context.Close()
+
+	// Create a class with method using negative length (should default to DefaultMethodParams)
+	constructor, _, err := NewClassBuilder("LengthTestClass").
+		Constructor(func(ctx *Context, newTarget Value, args []Value) Value {
+			return newTarget.NewInstance(&Point{X: 0, Y: 0})
+		}).
+		MethodWithLength("testMethod", func(ctx *Context, this Value, args []Value) Value {
+			return ctx.Int32(int32(len(args)))
+		}, -1). // Negative length should trigger default
+		Build(context)
+
+	if err != nil {
+		t.Fatalf("Failed to create class with negative method length: %v", err)
+	}
+
+	context.Globals().Set("LengthTestClass", constructor)
+
+	// Test that the method works correctly (the default length doesn't affect functionality)
+	result, err := context.Eval(`
+        let obj = new LengthTestClass();
+        obj.testMethod(1, 2, 3); // Should return 3 (number of arguments)
+    `)
+	if err != nil {
+		t.Fatalf("Failed to test method with default length: %v", err)
+	}
+	defer result.Free()
+
+	if result.Int32() != 3 {
+		t.Errorf("Expected method to receive 3 arguments, got %d", result.Int32())
 	}
 }
