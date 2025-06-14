@@ -105,6 +105,33 @@ extern JSValue CreateClassInstance(JSContext *ctx, JSValue constructor,
 extern JSValue CreateCFunction(JSContext *ctx, const char *name, 
                               int length, int func_type, int32_t handler_id);
 
+// Class creation structures
+// Method configuration structure
+typedef struct {
+    const char *name;
+    int32_t handler_id;
+    int length;
+    int is_static;
+} MethodEntry;
+
+// Property configuration structure
+typedef struct {
+    const char *name;
+    int32_t getter_id;
+    int32_t setter_id;
+    int is_static;
+} PropertyEntry;
+
+// Complete class creation function
+// C function allocates class_id internally and returns it via pointer
+// Go layer manages JSClassDef and class name memory
+extern JSValue CreateClass(JSContext *ctx,
+                          JSClassID *class_id,        // C function allocates internally
+                          JSClassDef *class_def,      // Go layer manages memory
+                          int32_t constructor_id,
+                          const MethodEntry *methods, int method_count,
+                          const PropertyEntry *properties, int property_count);
+
 extern int ValueGetTag(JSValueConst v);
 extern JSValue LoadModuleBytecode(JSContext *ctx, const uint8_t *buf, size_t buf_len, int load_only);
 

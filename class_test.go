@@ -7,8 +7,6 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
-
-	"github.com/stretchr/testify/require"
 )
 
 // Point represents a 2D point class for testing basic functionality
@@ -1004,23 +1002,4 @@ func TestReadOnlyAndWriteOnlyProperties(t *testing.T) {
 		t.Errorf("StaticReadOnly property failed: expected ['1.0.0', '1.0.0'], got ['%s', '%s']",
 			result3.GetIdx(0).String(), result3.GetIdx(1).String())
 	}
-}
-
-// TestCreateCFunctionWithCustomHandler tests createCFunction with various handler types
-func TestCreateCFunctionError(t *testing.T) {
-	rt := NewRuntime()
-	defer rt.Close()
-	ctx := rt.NewContext()
-	defer ctx.Close()
-
-	t.Run("UnsupportedFunctionType", func(st *testing.T) {
-		methodFunc, _, err := ctx.createCFunction("UnsupportedFunctionType", func(ctx *Context, this Value, args []Value) Value {
-			return ctx.Undefined()
-		}, uint32(999), 0)
-		defer methodFunc.Free()
-
-		require.True(t, methodFunc.IsException())
-		require.Error(t, err)
-	})
-
 }

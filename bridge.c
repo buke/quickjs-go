@@ -241,6 +241,198 @@ JSValue CreateCFunction(JSContext *ctx, const char *name,
 }
 
 // ============================================================================
+// CLASS CREATION HELPER FUNCTIONS
+// ============================================================================
+
+// Forward declarations
+JSValue BindMembersToObject(JSContext *ctx, JSValue obj,
+                           const MethodEntry *methods, int method_count,
+                           const PropertyEntry *properties, int property_count,
+                           int is_static);
+
+JSValue BindMethodToObject(JSContext *ctx, JSValue obj, const MethodEntry *method);
+
+JSValue BindPropertyToObject(JSContext *ctx, JSValue obj, const PropertyEntry *prop);
+
+// CreateClass - Complete class creation function
+// This function handles all QuickJS class creation steps:
+// 1. Allocate class_id internally
+// 2. Register class definition (Go layer manages JSClassDef memory)
+// 3. Create prototype object
+// 4. Bind instance members to prototype
+// 5. Create constructor function
+// 6. Associate constructor with prototype
+// 7. Set class prototype
+// 8. Bind static members to constructor
+//
+// Returns constructor JSValue on success, JS_EXCEPTION on failure
+// class_id is returned via pointer parameter
+JSValue CreateClass(JSContext *ctx,
+                   JSClassID *class_id,        // C function allocates internally
+                   JSClassDef *class_def,      // Go layer manages memory
+                   int32_t constructor_id,
+                   const MethodEntry *methods, int method_count,
+                   const PropertyEntry *properties, int property_count) {
+    
+    JSValue proto, constructor;
+    JSRuntime *rt = JS_GetRuntime(ctx);
+    
+    // Step 1: Input validation
+    if (!class_def || !class_def->class_name) {
+        return JS_ThrowInternalError(ctx, "class_def or class_name is null");
+    }
+    
+    // Step 2: Allocate class_id internally (corresponds to point.c: JS_NewClassID(&js_point_class_id))
+    JS_NewClassID(class_id);
+    
+    // Check QuickJS limits
+    if (*class_id >= (1 << 16)) {
+        return JS_ThrowRangeError(ctx, "class ID exceeds maximum value");
+    }
+    
+    // Step 3: Register class definition (corresponds to point.c: JS_NewClass)
+    // Go layer manages class_def memory, we just use it
+    int class_result = JS_NewClass(rt, *class_id, class_def);
+    if (class_result != 0) {
+        return JS_ThrowInternalError(ctx, "JS_NewClass failed: result=%d", class_result);
+    }
+    
+    // Step 4: Create prototype object (corresponds to point.c: point_proto = JS_NewObject(ctx))
+    proto = JS_NewObject(ctx);
+    if (JS_IsException(proto)) {
+        return proto;
+    }
+    
+    // Step 5: Bind instance members to prototype
+    JSValue proto_result = BindMembersToObject(ctx, proto, methods, method_count,
+                                              properties, property_count, 0);
+    if (JS_IsException(proto_result)) {
+        JS_FreeValue(ctx, proto);
+        return proto_result;
+    }
+    
+    // Step 6: Create constructor function (corresponds to point.c: JS_NewCFunction2)
+    constructor = CreateCFunction(ctx, class_def->class_name, 2,
+                                 GetCFuncConstructorMagic(), constructor_id);
+    if (JS_IsException(constructor)) {
+        JS_FreeValue(ctx, proto);
+        return constructor;
+    }
+    
+    // Step 7: Associate constructor with prototype (corresponds to point.c: JS_SetConstructor)
+    JS_SetConstructor(ctx, constructor, proto);
+    
+    // Step 8: Set class prototype (corresponds to point.c: JS_SetClassProto)
+    JS_SetClassProto(ctx, *class_id, proto);
+    
+    // Step 9: Bind static members to constructor
+    JSValue constructor_result = BindMembersToObject(ctx, constructor, methods, method_count,
+                                                    properties, property_count, 1);
+    if (JS_IsException(constructor_result)) {
+        JS_FreeValue(ctx, constructor);
+        return constructor_result;
+    }
+    
+    // Success: class_id has been set via pointer, return constructor
+    return constructor;
+}
+
+// BindMembersToObject - Bind methods and properties to a JavaScript object
+// is_static: 0 for instance members, 1 for static members
+JSValue BindMembersToObject(JSContext *ctx, JSValue obj,
+                           const MethodEntry *methods, int method_count,
+                           const PropertyEntry *properties, int property_count,
+                           int is_static) {
+    // Bind methods
+    for (int i = 0; i < method_count; i++) {
+        const MethodEntry *method = &methods[i];
+        if (method->is_static == is_static) {
+            JSValue method_result = BindMethodToObject(ctx, obj, method);
+            if (JS_IsException(method_result)) {
+                return method_result;
+            }
+        }
+    }
+    
+    // Bind properties
+    for (int i = 0; i < property_count; i++) {
+        const PropertyEntry *prop = &properties[i];
+        if (prop->is_static == is_static) {
+            JSValue prop_result = BindPropertyToObject(ctx, obj, prop);
+            if (JS_IsException(prop_result)) {
+                return prop_result;
+            }
+        }
+    }
+    
+    return JS_UNDEFINED;
+}
+
+// BindMethodToObject - Bind a method to a JavaScript object
+JSValue BindMethodToObject(JSContext *ctx, JSValue obj, const MethodEntry *method) {
+    // Create method function
+    JSValue method_func = CreateCFunction(ctx, method->name, method->length,
+                                         GetCFuncGenericMagic(), method->handler_id);
+    if (JS_IsException(method_func)) {
+        return method_func;
+    }
+    
+    // Define property
+    int result = JS_DefinePropertyValueStr(ctx, obj, method->name, method_func,
+                                          GetPropertyWritableConfigurable());
+    if (result < 0) {
+        JS_FreeValue(ctx, method_func);
+        return JS_ThrowInternalError(ctx, "failed to bind method: %s", method->name);
+    }
+    
+    return JS_UNDEFINED;
+}
+
+// BindPropertyToObject - Bind a property to a JavaScript object
+JSValue BindPropertyToObject(JSContext *ctx, JSValue obj, const PropertyEntry *prop) {
+    JSAtom prop_atom = JS_NewAtom(ctx, prop->name);
+    JSValue getter = JS_UNDEFINED;
+    JSValue setter = JS_UNDEFINED;
+    
+    // Create getter
+    if (prop->getter_id != 0) {
+        getter = CreateCFunction(ctx, prop->name, 0,
+                                GetCFuncGetterMagic(), prop->getter_id);
+        if (JS_IsException(getter)) {
+            JS_FreeAtom(ctx, prop_atom);
+            return getter;
+        }
+    }
+    
+    // Create setter
+    if (prop->setter_id != 0) {
+        setter = CreateCFunction(ctx, prop->name, 1,
+                                GetCFuncSetterMagic(), prop->setter_id);
+        if (JS_IsException(setter)) {
+            JS_FreeAtom(ctx, prop_atom);
+            if (!JS_IsUndefined(getter)) {
+                JS_FreeValue(ctx, getter);
+            }
+            return setter;
+        }
+    }
+    
+    // Define property
+    int result = JS_DefinePropertyGetSet(ctx, obj, prop_atom, getter, setter,
+                                        GetPropertyConfigurable());
+    
+    JS_FreeAtom(ctx, prop_atom);
+    
+    if (result < 0) {
+        if (!JS_IsUndefined(getter)) JS_FreeValue(ctx, getter);
+        if (!JS_IsUndefined(setter)) JS_FreeValue(ctx, setter);
+        return JS_ThrowInternalError(ctx, "failed to bind property: %s", prop->name);
+    }
+    
+    return JS_UNDEFINED;
+}
+
+// ============================================================================
 // INTERRUPT HANDLERS
 // ============================================================================
 
