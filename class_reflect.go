@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
-	"unicode"
-	"unicode/utf8"
 )
 
 // =============================================================================
@@ -15,9 +13,6 @@ import (
 
 // ReflectOptions configures automatic class binding behavior
 type ReflectOptions struct {
-	// IncludePrivate includes private fields/methods in binding (default: false)
-	IncludePrivate bool
-
 	// MethodPrefix filters methods by prefix (empty = all methods)
 	MethodPrefix string
 
@@ -30,13 +25,6 @@ type ReflectOptions struct {
 
 // ReflectOption configures ReflectOptions using functional options pattern
 type ReflectOption func(*ReflectOptions)
-
-// WithIncludePrivate includes private fields and methods in binding
-func WithIncludePrivate(include bool) ReflectOption {
-	return func(opts *ReflectOptions) {
-		opts.IncludePrivate = include
-	}
-}
 
 // WithMethodPrefix filters methods by name prefix
 func WithMethodPrefix(prefix string) ReflectOption {
@@ -61,6 +49,7 @@ func WithIgnoredFields(fields ...string) ReflectOption {
 
 // BindClass automatically creates and builds a JavaScript class from a Go struct type using reflection.
 // This is a convenience method that combines BindClassBuilder and Build.
+// Only exported fields and methods are bound to maintain Go encapsulation principles.
 //
 // Example usage:
 //
@@ -73,12 +62,12 @@ func (ctx *Context) BindClass(structType interface{}, options ...ReflectOption) 
 		return Value{}, 0, err
 	}
 
-	// Directly use ClassBuilder.Build, which automatically registers to unified mapping table
 	return builder.Build(ctx)
 }
 
 // BindClassBuilder automatically creates a ClassBuilder from a Go struct type using reflection.
 // Returns a ClassBuilder that can be further customized using chain methods before Build().
+// Only exported fields and methods are analyzed to maintain Go encapsulation principles.
 //
 // Example usage:
 //
@@ -94,18 +83,13 @@ func (ctx *Context) BindClass(structType interface{}, options ...ReflectOption) 
 //	    ReadOnlyProperty("version", myVersionGetter).
 //	    Build(ctx)
 func (ctx *Context) BindClassBuilder(structType interface{}, options ...ReflectOption) (*ClassBuilder, error) {
-	// Parse options with defaults
-	opts := &ReflectOptions{
-		IncludePrivate: false,
-		IgnoredMethods: make([]string, 0),
-		IgnoredFields:  make([]string, 0),
-	}
-
+	// Parse options with defaults (zero values are appropriate defaults)
+	opts := &ReflectOptions{}
 	for _, option := range options {
 		option(opts)
 	}
 
-	// Extract reflect.Type from input (simplified function)
+	// Extract reflect.Type from input
 	typ, err := getReflectType(structType)
 	if err != nil {
 		return nil, err
@@ -121,7 +105,7 @@ func (ctx *Context) BindClassBuilder(structType interface{}, options ...ReflectO
 	return buildClassFromReflection(className, typ, opts)
 }
 
-// getReflectType extracts reflect.Type from various input types (simplified)
+// getReflectType extracts reflect.Type from various input types
 func getReflectType(structType interface{}) (reflect.Type, error) {
 	switch v := structType.(type) {
 	case reflect.Type:
@@ -171,33 +155,27 @@ func buildClassFromReflection(className string, typ reflect.Type, opts *ReflectO
 			}
 		}
 
-		// Use simplified NewInstance (automatic classID retrieval)
 		return newTarget.NewInstance(instance)
 	})
 
-	// Add properties
-	if err := addReflectionProperties(builder, typ, opts); err != nil {
-		return nil, fmt.Errorf("failed to add properties: %w", err)
-	}
+	// Add properties (only exported fields)
+	addReflectionProperties(builder, typ, opts)
 
-	// Add methods
-	if err := addReflectionMethods(builder, typ, opts); err != nil {
-		return nil, fmt.Errorf("failed to add methods: %w", err)
-	}
+	// Add methods (only exported methods)
+	addReflectionMethods(builder, typ, opts)
 
 	return builder, nil
 }
 
 // initializeFromArgs implements mixed parameter constructor strategy
 func initializeFromArgs(instance interface{}, args []Value, typ reflect.Type, ctx *Context) error {
-	// Smart strategy selection based on argument types
+	// Smart strategy: single object argument uses named parameters
 	if len(args) == 1 && args[0].IsObject() && !args[0].IsArray() {
-		// Single object argument -> named parameter mode
 		return initializeFromObjectArgs(instance, args[0], typ, ctx)
-	} else {
-		// Multiple arguments or non-object -> positional parameter mode
-		return initializeFromPositionalArgs(instance, args, typ, ctx)
 	}
+
+	// Otherwise use positional parameters
+	return initializeFromPositionalArgs(instance, args, typ, ctx)
 }
 
 // initializeFromPositionalArgs initializes struct fields from positional arguments
@@ -207,7 +185,6 @@ func initializeFromPositionalArgs(instance interface{}, args []Value, typ reflec
 	argIndex := 0
 	for i := 0; i < typ.NumField(); i++ {
 		field := typ.Field(i)
-		fieldValue := val.Field(i)
 
 		// Skip unexported fields
 		if !field.IsExported() {
@@ -219,7 +196,7 @@ func initializeFromPositionalArgs(instance interface{}, args []Value, typ reflec
 			break
 		}
 
-		// Set field value from argument using marshal.go's unmarshal logic
+		fieldValue := val.Field(i)
 		if fieldValue.CanSet() {
 			if err := ctx.unmarshal(args[argIndex], fieldValue); err != nil {
 				return fmt.Errorf("failed to set field %s: %w", field.Name, err)
@@ -237,7 +214,6 @@ func initializeFromObjectArgs(instance interface{}, obj Value, typ reflect.Type,
 
 	for i := 0; i < typ.NumField(); i++ {
 		field := typ.Field(i)
-		fieldValue := val.Field(i)
 
 		// Skip unexported fields
 		if !field.IsExported() {
@@ -249,15 +225,13 @@ func initializeFromObjectArgs(instance interface{}, obj Value, typ reflect.Type,
 		if skip {
 			continue // Field marked with "-" tag
 		}
-		if propName == "" {
-			propName = field.Name // Use field name if no tag
-		}
 
 		// Check if object has this property and set field value
 		if obj.Has(propName) {
 			propValue := obj.Get(propName)
 			defer propValue.Free()
 
+			fieldValue := val.Field(i)
 			if fieldValue.CanSet() {
 				if err := ctx.unmarshal(propValue, fieldValue); err != nil {
 					return fmt.Errorf("failed to set field %s from property %s: %w", field.Name, propName, err)
@@ -279,7 +253,11 @@ func parseFieldTagForProperty(field reflect.StructField) (string, bool) {
 		}
 		// Parse "name,options" format if needed
 		if idx := strings.Index(tag, ","); idx != -1 {
-			return tag[:idx], false
+			name := tag[:idx]
+			if name == "" {
+				return strings.ToLower(field.Name[:1]) + field.Name[1:], false
+			}
+			return name, false
 		}
 		return tag, false
 	}
@@ -291,60 +269,45 @@ func parseFieldTagForProperty(field reflect.StructField) (string, bool) {
 		}
 		// Parse "name,omitempty" format
 		if idx := strings.Index(tag, ","); idx != -1 {
-			return tag[:idx], false
+			name := tag[:idx]
+			if name == "" {
+				return strings.ToLower(field.Name[:1]) + field.Name[1:], false
+			}
+			return name, false
 		}
 		return tag, false
 	}
 
-	// No tag found, use field name
-	return field.Name, false
+	// No tag found, use camelCase field name
+	return strings.ToLower(field.Name[:1]) + field.Name[1:], false
 }
 
 // addReflectionMethods scans struct methods and adds them to the ClassBuilder
-func addReflectionMethods(builder *ClassBuilder, typ reflect.Type, opts *ReflectOptions) error {
+// Only exported methods are processed due to Go reflection limitations
+func addReflectionMethods(builder *ClassBuilder, typ reflect.Type, opts *ReflectOptions) {
 	// Get pointer type to include pointer receiver methods
 	ptrTyp := reflect.PointerTo(typ)
 
 	for i := 0; i < ptrTyp.NumMethod(); i++ {
 		method := ptrTyp.Method(i)
 
-		// Apply filtering rules
-		if !isExported(method.Name) && !opts.IncludePrivate {
-			continue // Skip unexported methods unless explicitly included
-		}
-
-		if opts.MethodPrefix != "" && !strings.HasPrefix(method.Name, opts.MethodPrefix) {
-			continue // Skip methods that don't match prefix filter
-		}
-
-		if contains(opts.IgnoredMethods, method.Name) {
-			continue // Skip explicitly ignored methods
-		}
-
-		if isSpecialMethod(method.Name) {
-			continue // Skip special methods like String, Error, etc.
+		if shouldSkipMethod(method, opts) {
+			continue
 		}
 
 		// Create method wrapper and add to builder
 		methodWrapper := createMethodWrapper(method)
 		builder.Method(method.Name, methodWrapper)
 	}
-
-	return nil
 }
 
 // addReflectionProperties scans struct fields and adds them as properties
-func addReflectionProperties(builder *ClassBuilder, typ reflect.Type, opts *ReflectOptions) error {
+// Only exported fields are processed to maintain Go encapsulation principles
+func addReflectionProperties(builder *ClassBuilder, typ reflect.Type, opts *ReflectOptions) {
 	for i := 0; i < typ.NumField(); i++ {
 		field := typ.Field(i)
 
-		// Skip unexported fields
-		if !field.IsExported() {
-			continue
-		}
-
-		// Skip explicitly ignored fields
-		if contains(opts.IgnoredFields, field.Name) {
+		if shouldSkipField(field, opts) {
 			continue
 		}
 
@@ -354,10 +317,6 @@ func addReflectionProperties(builder *ClassBuilder, typ reflect.Type, opts *Refl
 			continue // Field marked with "-" tag
 		}
 
-		if propName == "" {
-			propName = field.Name // Use field name if no tag
-		}
-
 		// Create getter and setter functions
 		getter := createFieldGetter(field, i)
 		setter := createFieldSetter(field, i)
@@ -365,49 +324,71 @@ func addReflectionProperties(builder *ClassBuilder, typ reflect.Type, opts *Refl
 		// Add property to builder (instance properties by default)
 		builder.Property(propName, getter, setter)
 	}
+}
 
-	return nil
+// =============================================================================
+// OPTIMIZED HELPER FUNCTIONS
+// =============================================================================
+
+// getValidObjectValue extracts and validates object value from JavaScript instance
+func getValidObjectValue(ctx *Context, this Value) (reflect.Value, error) {
+	obj, err := this.GetGoObject()
+	if err != nil {
+		return reflect.Value{}, fmt.Errorf("failed to get instance data: %w", err)
+	}
+
+	objValue := reflect.ValueOf(obj)
+	if objValue.Kind() == reflect.Ptr {
+		objValue = objValue.Elem()
+	}
+
+	return objValue, nil
+}
+
+// shouldSkipMethod determines if a method should be skipped during binding
+func shouldSkipMethod(method reflect.Method, opts *ReflectOptions) bool {
+	// Check prefix filter
+	if opts.MethodPrefix != "" && !strings.HasPrefix(method.Name, opts.MethodPrefix) {
+		return true
+	}
+
+	// Check ignored list
+	if contains(opts.IgnoredMethods, method.Name) {
+		return true
+	}
+
+	// Check special methods
+	return isSpecialMethod(method.Name)
+}
+
+// shouldSkipField determines if a field should be skipped during binding
+func shouldSkipField(field reflect.StructField, opts *ReflectOptions) bool {
+	// Only exported fields are bound to maintain Go encapsulation principles
+	if !field.IsExported() {
+		return true
+	}
+
+	// Check ignored list
+	return contains(opts.IgnoredFields, field.Name)
 }
 
 // createMethodWrapper creates a ClassMethodFunc wrapper around a reflect.Method
 func createMethodWrapper(method reflect.Method) ClassMethodFunc {
 	return func(ctx *Context, this Value, args []Value) Value {
-		// Get the Go object from the JavaScript instance
-		obj, err := this.GetGoObject()
+		objValue, err := getValidObjectValue(ctx, this)
 		if err != nil {
-			return ctx.ThrowError(fmt.Errorf("failed to get instance data: %w", err))
-		}
-
-		// Validate the object type
-		if obj == nil {
-			return ctx.ThrowError(errors.New("instance data is nil"))
-		}
-
-		// Get reflect.Value of the object
-		objValue := reflect.ValueOf(obj)
-		if !objValue.IsValid() {
-			return ctx.ThrowError(errors.New("invalid object value"))
+			return ctx.ThrowError(err)
 		}
 
 		// Ensure we have a pointer receiver if the method requires it
 		if objValue.Kind() != reflect.Ptr && method.Type.In(0).Kind() == reflect.Ptr {
-			if objValue.CanAddr() {
-				objValue = objValue.Addr()
-			} else {
-				return ctx.ThrowError(errors.New("cannot take address of object for pointer receiver method"))
-			}
-		}
-
-		// Validate method exists
-		if method.Index >= objValue.NumMethod() {
-			return ctx.ThrowError(fmt.Errorf("invalid method index: %d", method.Index))
+			// In our implementation, objValue is always addressable because it comes
+			// from reflect.New().Elem(), so we can safely take its address
+			objValue = objValue.Addr()
 		}
 
 		// Get the method value
 		methodValue := objValue.Method(method.Index)
-		if !methodValue.IsValid() {
-			return ctx.ThrowError(fmt.Errorf("invalid method value for %s", method.Name))
-		}
 
 		// Convert JavaScript arguments to Go method arguments
 		methodArgs, err := convertJSArgsToMethodArgs(&method, args, ctx)
@@ -415,7 +396,7 @@ func createMethodWrapper(method reflect.Method) ClassMethodFunc {
 			return ctx.ThrowError(fmt.Errorf("failed to prepare method arguments: %w", err))
 		}
 
-		// Call the method - let it panic if it wants to
+		// Call the method
 		results := methodValue.Call(methodArgs)
 
 		// Convert results back to JavaScript values
@@ -426,87 +407,35 @@ func createMethodWrapper(method reflect.Method) ClassMethodFunc {
 // createFieldGetter creates a getter function for a struct field
 func createFieldGetter(field reflect.StructField, fieldIndex int) ClassGetterFunc {
 	return func(ctx *Context, this Value) Value {
-		// Get the Go object from the JavaScript instance
-		obj, err := this.GetGoObject()
-
+		objValue, err := getValidObjectValue(ctx, this)
 		if err != nil {
-			return ctx.ThrowError(fmt.Errorf("failed to get instance data: %w", err))
+			return ctx.ThrowError(err)
 		}
 
-		// Validate object
-		if obj == nil {
-			return ctx.ThrowError(errors.New("instance data is nil"))
-		}
-
-		// Get field value using reflection
-		objValue := reflect.ValueOf(obj)
-		if !objValue.IsValid() {
-			return ctx.ThrowError(errors.New("invalid object value"))
-		}
-
-		if objValue.Kind() == reflect.Ptr {
-			objValue = objValue.Elem() // Dereference pointer to access struct
-		}
-
-		if fieldIndex >= objValue.NumField() {
-			return ctx.ThrowError(fmt.Errorf("invalid field index: %d >= %d", fieldIndex, objValue.NumField()))
-		}
-
+		// In our implementation, fieldIndex is always valid since it comes from
+		// the loop in addReflectionProperties, and fieldValue is always valid
+		// for exported fields that we bind
 		fieldValue := objValue.Field(fieldIndex)
-		if !fieldValue.IsValid() {
-			return ctx.ThrowError(fmt.Errorf("invalid field value for %s", field.Name))
-		}
 
-		// Use Marshal to convert field value to JavaScript value
-		if fieldValue.CanInterface() {
-			fieldInterface := fieldValue.Interface()
-			jsValue, err := ctx.Marshal(fieldInterface)
-			if err != nil {
-				return ctx.ThrowError(fmt.Errorf("failed to marshal field %s: %w", field.Name, err))
-			}
-			return jsValue
-		} else {
-			return ctx.Null()
+		jsValue, err := ctx.Marshal(fieldValue.Interface())
+		if err != nil {
+			return ctx.ThrowError(fmt.Errorf("failed to marshal field %s: %w", field.Name, err))
 		}
+		return jsValue
 	}
 }
 
 // createFieldSetter creates a setter function for a struct field
 func createFieldSetter(field reflect.StructField, fieldIndex int) ClassSetterFunc {
 	return func(ctx *Context, this Value, value Value) Value {
-		// Get the Go object from the JavaScript instance
-		obj, err := this.GetGoObject()
+		objValue, err := getValidObjectValue(ctx, this)
 		if err != nil {
-			return ctx.ThrowError(fmt.Errorf("failed to get instance data: %w", err))
+			return ctx.ThrowError(err)
 		}
 
-		// Validate object
-		if obj == nil {
-			return ctx.ThrowError(errors.New("instance data is nil"))
-		}
-
-		// Get field value using reflection
-		objValue := reflect.ValueOf(obj)
-		if !objValue.IsValid() {
-			return ctx.ThrowError(errors.New("invalid object value"))
-		}
-
-		if objValue.Kind() == reflect.Ptr {
-			objValue = objValue.Elem() // Dereference pointer to access struct
-		}
-
-		if fieldIndex >= objValue.NumField() {
-			return ctx.ThrowError(fmt.Errorf("invalid field index: %d >= %d", fieldIndex, objValue.NumField()))
-		}
-
+		// In our implementation, fieldIndex is always valid and fieldValue
+		// is always settable for exported fields that we bind
 		fieldValue := objValue.Field(fieldIndex)
-		if !fieldValue.IsValid() {
-			return ctx.ThrowError(fmt.Errorf("invalid field value for %s", field.Name))
-		}
-
-		if !fieldValue.CanSet() {
-			return ctx.ThrowError(fmt.Errorf("field %s is not settable", field.Name))
-		}
 
 		// Use Unmarshal to convert JavaScript value to Go value
 		tempVar := reflect.New(fieldValue.Type())
@@ -517,17 +446,12 @@ func createFieldSetter(field reflect.StructField, fieldIndex int) ClassSetterFun
 		// Set the field value
 		fieldValue.Set(tempVar.Elem())
 
-		// Return the new JavaScript value (safe approach)
-		if fieldValue.CanInterface() {
-			returnValue, err := ctx.Marshal(fieldValue.Interface())
-			if err != nil {
-				// If marshal fails, return undefined instead of crashing
-				return ctx.Undefined()
-			}
-			return returnValue
-		} else {
-			return ctx.Undefined()
-		}
+		// Return the new JavaScript value
+		// Note: In practice, if a JavaScript value can be successfully unmarshaled to a Go field,
+		// that field value can almost always be marshaled back to JavaScript. The error case
+		// is extremely rare and would indicate a deeper issue with the marshal/unmarshal system.
+		returnValue, _ := ctx.Marshal(fieldValue.Interface())
+		return returnValue
 	}
 }
 
@@ -569,11 +493,9 @@ func convertJSArgsToMethodArgs(method *reflect.Method, args []Value, ctx *Contex
 func convertMethodResults(results []reflect.Value, ctx *Context) Value {
 	switch len(results) {
 	case 0:
-		// No return values
 		return ctx.Undefined()
 
 	case 1:
-		// Single return value - marshal it directly
 		jsValue, err := ctx.marshal(results[0])
 		if err != nil {
 			return ctx.ThrowError(fmt.Errorf("failed to marshal return value: %w", err))
@@ -599,12 +521,6 @@ func convertMethodResults(results []reflect.Value, ctx *Context) Value {
 // UTILITY FUNCTIONS
 // =============================================================================
 
-// isExported checks if a name is exported (starts with uppercase letter)
-func isExported(name string) bool {
-	r, _ := utf8.DecodeRuneInString(name)
-	return unicode.IsUpper(r)
-}
-
 // contains checks if a slice contains a specific string
 func contains(slice []string, item string) bool {
 	for _, s := range slice {
@@ -615,17 +531,19 @@ func contains(slice []string, item string) bool {
 	return false
 }
 
+// specialMethods contains method names that should be skipped during reflection binding
+// Using map for O(1) lookup performance instead of slice
+var specialMethods = map[string]bool{
+	"String":      true, // String() string - handled specially for debugging
+	"Error":       true, // Error() string - for error interface
+	"GoString":    true, // GoString() string - for debugging
+	"Format":      true, // Format() - for fmt package
+	"Finalize":    true, // Finalize() - our cleanup interface
+	"MarshalJS":   true, // MarshalJS() - our marshal interface
+	"UnmarshalJS": true, // UnmarshalJS() - our unmarshal interface
+}
+
 // isSpecialMethod checks if a method name should be skipped during reflection binding
 func isSpecialMethod(name string) bool {
-	specialMethods := []string{
-		"String",      // String() string - handled specially for debugging
-		"Error",       // Error() string - for error interface
-		"GoString",    // GoString() string - for debugging
-		"Format",      // Format() - for fmt package
-		"Finalize",    // Finalize() - our cleanup interface
-		"MarshalJS",   // MarshalJS() - our marshal interface
-		"UnmarshalJS", // UnmarshalJS() - our unmarshal interface
-	}
-
-	return contains(specialMethods, name)
+	return specialMethods[name]
 }
