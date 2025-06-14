@@ -35,45 +35,6 @@ we prebuilt quickjs static library for the following platforms:
 | v0.2.x     | v2023-12-09 |
 | v0.1.x     | v2021-03-27 |
 
-## Breaking Changes
-
-### v0.5.x
-
-**Collection API Removal**: The main goal of this project is to provide bindings for the QuickJS C API, therefore collection-related APIs have been removed. The following methods are no longer available:
-
-- `ctx.Array()` - Use `ctx.Eval("[]")` or `ctx.Object()` instead
-- `ctx.Map()` - Use `ctx.Eval("new Map()")` instead  
-- `ctx.Set()` - Use `ctx.Eval("new Set()")` instead
-- `value.ToArray()` - Use direct `Value` operations instead
-- `value.ToMap()` - Use direct `Value` operations instead
-- `value.ToSet()` - Use direct `Value` operations instead
-- `value.IsMap()` - Use `value.GlobalInstanceof("Map")` instead
-- `value.IsSet()` - Use `value.GlobalInstanceof("Set")` instead
-
-**Migration Guide:**
-
-```go
-// Before (v0.4.x and earlier)
-arr := ctx.Array()
-arr.Set("0", ctx.String("item"))
-
-mapObj := ctx.Map()
-mapObj.Set("key", ctx.String("value"))
-
-setObj := ctx.Set()
-setObj.Add(ctx.String("item"))
-
-// After (v0.5.x)
-arr, _ := ctx.Eval("[]")
-arr.Set("0", ctx.String("item"))
-arr.Set("length", ctx.Int32(1))
-
-mapObj, _ := ctx.Eval("new Map()")
-mapObj.Call("set", ctx.String("key"), ctx.String("value"))
-
-setObj, _ := ctx.Eval("new Set()")
-setObj.Call("add", ctx.String("item"))
-```
 
 ## Features
 
@@ -84,6 +45,7 @@ setObj.Call("add", ctx.String("item"))
 - Simple exception throwing and catching
 - **Marshal/Unmarshal Go values to/from JavaScript values**
 - **Full TypedArray support (Int8Array, Uint8Array, Float32Array, etc.)**
+- **Class Binding with manual and automatic reflection-based approaches**
 
 ## Guidelines
 
@@ -112,13 +74,7 @@ import (
 
 func main() {
     // Create a new runtime
-    rt := quickjs.NewRuntime(
-        quickjs.WithExecuteTimeout(30),
-        quickjs.WithMemoryLimit(128*1024),
-        quickjs.WithGCThreshold(256*1024),
-        quickjs.WithMaxStackSize(65534),
-        quickjs.WithCanBlock(true),
-    )
+    rt := quickjs.NewRuntime()
     defer rt.Close()
 
     // Create a new context
@@ -778,6 +734,349 @@ When unmarshaling into `interface{}`, the following types are used:
 - `map[string]interface{}` for Object
 - `*big.Int` for BigInt
 - `[]byte` for ArrayBuffer
+
+### Class Binding
+
+QuickJS-Go provides powerful class binding capabilities that allow you to seamlessly bridge Go structs to JavaScript classes.
+
+#### Manual Class Binding
+
+Create JavaScript classes manually with full control over methods and properties:
+
+```go
+package main
+
+import (
+    "fmt"
+    "math"
+    "github.com/buke/quickjs-go"
+)
+
+type Point struct {
+    X, Y float64
+}
+
+func (p *Point) Distance() float64 {
+    return math.Sqrt(p.X*p.X + p.Y*p.Y)
+}
+
+func (p *Point) Move(dx, dy float64) {
+    p.X += dx
+    p.Y += dy
+}
+
+func main() {
+    rt := quickjs.NewRuntime()
+    defer rt.Close()
+    ctx := rt.NewContext()
+    defer ctx.Close()
+
+    // Create Point class using ClassBuilder
+    pointConstructor, _, err := quickjs.NewClassBuilder("Point").
+        Constructor(func(ctx *quickjs.Context, newTarget quickjs.Value, args []quickjs.Value) quickjs.Value {
+            x, y := 0.0, 0.0
+            if len(args) > 0 { x = args[0].ToFloat64() }
+            if len(args) > 1 { y = args[1].ToFloat64() }
+            
+            point := &Point{X: x, Y: y}
+            return newTarget.NewInstance(point)
+        }).
+        Property("x", 
+            func(ctx *quickjs.Context, this quickjs.Value) quickjs.Value {
+                point, _ := this.GetGoObject()
+                return ctx.Float64(point.(*Point).X)
+            },
+            func(ctx *quickjs.Context, this quickjs.Value, value quickjs.Value) quickjs.Value {
+                point, _ := this.GetGoObject()
+                point.(*Point).X = value.ToFloat64()
+                return value
+            }).
+        Property("y",
+            func(ctx *quickjs.Context, this quickjs.Value) quickjs.Value {
+                point, _ := this.GetGoObject()
+                return ctx.Float64(point.(*Point).Y)
+            },
+            func(ctx *quickjs.Context, this quickjs.Value, value quickjs.Value) quickjs.Value {
+                point, _ := this.GetGoObject()
+                point.(*Point).Y = value.ToFloat64()
+                return value
+            }).
+        Method("distance", func(ctx *quickjs.Context, this quickjs.Value, args []quickjs.Value) quickjs.Value {
+            point, _ := this.GetGoObject()
+            return ctx.Float64(point.(*Point).Distance())
+        }).
+        Method("move", func(ctx *quickjs.Context, this quickjs.Value, args []quickjs.Value) quickjs.Value {
+            point, _ := this.GetGoObject()
+            dx, dy := 0.0, 0.0
+            if len(args) > 0 { dx = args[0].ToFloat64() }
+            if len(args) > 1 { dy = args[1].ToFloat64() }
+            point.(*Point).Move(dx, dy)
+            return ctx.Undefined()
+        }).
+        Build(ctx)
+
+    if err != nil {
+        panic(err)
+    }
+
+    // Register the class
+    ctx.Globals().Set("Point", pointConstructor)
+
+    // Use in JavaScript
+    result, _ := ctx.Eval(`
+        const p = new Point(3, 4);
+        const dist1 = p.distance();
+        p.move(1, 1);
+        const dist2 = p.distance();
+        
+        ({ 
+            initial: dist1, 
+            afterMove: dist2, 
+            x: p.x, 
+            y: p.y 
+        });
+    `)
+    defer result.Free()
+    
+    fmt.Println("Result:", result.JSONStringify())
+}
+```
+
+#### Automatic Class Binding with Reflection
+
+Automatically generate JavaScript classes from Go structs using reflection:
+
+```go
+package main
+
+import (
+    "fmt"
+    "github.com/buke/quickjs-go"
+)
+
+type User struct {
+    ID        int64     `js:"id"`
+    Name      string    `js:"name"`
+    Email     string    `json:"email_address"`
+    Age       int       `js:"age"`
+    IsActive  bool      `js:"is_active"`
+    Scores    []float32 `js:"scores"`    // Becomes Float32Array
+    private   string    // Not accessible
+    Secret    string    `js:"-"`         // Explicitly ignored
+}
+
+func (u *User) GetFullInfo() string {
+    return fmt.Sprintf("%s (%s) - Age: %d", u.Name, u.Email, u.Age)
+}
+
+func (u *User) UpdateEmail(newEmail string) {
+    u.Email = newEmail
+}
+
+func (u *User) AddScore(score float32) {
+    u.Scores = append(u.Scores, score)
+}
+
+func main() {
+    rt := quickjs.NewRuntime()
+    defer rt.Close()
+    ctx := rt.NewContext()
+    defer ctx.Close()
+
+    // Automatically create User class from struct
+    userConstructor, _, err := ctx.BindClass(&User{})
+    if err != nil {
+        panic(err)
+    }
+
+    ctx.Globals().Set("User", userConstructor)
+
+    // Use with positional arguments
+    result1, _ := ctx.Eval(`
+        const user1 = new User(1, "Alice", "alice@example.com", 25, true, [95.5, 87.2]);
+        user1.GetFullInfo();
+    `)
+    defer result1.Free()
+    fmt.Println("Positional:", result1.String())
+
+    // Use with named arguments (object parameter)
+    result2, _ := ctx.Eval(`
+        const user2 = new User({
+            id: 2,
+            name: "Bob",
+            email_address: "bob@example.com",
+            age: 30,
+            is_active: true,
+            scores: [88.0, 92.5, 85.0]
+        });
+        
+        // Call methods
+        user2.UpdateEmail("bob.smith@example.com");
+        user2.AddScore(95.0);
+        
+        ({
+            info: user2.GetFullInfo(),
+            email: user2.email_address,
+            scoresType: user2.scores instanceof Float32Array,
+            scoresLength: user2.scores.length
+        });
+    `)
+    defer result2.Free()
+    fmt.Println("Named:", result2.JSONStringify())
+}
+```
+
+#### Advanced Reflection Options
+
+Customize automatic binding with filtering and configuration options:
+
+```go
+package main
+
+import (
+    "fmt"
+    "github.com/buke/quickjs-go"
+)
+
+type APIClient struct {
+    BaseURL    string `js:"baseUrl"`
+    APIKey     string `js:"-"`          // Hidden from JavaScript
+    Version    string `js:"version"`
+    UserAgent  string `js:"userAgent"`
+}
+
+func (c *APIClient) Get(endpoint string) string {
+    return fmt.Sprintf("GET %s%s", c.BaseURL, endpoint)
+}
+
+func (c *APIClient) Post(endpoint string, data interface{}) string {
+    return fmt.Sprintf("POST %s%s with data", c.BaseURL, endpoint)
+}
+
+func (c *APIClient) InternalMethod() string {
+    return "This should be hidden"
+}
+
+func main() {
+    rt := quickjs.NewRuntime()
+    defer rt.Close()
+    ctx := rt.NewContext()
+    defer ctx.Close()
+
+    // Create class with custom options
+    clientConstructor, _, err := ctx.BindClass(&APIClient{},
+        quickjs.WithMethodPrefix("Get"), // Only include Get* and Post* methods
+        quickjs.WithIgnoredMethods("InternalMethod"), // Explicitly ignore methods
+        quickjs.WithIgnoredFields("APIKey"), // Ignore additional fields beyond tags
+    )
+    if err != nil {
+        panic(err)
+    }
+
+    ctx.Globals().Set("APIClient", clientConstructor)
+
+    result, _ := ctx.Eval(`
+        const client = new APIClient({
+            baseUrl: "https://api.example.com/v1/",
+            version: "1.0",
+            userAgent: "MyApp/1.0"
+        });
+        
+        ({
+            get: client.Get("/users"),
+            post: typeof client.Post !== 'undefined' ? client.Post("/users", {name: "test"}) : "undefined",
+            hasInternal: typeof client.InternalMethod !== 'undefined',
+            hasAPIKey: typeof client.APIKey !== 'undefined'
+        });
+    `)
+    defer result.Free()
+    
+    fmt.Println("Filtered binding:", result.JSONStringify())
+}
+```
+
+#### Class Inheritance Support
+
+JavaScript classes can inherit from Go-registered classes:
+
+```go
+package main
+
+import (
+    "fmt"
+    "github.com/buke/quickjs-go"
+)
+
+type Vehicle struct {
+    Brand string `js:"brand"`
+    Model string `js:"model"`
+}
+
+func (v *Vehicle) Start() string {
+    return fmt.Sprintf("Starting %s %s", v.Brand, v.Model)
+}
+
+func main() {
+    rt := quickjs.NewRuntime()
+    defer rt.Close()
+    ctx := rt.NewContext()
+    defer ctx.Close()
+
+    // Register base Vehicle class
+    vehicleConstructor, _, _ := ctx.BindClass(&Vehicle{})
+    ctx.Globals().Set("Vehicle", vehicleConstructor)
+
+    // Create Car class that extends Vehicle in JavaScript
+    _, err := ctx.Eval(`
+        class Car extends Vehicle {
+            constructor(brand, model, doors) {
+                super({ brand, model });
+                this.doors = doors;
+            }
+            
+            getInfo() {
+                return this.Start() + " with " + this.doors + " doors";
+            }
+        }
+        
+        // Test inheritance
+        const car = new Car("Toyota", "Camry", 4);
+        globalThis.result = car.getInfo();
+    `)
+    if err != nil {
+        panic(err)
+    }
+
+    result := ctx.Globals().Get("result")
+    defer result.Free()
+    fmt.Println("Inheritance:", result.String())
+}
+```
+
+#### Features
+
+**Manual Class Binding:**
+- Full control over class structure and behavior
+- Support for instance and static methods/properties
+- Read-only, write-only, and read-write properties
+- Constructor with `new.target` support for inheritance
+- Automatic memory management with finalizers
+
+**Automatic Reflection Binding:**
+- Zero-boilerplate class generation from Go structs
+- Smart constructor supporting both positional and named parameters
+- Automatic property mapping with `js` and `json` tag support
+- Method binding with proper parameter/return value conversion
+- TypedArray support for numeric slice fields
+- Configurable filtering for methods and fields
+
+**Shared Features:**
+- Full JavaScript inheritance support
+- Seamless integration with Marshal/Unmarshal system
+- TypedArray support for binary data
+- Automatic memory management
+- Thread-safe operation
+- Class instance validation and type checking
 
 ### Bytecode Compiler
 
