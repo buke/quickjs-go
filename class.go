@@ -43,22 +43,6 @@ func getConstructorClassID(constructor C.JSValue) (uint32, bool) {
 }
 
 // =============================================================================
-// CLASS BINDING CONFIGURATION CONSTANTS
-// =============================================================================
-
-// Constants for class binding configuration
-const (
-	// Default parameter counts for different function types
-	DefaultConstructorParams = 2 // newTarget + arguments
-	DefaultMethodParams      = 0 // Auto-detect
-	DefaultGetterParams      = 0 // No parameters for getters
-	DefaultSetterParams      = 1 // One parameter for setters
-
-	// QuickJS limits
-	MaxClassID = 1 << 16 // QuickJS class ID hard limit
-)
-
-// =============================================================================
 // CLASS FINALIZER INTERFACE
 // =============================================================================
 
@@ -153,34 +137,23 @@ func (cb *ClassBuilder) Constructor(fn ClassConstructorFunc) *ClassBuilder {
 // Method adds an instance method to the class
 // Instance methods are called on object instances
 func (cb *ClassBuilder) Method(name string, fn ClassMethodFunc) *ClassBuilder {
-	return cb.MethodWithLength(name, fn, DefaultMethodParams)
+	cb.methods = append(cb.methods, MethodEntry{
+		Name:   name,
+		Func:   fn,
+		Static: false,
+		Length: 0,
+	})
+	return cb
 }
 
 // StaticMethod adds a static method to the class
 // Static methods are called on the constructor function itself
 func (cb *ClassBuilder) StaticMethod(name string, fn ClassMethodFunc) *ClassBuilder {
-	return cb.StaticMethodWithLength(name, fn, DefaultMethodParams)
-}
-
-// MethodWithLength adds an instance method with explicit parameter count
-// Useful for optimization when parameter count is known
-func (cb *ClassBuilder) MethodWithLength(name string, fn ClassMethodFunc, length int) *ClassBuilder {
-	cb.methods = append(cb.methods, MethodEntry{
-		Name:   name,
-		Func:   fn,
-		Static: false,
-		Length: length,
-	})
-	return cb
-}
-
-// StaticMethodWithLength adds a static method with explicit parameter count
-func (cb *ClassBuilder) StaticMethodWithLength(name string, fn ClassMethodFunc, length int) *ClassBuilder {
 	cb.methods = append(cb.methods, MethodEntry{
 		Name:   name,
 		Func:   fn,
 		Static: true,
-		Length: length,
+		Length: 0,
 	})
 	return cb
 }
@@ -299,9 +272,6 @@ func (ctx *Context) createClass(builder *ClassBuilder) (Value, uint32, error) {
 
 		// Determine length parameter
 		length := method.Length
-		if length < 0 {
-			length = DefaultMethodParams
-		}
 
 		// Convert static flag
 		isStatic := 0

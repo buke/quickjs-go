@@ -1028,41 +1028,41 @@ func TestReadOnlyAndWriteOnlyProperties(t *testing.T) {
 	}
 }
 
-// TestMethodLengthDefault tests the default method length parameter handling
-func TestMethodLengthDefault(t *testing.T) {
-	rt := NewRuntime()
-	defer rt.Close()
+// // TestMethodLengthDefault tests the default method length parameter handling
+// func TestMethodLengthDefault(t *testing.T) {
+// 	rt := NewRuntime()
+// 	defer rt.Close()
 
-	context := rt.NewContext()
-	defer context.Close()
+// 	context := rt.NewContext()
+// 	defer context.Close()
 
-	// Create a class with method using negative length (should default to DefaultMethodParams)
-	constructor, _, err := NewClassBuilder("LengthTestClass").
-		Constructor(func(ctx *Context, newTarget Value, args []Value) Value {
-			return newTarget.NewInstance(&Point{X: 0, Y: 0})
-		}).
-		MethodWithLength("testMethod", func(ctx *Context, this Value, args []Value) Value {
-			return ctx.Int32(int32(len(args)))
-		}, -1). // Negative length should trigger default
-		Build(context)
+// 	// Create a class with method using negative length (should default to DefaultMethodParams)
+// 	constructor, _, err := NewClassBuilder("LengthTestClass").
+// 		Constructor(func(ctx *Context, newTarget Value, args []Value) Value {
+// 			return newTarget.NewInstance(&Point{X: 0, Y: 0})
+// 		}).
+// 		MethodWithLength("testMethod", func(ctx *Context, this Value, args []Value) Value {
+// 			return ctx.Int32(int32(len(args)))
+// 		}, -1). // Negative length should trigger default
+// 		Build(context)
 
-	if err != nil {
-		t.Fatalf("Failed to create class with negative method length: %v", err)
-	}
+// 	if err != nil {
+// 		t.Fatalf("Failed to create class with negative method length: %v", err)
+// 	}
 
-	context.Globals().Set("LengthTestClass", constructor)
+// 	context.Globals().Set("LengthTestClass", constructor)
 
-	// Test that the method works correctly (the default length doesn't affect functionality)
-	result, err := context.Eval(`
-        let obj = new LengthTestClass();
-        obj.testMethod(1, 2, 3); // Should return 3 (number of arguments)
-    `)
-	if err != nil {
-		t.Fatalf("Failed to test method with default length: %v", err)
-	}
-	defer result.Free()
+// 	// Test that the method works correctly (the default length doesn't affect functionality)
+// 	result, err := context.Eval(`
+//         let obj = new LengthTestClass();
+//         obj.testMethod(1, 2, 3); // Should return 3 (number of arguments)
+//     `)
+// 	if err != nil {
+// 		t.Fatalf("Failed to test method with default length: %v", err)
+// 	}
+// 	defer result.Free()
 
-	if result.Int32() != 3 {
-		t.Errorf("Expected method to receive 3 arguments, got %d", result.Int32())
-	}
-}
+// 	if result.Int32() != 3 {
+// 		t.Errorf("Expected method to receive 3 arguments, got %d", result.Int32())
+// 	}
+// }
