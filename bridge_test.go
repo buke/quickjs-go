@@ -611,9 +611,9 @@ func TestBridgeClassGetterErrors(t *testing.T) {
 			Constructor(func(ctx *Context, newTarget Value, args []Value) Value {
 				return newTarget.NewInstance(&Point{X: 1, Y: 2})
 			}).
-			ReadOnlyProperty("testProp", func(ctx *Context, this Value) Value {
+			Property("testProp", func(ctx *Context, this Value) Value {
 				return ctx.String("getter called")
-			}).
+			}, nil).
 			Build(ctx)
 		require.NoError(t, err)
 
@@ -665,9 +665,9 @@ func TestBridgeClassGetterErrors(t *testing.T) {
 			Constructor(func(ctx *Context, newTarget Value, args []Value) Value {
 				return newTarget.NewInstance(&Point{X: 1, Y: 2})
 			}).
-			ReadOnlyProperty("testProp", func(ctx *Context, this Value) Value {
+			Property("testProp", func(ctx *Context, this Value) Value {
 				return ctx.String("getter called")
-			}).
+			}, nil).
 			Build(ctx)
 		require.NoError(t, err)
 
@@ -716,9 +716,9 @@ func TestBridgeClassGetterErrors(t *testing.T) {
 			Constructor(func(ctx *Context, newTarget Value, args []Value) Value {
 				return newTarget.NewInstance(&Point{X: 1, Y: 2})
 			}).
-			ReadOnlyProperty("testProp", func(ctx *Context, this Value) Value {
+			Property("testProp", func(ctx *Context, this Value) Value {
 				return ctx.String("getter called")
-			}).
+			}, nil).
 			Build(ctx)
 		require.NoError(t, err)
 
@@ -811,7 +811,7 @@ func TestBridgeClassSetterErrors(t *testing.T) {
 			Constructor(func(ctx *Context, newTarget Value, args []Value) Value {
 				return newTarget.NewInstance(&Point{X: 1, Y: 2})
 			}).
-			WriteOnlyProperty("testProp", func(ctx *Context, this Value, value Value) Value {
+			Property("testProp", nil, func(ctx *Context, this Value, value Value) Value {
 				return ctx.Undefined()
 			}).
 			Build(ctx)
@@ -866,7 +866,7 @@ func TestBridgeClassSetterErrors(t *testing.T) {
 			Constructor(func(ctx *Context, newTarget Value, args []Value) Value {
 				return newTarget.NewInstance(&Point{X: 1, Y: 2})
 			}).
-			WriteOnlyProperty("testProp", func(ctx *Context, this Value, value Value) Value {
+			Property("testProp", nil, func(ctx *Context, this Value, value Value) Value {
 				return ctx.Undefined()
 			}).
 			Build(ctx)
@@ -918,7 +918,7 @@ func TestBridgeClassSetterErrors(t *testing.T) {
 			Constructor(func(ctx *Context, newTarget Value, args []Value) Value {
 				return newTarget.NewInstance(&Point{X: 1, Y: 2})
 			}).
-			WriteOnlyProperty("testProp", func(ctx *Context, this Value, value Value) Value {
+			Property("testProp", nil, func(ctx *Context, this Value, value Value) Value {
 				return ctx.Undefined()
 			}).
 			Build(ctx)

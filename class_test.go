@@ -925,11 +925,11 @@ func TestReadOnlyAndWriteOnlyProperties(t *testing.T) {
 		Constructor(func(ctx *Context, newTarget Value, args []Value) Value {
 			return newTarget.NewInstance(&Point{X: 10, Y: 20})
 		}).
-		ReadOnlyProperty("readOnlyX", func(ctx *Context, this Value) Value {
+		Property("readOnlyX", func(ctx *Context, this Value) Value {
 			obj, _ := this.GetGoObject()
 			point := obj.(*Point)
 			return ctx.Float64(point.X)
-		}).
+		}, nil).
 		Build(ctx)
 
 	if err != nil {
@@ -960,17 +960,17 @@ func TestReadOnlyAndWriteOnlyProperties(t *testing.T) {
 		Constructor(func(ctx *Context, newTarget Value, args []Value) Value {
 			return newTarget.NewInstance(&Point{X: 0, Y: 0})
 		}).
-		WriteOnlyProperty("writeOnlyX", func(ctx *Context, this Value, value Value) Value {
+		Property("writeOnlyX", nil, func(ctx *Context, this Value, value Value) Value {
 			obj, _ := this.GetGoObject()
 			point := obj.(*Point)
 			point.X = value.Float64()
 			return ctx.Undefined()
 		}).
-		ReadOnlyProperty("getX", func(ctx *Context, this Value) Value {
+		Property("getX", func(ctx *Context, this Value) Value {
 			obj, _ := this.GetGoObject()
 			point := obj.(*Point)
 			return ctx.Float64(point.X)
-		}).
+		}, nil).
 		Build(ctx)
 
 	if err != nil {
@@ -1000,9 +1000,9 @@ func TestReadOnlyAndWriteOnlyProperties(t *testing.T) {
 		Constructor(func(ctx *Context, newTarget Value, args []Value) Value {
 			return newTarget.NewInstance(&Point{X: 0, Y: 0})
 		}).
-		StaticReadOnlyProperty("VERSION", func(ctx *Context, this Value) Value {
+		StaticProperty("VERSION", func(ctx *Context, this Value) Value {
 			return ctx.String("1.0.0")
-		}).
+		}, nil).
 		Build(ctx)
 
 	if err != nil {
@@ -1027,42 +1027,3 @@ func TestReadOnlyAndWriteOnlyProperties(t *testing.T) {
 			result3.GetIdx(0).String(), result3.GetIdx(1).String())
 	}
 }
-
-// // TestMethodLengthDefault tests the default method length parameter handling
-// func TestMethodLengthDefault(t *testing.T) {
-// 	rt := NewRuntime()
-// 	defer rt.Close()
-
-// 	context := rt.NewContext()
-// 	defer context.Close()
-
-// 	// Create a class with method using negative length (should default to DefaultMethodParams)
-// 	constructor, _, err := NewClassBuilder("LengthTestClass").
-// 		Constructor(func(ctx *Context, newTarget Value, args []Value) Value {
-// 			return newTarget.NewInstance(&Point{X: 0, Y: 0})
-// 		}).
-// 		MethodWithLength("testMethod", func(ctx *Context, this Value, args []Value) Value {
-// 			return ctx.Int32(int32(len(args)))
-// 		}, -1). // Negative length should trigger default
-// 		Build(context)
-
-// 	if err != nil {
-// 		t.Fatalf("Failed to create class with negative method length: %v", err)
-// 	}
-
-// 	context.Globals().Set("LengthTestClass", constructor)
-
-// 	// Test that the method works correctly (the default length doesn't affect functionality)
-// 	result, err := context.Eval(`
-//         let obj = new LengthTestClass();
-//         obj.testMethod(1, 2, 3); // Should return 3 (number of arguments)
-//     `)
-// 	if err != nil {
-// 		t.Fatalf("Failed to test method with default length: %v", err)
-// 	}
-// 	defer result.Free()
-
-// 	if result.Int32() != 3 {
-// 		t.Errorf("Expected method to receive 3 arguments, got %d", result.Int32())
-// 	}
-// }

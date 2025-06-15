@@ -170,47 +170,12 @@ func (cb *ClassBuilder) Property(name string, getter ClassGetterFunc, setter Cla
 	return cb
 }
 
-// ReadOnlyProperty adds a read-only property to the class instance
-// Only getter is provided, property cannot be modified from JavaScript
-func (cb *ClassBuilder) ReadOnlyProperty(name string, getter ClassGetterFunc) *ClassBuilder {
-	cb.properties = append(cb.properties, PropertyEntry{
-		Name:   name,
-		Getter: getter,
-		Setter: nil,
-		Static: false,
-	})
-	return cb
-}
-
-// WriteOnlyProperty adds a write-only property to the class instance
-// Only setter is provided, property cannot be read from JavaScript
-func (cb *ClassBuilder) WriteOnlyProperty(name string, setter ClassSetterFunc) *ClassBuilder {
-	cb.properties = append(cb.properties, PropertyEntry{
-		Name:   name,
-		Getter: nil,
-		Setter: setter,
-		Static: false,
-	})
-	return cb
-}
-
 // StaticProperty adds a read-write static property to the class constructor
 func (cb *ClassBuilder) StaticProperty(name string, getter ClassGetterFunc, setter ClassSetterFunc) *ClassBuilder {
 	cb.properties = append(cb.properties, PropertyEntry{
 		Name:   name,
 		Getter: getter,
 		Setter: setter,
-		Static: true,
-	})
-	return cb
-}
-
-// StaticReadOnlyProperty adds a read-only static property to the class constructor
-func (cb *ClassBuilder) StaticReadOnlyProperty(name string, getter ClassGetterFunc) *ClassBuilder {
-	cb.properties = append(cb.properties, PropertyEntry{
-		Name:   name,
-		Getter: getter,
-		Setter: nil,
 		Static: true,
 	})
 	return cb
