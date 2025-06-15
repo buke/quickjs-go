@@ -81,7 +81,7 @@ func (ctx *Context) BindClass(structType interface{}, options ...ReflectOption) 
 //	if err != nil { return err }
 //	constructor, classID, err := builder.
 //	    StaticMethod("Create", myCreateFunc).
-//	    ReadOnlyProperty("version", myVersionGetter).
+//	    ReadOnlyAccessor("version", myVersionGetter).
 //	    Build(ctx)
 func (ctx *Context) BindClassBuilder(structType interface{}, options ...ReflectOption) (*ClassBuilder, error) {
 	// Parse options with defaults (zero values are appropriate defaults)
@@ -159,8 +159,8 @@ func buildClassFromReflection(className string, typ reflect.Type, opts *ReflectO
 		return newTarget.NewInstance(instance)
 	})
 
-	// Add properties (only exported fields)
-	addReflectionProperties(builder, typ, opts)
+	// Add accessors (only exported fields)
+	addReflectionAccessors(builder, typ, opts)
 
 	// Add methods (only exported methods)
 	addReflectionMethods(builder, typ, opts)
@@ -263,9 +263,9 @@ func addReflectionMethods(builder *ClassBuilder, typ reflect.Type, opts *Reflect
 	}
 }
 
-// addReflectionProperties scans struct fields and adds them as properties
+// addReflectionAccessors scans struct fields and adds them as accessors
 // Only exported fields are processed to maintain Go encapsulation principles
-func addReflectionProperties(builder *ClassBuilder, typ reflect.Type, opts *ReflectOptions) {
+func addReflectionAccessors(builder *ClassBuilder, typ reflect.Type, opts *ReflectOptions) {
 	for i := 0; i < typ.NumField(); i++ {
 		field := typ.Field(i)
 
@@ -283,8 +283,8 @@ func addReflectionProperties(builder *ClassBuilder, typ reflect.Type, opts *Refl
 		getter := createFieldGetter(field, i)
 		setter := createFieldSetter(field, i)
 
-		// Add property to builder (instance properties by default)
-		builder.Property(tagInfo.Name, getter, setter)
+		// Add accessor to builder (instance accessors by default)
+		builder.Accessor(tagInfo.Name, getter, setter)
 	}
 }
 
@@ -375,7 +375,7 @@ func createFieldGetter(field reflect.StructField, fieldIndex int) ClassGetterFun
 		}
 
 		// In our implementation, fieldIndex is always valid since it comes from
-		// the loop in addReflectionProperties, and fieldValue is always valid
+		// the loop in addReflectionAccessors, and fieldValue is always valid
 		// for exported fields that we bind
 		fieldValue := objValue.Field(fieldIndex)
 

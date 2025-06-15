@@ -124,13 +124,13 @@ JSValue GoClassMethodProxy(JSContext *ctx, JSValueConst this_val,
     return goClassMethodProxy(ctx, this_val, argc, argv, magic);
 }
 
-// Property getter proxy
+// Accessor getter proxy
 // Corresponds to QuickJS JSCFunctionType.getter_magic
 JSValue GoClassGetterProxy(JSContext *ctx, JSValueConst this_val, int magic) {
     return goClassGetterProxy(ctx, this_val, magic);
 }
 
-// Property setter proxy
+// Accessor setter proxy
 // Corresponds to QuickJS JSCFunctionType.setter_magic
 JSValue GoClassSetterProxy(JSContext *ctx, JSValueConst this_val, 
                           JSValueConst val, int magic) {
@@ -249,12 +249,12 @@ JSValue CreateCFunction(JSContext *ctx, const char *name,
 // Forward declarations
 JSValue BindMembersToObject(JSContext *ctx, JSValue obj,
                            const MethodEntry *methods, int method_count,
-                           const PropertyEntry *properties, int property_count,
+                           const AccessorEntry *accessors, int accessor_count,
                            int is_static);
 
 JSValue BindMethodToObject(JSContext *ctx, JSValue obj, const MethodEntry *method);
 
-JSValue BindPropertyToObject(JSContext *ctx, JSValue obj, const PropertyEntry *prop);
+JSValue BindAccessorToObject(JSContext *ctx, JSValue obj, const AccessorEntry *accessor);
 
 // CreateClass - Complete class creation function
 // This function handles all QuickJS class creation steps:
@@ -274,7 +274,7 @@ JSValue CreateClass(JSContext *ctx,
                    JSClassDef *class_def,      // Go layer manages memory
                    int32_t constructor_id,
                    const MethodEntry *methods, int method_count,
-                   const PropertyEntry *properties, int property_count) {
+                   const AccessorEntry *accessors, int accessor_count) {
     
     JSValue proto, constructor;
     JSRuntime *rt = JS_GetRuntime(ctx);
@@ -312,7 +312,7 @@ JSValue CreateClass(JSContext *ctx,
     
     // Step 5: Bind instance members to prototype
     JSValue proto_result = BindMembersToObject(ctx, proto, methods, method_count,
-                                              properties, property_count, 0);
+                                              accessors, accessor_count, 0);
     if (JS_IsException(proto_result)) {
         JS_FreeValue(ctx, proto);
         return proto_result;
@@ -334,7 +334,7 @@ JSValue CreateClass(JSContext *ctx,
     
     // Step 9: Bind static members to constructor
     JSValue constructor_result = BindMembersToObject(ctx, constructor, methods, method_count,
-                                                    properties, property_count, 1);
+                                                    accessors, accessor_count, 1);
     if (JS_IsException(constructor_result)) {
         JS_FreeValue(ctx, constructor);
         return constructor_result;
@@ -344,11 +344,11 @@ JSValue CreateClass(JSContext *ctx,
     return constructor;
 }
 
-// BindMembersToObject - Bind methods and properties to a JavaScript object
+// BindMembersToObject - Bind methods and accessors to a JavaScript object
 // is_static: 0 for instance members, 1 for static members
 JSValue BindMembersToObject(JSContext *ctx, JSValue obj,
                            const MethodEntry *methods, int method_count,
-                           const PropertyEntry *properties, int property_count,
+                           const AccessorEntry *accessors, int accessor_count,
                            int is_static) {
     // Bind methods
     for (int i = 0; i < method_count; i++) {
@@ -361,13 +361,13 @@ JSValue BindMembersToObject(JSContext *ctx, JSValue obj,
         }
     }
     
-    // Bind properties
-    for (int i = 0; i < property_count; i++) {
-        const PropertyEntry *prop = &properties[i];
-        if (prop->is_static == is_static) {
-            JSValue prop_result = BindPropertyToObject(ctx, obj, prop);
-            if (JS_IsException(prop_result)) {
-                return prop_result;
+    // Bind accessors
+    for (int i = 0; i < accessor_count; i++) {
+        const AccessorEntry *accessor = &accessors[i];
+        if (accessor->is_static == is_static) {
+            JSValue accessor_result = BindAccessorToObject(ctx, obj, accessor);
+            if (JS_IsException(accessor_result)) {
+                return accessor_result;
             }
         }
     }
@@ -395,28 +395,28 @@ JSValue BindMethodToObject(JSContext *ctx, JSValue obj, const MethodEntry *metho
     return JS_UNDEFINED;
 }
 
-// BindPropertyToObject - Bind a property to a JavaScript object
-JSValue BindPropertyToObject(JSContext *ctx, JSValue obj, const PropertyEntry *prop) {
-    JSAtom prop_atom = JS_NewAtom(ctx, prop->name);
+// BindAccessorToObject - Bind an accessor to a JavaScript object
+JSValue BindAccessorToObject(JSContext *ctx, JSValue obj, const AccessorEntry *accessor) {
+    JSAtom accessor_atom = JS_NewAtom(ctx, accessor->name);
     JSValue getter = JS_UNDEFINED;
     JSValue setter = JS_UNDEFINED;
     
     // Create getter
-    if (prop->getter_id != 0) {
-        getter = CreateCFunction(ctx, prop->name, 0,
-                                GetCFuncGetterMagic(), prop->getter_id);
+    if (accessor->getter_id != 0) {
+        getter = CreateCFunction(ctx, accessor->name, 0,
+                                GetCFuncGetterMagic(), accessor->getter_id);
         if (JS_IsException(getter)) {
-            JS_FreeAtom(ctx, prop_atom);
+            JS_FreeAtom(ctx, accessor_atom);
             return getter;
         }
     }
     
     // Create setter
-    if (prop->setter_id != 0) {
-        setter = CreateCFunction(ctx, prop->name, 1,
-                                GetCFuncSetterMagic(), prop->setter_id);
+    if (accessor->setter_id != 0) {
+        setter = CreateCFunction(ctx, accessor->name, 1,
+                                GetCFuncSetterMagic(), accessor->setter_id);
         if (JS_IsException(setter)) {
-            JS_FreeAtom(ctx, prop_atom);
+            JS_FreeAtom(ctx, accessor_atom);
             if (!JS_IsUndefined(getter)) {
                 JS_FreeValue(ctx, getter);
             }
@@ -424,16 +424,16 @@ JSValue BindPropertyToObject(JSContext *ctx, JSValue obj, const PropertyEntry *p
         }
     }
     
-    // Define property
-    int result = JS_DefinePropertyGetSet(ctx, obj, prop_atom, getter, setter,
+    // Define accessor
+    int result = JS_DefinePropertyGetSet(ctx, obj, accessor_atom, getter, setter,
                                         GetPropertyConfigurable());
     
-    JS_FreeAtom(ctx, prop_atom);
+    JS_FreeAtom(ctx, accessor_atom);
     
     if (result < 0) {
         if (!JS_IsUndefined(getter)) JS_FreeValue(ctx, getter);
         if (!JS_IsUndefined(setter)) JS_FreeValue(ctx, setter);
-        return JS_ThrowInternalError(ctx, "failed to bind property: %s", prop->name);
+        return JS_ThrowInternalError(ctx, "failed to bind accessor: %s", accessor->name);
     }
     
     return JS_UNDEFINED;
@@ -513,7 +513,7 @@ JSValue LoadModuleBytecode(JSContext *ctx, const uint8_t *buf, size_t buf_len, i
                 JS_FreeValue(ctx, obj);
                 return JS_EXCEPTION;
             }
-            js_module_set_import_meta(ctx, obj, FALSE, TRUE);
+            js_module_set_import_meta(ctx, obj, FALSE, FALSE);
             val = JS_EvalFunction(ctx, obj);
             val = js_std_await(ctx, val);
         } else {

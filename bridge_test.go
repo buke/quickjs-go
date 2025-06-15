@@ -606,12 +606,12 @@ func TestBridgeClassGetterErrors(t *testing.T) {
 		ctx := rt.NewContext()
 		defer ctx.Close()
 
-		// Create a class with getter property
+		// Create a class with getter accessor
 		constructor, _, err := NewClassBuilder("TestClass").
 			Constructor(func(ctx *Context, newTarget Value, args []Value) Value {
 				return newTarget.NewInstance(&Point{X: 1, Y: 2})
 			}).
-			Property("testProp", func(ctx *Context, this Value) Value {
+			Accessor("testProp", func(ctx *Context, this Value) Value {
 				return ctx.String("getter called")
 			}, nil).
 			Build(ctx)
@@ -660,12 +660,12 @@ func TestBridgeClassGetterErrors(t *testing.T) {
 		ctx := rt.NewContext()
 		defer ctx.Close()
 
-		// Create a class with getter property
+		// Create a class with getter accessor
 		constructor, _, err := NewClassBuilder("TestClass").
 			Constructor(func(ctx *Context, newTarget Value, args []Value) Value {
 				return newTarget.NewInstance(&Point{X: 1, Y: 2})
 			}).
-			Property("testProp", func(ctx *Context, this Value) Value {
+			Accessor("testProp", func(ctx *Context, this Value) Value {
 				return ctx.String("getter called")
 			}, nil).
 			Build(ctx)
@@ -711,12 +711,12 @@ func TestBridgeClassGetterErrors(t *testing.T) {
 		ctx := rt.NewContext()
 		defer ctx.Close()
 
-		// Create a class with getter property
+		// Create a class with getter accessor
 		constructor, _, err := NewClassBuilder("TestClass").
 			Constructor(func(ctx *Context, newTarget Value, args []Value) Value {
 				return newTarget.NewInstance(&Point{X: 1, Y: 2})
 			}).
-			Property("testProp", func(ctx *Context, this Value) Value {
+			Accessor("testProp", func(ctx *Context, this Value) Value {
 				return ctx.String("getter called")
 			}, nil).
 			Build(ctx)
@@ -806,12 +806,12 @@ func TestBridgeClassSetterErrors(t *testing.T) {
 		ctx := rt.NewContext()
 		defer ctx.Close()
 
-		// Create a class with setter property
+		// Create a class with setter accessor
 		constructor, _, err := NewClassBuilder("TestClass").
 			Constructor(func(ctx *Context, newTarget Value, args []Value) Value {
 				return newTarget.NewInstance(&Point{X: 1, Y: 2})
 			}).
-			Property("testProp", nil, func(ctx *Context, this Value, value Value) Value {
+			Accessor("testProp", nil, func(ctx *Context, this Value, value Value) Value {
 				return ctx.Undefined()
 			}).
 			Build(ctx)
@@ -861,12 +861,12 @@ func TestBridgeClassSetterErrors(t *testing.T) {
 		ctx := rt.NewContext()
 		defer ctx.Close()
 
-		// Create a class with setter property
+		// Create a class with setter accessor
 		constructor, _, err := NewClassBuilder("TestClass").
 			Constructor(func(ctx *Context, newTarget Value, args []Value) Value {
 				return newTarget.NewInstance(&Point{X: 1, Y: 2})
 			}).
-			Property("testProp", nil, func(ctx *Context, this Value, value Value) Value {
+			Accessor("testProp", nil, func(ctx *Context, this Value, value Value) Value {
 				return ctx.Undefined()
 			}).
 			Build(ctx)
@@ -913,12 +913,12 @@ func TestBridgeClassSetterErrors(t *testing.T) {
 		ctx := rt.NewContext()
 		defer ctx.Close()
 
-		// Create a class with setter property
+		// Create a class with setter accessor
 		constructor, _, err := NewClassBuilder("TestClass").
 			Constructor(func(ctx *Context, newTarget Value, args []Value) Value {
 				return newTarget.NewInstance(&Point{X: 1, Y: 2})
 			}).
-			Property("testProp", nil, func(ctx *Context, this Value, value Value) Value {
+			Accessor("testProp", nil, func(ctx *Context, this Value, value Value) Value {
 				return ctx.Undefined()
 			}).
 			Build(ctx)

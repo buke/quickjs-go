@@ -71,11 +71,11 @@ type ClassConstructorFunc func(ctx *Context, newTarget Value, args []Value) Valu
 // Corresponds to QuickJS JSCFunctionType.generic_magic
 type ClassMethodFunc func(ctx *Context, this Value, args []Value) Value
 
-// ClassGetterFunc represents property getter functions
+// ClassGetterFunc represents accessor getter functions
 // Corresponds to QuickJS JSCFunctionType.getter_magic
 type ClassGetterFunc func(ctx *Context, this Value) Value
 
-// ClassSetterFunc represents property setter functions
+// ClassSetterFunc represents accessor setter functions
 // Returns the set value or an exception
 // Corresponds to QuickJS JSCFunctionType.setter_magic
 type ClassSetterFunc func(ctx *Context, this Value, value Value) Value
@@ -92,12 +92,12 @@ type MethodEntry struct {
 	Length int             // Expected parameter count, -1 for auto-detection
 }
 
-// PropertyEntry represents a property binding configuration
-type PropertyEntry struct {
-	Name   string          // Property name in JavaScript
+// AccessorEntry represents an accessor binding configuration
+type AccessorEntry struct {
+	Name   string          // Accessor name in JavaScript
 	Getter ClassGetterFunc // Optional getter function
 	Setter ClassSetterFunc // Optional setter function
-	Static bool            // true for static properties, false for instance properties
+	Static bool            // true for static accessors, false for instance accessors
 }
 
 // =============================================================================
@@ -110,16 +110,16 @@ type ClassBuilder struct {
 	name        string
 	constructor ClassConstructorFunc
 	methods     []MethodEntry
-	properties  []PropertyEntry
+	accessors   []AccessorEntry
 }
 
 // NewClassBuilder creates a new ClassBuilder with the specified name
 // This is the entry point for building JavaScript classes
 func NewClassBuilder(name string) *ClassBuilder {
 	return &ClassBuilder{
-		name:       name,
-		methods:    make([]MethodEntry, 0),
-		properties: make([]PropertyEntry, 0),
+		name:      name,
+		methods:   make([]MethodEntry, 0),
+		accessors: make([]AccessorEntry, 0),
 	}
 }
 
@@ -158,10 +158,11 @@ func (cb *ClassBuilder) StaticMethod(name string, fn ClassMethodFunc) *ClassBuil
 	return cb
 }
 
-// Property adds a read-write property to the class instance
-// Both getter and setter must be provided for read-write properties
-func (cb *ClassBuilder) Property(name string, getter ClassGetterFunc, setter ClassSetterFunc) *ClassBuilder {
-	cb.properties = append(cb.properties, PropertyEntry{
+// Accessor adds a read-write accessor to the class instance
+// Pass nil for getter to create write-only accessor
+// Pass nil for setter to create read-only accessor
+func (cb *ClassBuilder) Accessor(name string, getter ClassGetterFunc, setter ClassSetterFunc) *ClassBuilder {
+	cb.accessors = append(cb.accessors, AccessorEntry{
 		Name:   name,
 		Getter: getter,
 		Setter: setter,
@@ -170,9 +171,11 @@ func (cb *ClassBuilder) Property(name string, getter ClassGetterFunc, setter Cla
 	return cb
 }
 
-// StaticProperty adds a read-write static property to the class constructor
-func (cb *ClassBuilder) StaticProperty(name string, getter ClassGetterFunc, setter ClassSetterFunc) *ClassBuilder {
-	cb.properties = append(cb.properties, PropertyEntry{
+// StaticAccessor adds a read-write static accessor to the class constructor
+// Pass nil for getter to create write-only accessor
+// Pass nil for setter to create read-only accessor
+func (cb *ClassBuilder) StaticAccessor(name string, getter ClassGetterFunc, setter ClassSetterFunc) *ClassBuilder {
+	cb.accessors = append(cb.accessors, AccessorEntry{
 		Name:   name,
 		Getter: getter,
 		Setter: setter,
@@ -253,40 +256,40 @@ func (ctx *Context) createClass(builder *ClassBuilder) (Value, uint32, error) {
 		})
 	}
 
-	// Step 6: Prepare property entries for C layer
-	var cProperties []C.PropertyEntry
-	var propertyIDs []int32
+	// Step 6: Prepare accessor entries for C layer
+	var cAccessors []C.AccessorEntry
+	var accessorIDs []int32
 
-	for _, prop := range builder.properties {
-		// Convert property name to C string
-		propName := C.CString(prop.Name)
+	for _, accessor := range builder.accessors {
+		// Convert accessor name to C string
+		accessorName := C.CString(accessor.Name)
 		// Note: Don't defer free as C layer needs these strings during binding
 
 		var getterID, setterID C.int32_t = 0, 0
 
 		// Store getter function if provided
-		if prop.Getter != nil {
-			handlerID := ctx.handleStore.Store(prop.Getter)
-			propertyIDs = append(propertyIDs, handlerID)
+		if accessor.Getter != nil {
+			handlerID := ctx.handleStore.Store(accessor.Getter)
+			accessorIDs = append(accessorIDs, handlerID)
 			getterID = C.int32_t(handlerID)
 		}
 
 		// Store setter function if provided
-		if prop.Setter != nil {
-			handlerID := ctx.handleStore.Store(prop.Setter)
-			propertyIDs = append(propertyIDs, handlerID)
+		if accessor.Setter != nil {
+			handlerID := ctx.handleStore.Store(accessor.Setter)
+			accessorIDs = append(accessorIDs, handlerID)
 			setterID = C.int32_t(handlerID)
 		}
 
 		// Convert static flag
 		isStatic := 0
-		if prop.Static {
+		if accessor.Static {
 			isStatic = 1
 		}
 
-		// Create C property entry
-		cProperties = append(cProperties, C.PropertyEntry{
-			name:      propName,
+		// Create C accessor entry
+		cAccessors = append(cAccessors, C.AccessorEntry{
+			name:      accessorName,
 			getter_id: getterID,
 			setter_id: setterID,
 			is_static: C.int(isStatic),
@@ -295,13 +298,13 @@ func (ctx *Context) createClass(builder *ClassBuilder) (Value, uint32, error) {
 
 	// Step 7: Prepare C array pointers (handle empty arrays)
 	var cMethodsPtr *C.MethodEntry
-	var cPropertiesPtr *C.PropertyEntry
+	var cAccessorsPtr *C.AccessorEntry
 
 	if len(cMethods) > 0 {
 		cMethodsPtr = &cMethods[0]
 	}
-	if len(cProperties) > 0 {
-		cPropertiesPtr = &cProperties[0]
+	if len(cAccessors) > 0 {
+		cAccessorsPtr = &cAccessors[0]
 	}
 
 	// Step 8: Call C function to create class (single call does all the work)
@@ -312,8 +315,8 @@ func (ctx *Context) createClass(builder *ClassBuilder) (Value, uint32, error) {
 		C.int32_t(constructorID),
 		cMethodsPtr,
 		C.int(len(cMethods)),
-		cPropertiesPtr,
-		C.int(len(cProperties)),
+		cAccessorsPtr,
+		C.int(len(cAccessors)),
 	)
 
 	// Step 9: Error handling - clean up all stored handlers on failure
@@ -327,8 +330,8 @@ func (ctx *Context) createClass(builder *ClassBuilder) (Value, uint32, error) {
 			ctx.handleStore.Delete(id)
 		}
 
-		// Clean up property handlers
-		for _, id := range propertyIDs {
+		// Clean up accessor handlers
+		for _, id := range accessorIDs {
 			ctx.handleStore.Delete(id)
 		}
 

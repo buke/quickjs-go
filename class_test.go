@@ -71,7 +71,7 @@ func createPointClass(ctx *Context) (Value, uint32, error) {
 			point := obj.(*Point)
 			return ctx.String(point.String())
 		}).
-		Property("x",
+		Accessor("x",
 			func(ctx *Context, this Value) Value { // getter
 				obj, err := this.GetGoObject()
 				if err != nil {
@@ -89,7 +89,7 @@ func createPointClass(ctx *Context) (Value, uint32, error) {
 				point.X = value.Float64()
 				return ctx.Undefined()
 			}).
-		Property("y",
+		Accessor("y",
 			func(ctx *Context, this Value) Value { // getter
 				obj, err := this.GetGoObject()
 				if err != nil {
@@ -111,7 +111,7 @@ func createPointClass(ctx *Context) (Value, uint32, error) {
 			// Use simplified NewInstance for static method as well
 			return this.NewInstance(&Point{X: 0, Y: 0})
 		}).
-		StaticProperty("PI",
+		StaticAccessor("PI",
 			func(ctx *Context, this Value) Value { // static getter
 				return ctx.Float64(math.Pi)
 			},
@@ -250,8 +250,8 @@ func TestInstanceMethods(t *testing.T) {
 	}
 }
 
-// TestProperties tests getter and setter properties
-func TestProperties(t *testing.T) {
+// TestAccessors tests getter and setter accessor functionality
+func TestAccessors(t *testing.T) {
 	rt := NewRuntime()
 	defer rt.Close()
 
@@ -268,13 +268,13 @@ func TestProperties(t *testing.T) {
 	// Note: Globals will manage the memory automatically
 	context.Globals().Set("Point", pointConstructor)
 
-	// Test property getters
+	// Test accessor getters
 	result, err := context.Eval(`
         let p1 = new Point(3, 4);
         [p1.x, p1.y];
     `)
 	if err != nil {
-		t.Fatalf("Failed to evaluate property getters: %v", err)
+		t.Fatalf("Failed to evaluate accessor getters: %v", err)
 	}
 	defer result.Free()
 
@@ -283,7 +283,7 @@ func TestProperties(t *testing.T) {
 			result.GetIdx(0).Float64(), result.GetIdx(1).Float64())
 	}
 
-	// Test property setters
+	// Test accessor setters
 	result2, err := context.Eval(`
         let p2 = new Point(1, 2);
         p2.x = 10;
@@ -291,7 +291,7 @@ func TestProperties(t *testing.T) {
         [p2.x, p2.y];
     `)
 	if err != nil {
-		t.Fatalf("Failed to evaluate property setters: %v", err)
+		t.Fatalf("Failed to evaluate accessor setters: %v", err)
 	}
 	defer result2.Free()
 
@@ -335,8 +335,8 @@ func TestStaticMethods(t *testing.T) {
 	}
 }
 
-// TestStaticProperties tests static property functionality
-func TestStaticProperties(t *testing.T) {
+// TestStaticAccessors tests static accessor functionality
+func TestStaticAccessors(t *testing.T) {
 	rt := NewRuntime()
 	defer rt.Close()
 
@@ -353,10 +353,10 @@ func TestStaticProperties(t *testing.T) {
 	// Note: Globals will manage the memory automatically
 	context.Globals().Set("Point", pointConstructor)
 
-	// Test static read-only property
+	// Test static read-only accessor
 	result, err := context.Eval(`Point.PI`)
 	if err != nil {
-		t.Fatalf("Failed to evaluate static property: %v", err)
+		t.Fatalf("Failed to evaluate static accessor: %v", err)
 	}
 	defer result.Free()
 
@@ -618,7 +618,7 @@ func TestErrorHandling(t *testing.T) {
 		Method("getValue", func(ctx *Context, this Value, args []Value) Value {
 			return ctx.Float64(0)
 		}).
-		Property("y",
+		Accessor("y",
 			func(ctx *Context, this Value) Value { // getter
 				obj, err := this.GetGoObject()
 				if err != nil {
@@ -799,7 +799,7 @@ func TestComplexClassHierarchy(t *testing.T) {
 		t.Errorf("Expected NamedColoredPoint to be instanceof NamedColoredPoint")
 	}
 
-	// Check inherited properties and methods
+	// Check inherited accessors and methods
 	if result.GetIdx(3).Float64() != 3.0 {
 		t.Errorf("Expected x=3, got %f", result.GetIdx(3).Float64())
 	}
@@ -913,19 +913,19 @@ func TestUnifiedConstructorMapping(t *testing.T) {
 	}
 }
 
-// TestReadOnlyAndWriteOnlyProperties tests readonly and writeonly property functionality
-func TestReadOnlyAndWriteOnlyProperties(t *testing.T) {
+// TestReadOnlyAndWriteOnlyAccessors tests readonly and writeonly accessor functionality
+func TestReadOnlyAndWriteOnlyAccessors(t *testing.T) {
 	rt := NewRuntime()
 	defer rt.Close()
 	ctx := rt.NewContext()
 	defer ctx.Close()
 
-	// Test ReadOnlyProperty
+	// Test ReadOnlyAccessor
 	constructor1, _, err := NewClassBuilder("ReadOnlyTest").
 		Constructor(func(ctx *Context, newTarget Value, args []Value) Value {
 			return newTarget.NewInstance(&Point{X: 10, Y: 20})
 		}).
-		Property("readOnlyX", func(ctx *Context, this Value) Value {
+		Accessor("readOnlyX", func(ctx *Context, this Value) Value {
 			obj, _ := this.GetGoObject()
 			point := obj.(*Point)
 			return ctx.Float64(point.X)
@@ -946,27 +946,27 @@ func TestReadOnlyAndWriteOnlyProperties(t *testing.T) {
         [original, obj1.readOnlyX];
     `)
 	if err != nil {
-		t.Fatalf("ReadOnly property test failed: %v", err)
+		t.Fatalf("ReadOnly accessor test failed: %v", err)
 	}
 	defer result.Free()
 
 	if result.GetIdx(0).Float64() != 10.0 || result.GetIdx(1).Float64() != 10.0 {
-		t.Errorf("ReadOnly property failed: expected [10, 10], got [%f, %f]",
+		t.Errorf("ReadOnly accessor failed: expected [10, 10], got [%f, %f]",
 			result.GetIdx(0).Float64(), result.GetIdx(1).Float64())
 	}
 
-	// Test WriteOnlyProperty
+	// Test WriteOnlyAccessor
 	constructor2, _, err := NewClassBuilder("WriteOnlyTest").
 		Constructor(func(ctx *Context, newTarget Value, args []Value) Value {
 			return newTarget.NewInstance(&Point{X: 0, Y: 0})
 		}).
-		Property("writeOnlyX", nil, func(ctx *Context, this Value, value Value) Value {
+		Accessor("writeOnlyX", nil, func(ctx *Context, this Value, value Value) Value {
 			obj, _ := this.GetGoObject()
 			point := obj.(*Point)
 			point.X = value.Float64()
 			return ctx.Undefined()
 		}).
-		Property("getX", func(ctx *Context, this Value) Value {
+		Accessor("getX", func(ctx *Context, this Value) Value {
 			obj, _ := this.GetGoObject()
 			point := obj.(*Point)
 			return ctx.Float64(point.X)
@@ -986,21 +986,21 @@ func TestReadOnlyAndWriteOnlyProperties(t *testing.T) {
         [obj2.getX, obj2.writeOnlyX]; // getX should show 42, writeOnlyX should be undefined
     `)
 	if err != nil {
-		t.Fatalf("WriteOnly property test failed: %v", err)
+		t.Fatalf("WriteOnly accessor test failed: %v", err)
 	}
 	defer result2.Free()
 
 	if result2.GetIdx(0).Float64() != 42.0 || !result2.GetIdx(1).IsUndefined() {
-		t.Errorf("WriteOnly property failed: expected [42, undefined], got [%f, %v]",
+		t.Errorf("WriteOnly accessor failed: expected [42, undefined], got [%f, %v]",
 			result2.GetIdx(0).Float64(), result2.GetIdx(1).String())
 	}
 
-	// Test StaticReadOnlyProperty
+	// Test StaticReadOnlyAccessor
 	constructor3, _, err := NewClassBuilder("StaticReadOnlyTest").
 		Constructor(func(ctx *Context, newTarget Value, args []Value) Value {
 			return newTarget.NewInstance(&Point{X: 0, Y: 0})
 		}).
-		StaticProperty("VERSION", func(ctx *Context, this Value) Value {
+		StaticAccessor("VERSION", func(ctx *Context, this Value) Value {
 			return ctx.String("1.0.0")
 		}, nil).
 		Build(ctx)
@@ -1011,19 +1011,19 @@ func TestReadOnlyAndWriteOnlyProperties(t *testing.T) {
 
 	ctx.Globals().Set("StaticReadOnlyTest", constructor3)
 
-	// Test static readonly property
+	// Test static readonly accessor
 	result3, err := ctx.Eval(`
         let original3 = StaticReadOnlyTest.VERSION;
         StaticReadOnlyTest.VERSION = "2.0.0"; // Should not change
         [original3, StaticReadOnlyTest.VERSION];
     `)
 	if err != nil {
-		t.Fatalf("StaticReadOnly property test failed: %v", err)
+		t.Fatalf("StaticReadOnly accessor test failed: %v", err)
 	}
 	defer result3.Free()
 
 	if result3.GetIdx(0).String() != "1.0.0" || result3.GetIdx(1).String() != "1.0.0" {
-		t.Errorf("StaticReadOnly property failed: expected ['1.0.0', '1.0.0'], got ['%s', '%s']",
+		t.Errorf("StaticReadOnly accessor failed: expected ['1.0.0', '1.0.0'], got ['%s', '%s']",
 			result3.GetIdx(0).String(), result3.GetIdx(1).String())
 	}
 }
