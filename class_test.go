@@ -116,6 +116,11 @@ func createPointClass(ctx *Context) (Value, uint32, error) {
 				return ctx.Float64(math.Pi)
 			},
 			nil). // no setter, read-only
+		// NEW: Add Properties for testing
+		Property("version", ctx.String("1.0.0")).                               // Instance property (default flags)
+		Property("readOnlyFlag", ctx.Bool(true), PropertyConfigurable).         // Read-only instance property
+		StaticProperty("PI_CONST", ctx.Float64(math.Pi)).                       // Static property (default flags)
+		StaticProperty("AUTHOR", ctx.String("QuickJS-Go"), PropertyEnumerable). // Enumerable-only static property
 		Build(ctx)
 }
 
@@ -362,6 +367,282 @@ func TestStaticAccessors(t *testing.T) {
 
 	if math.Abs(result.Float64()-math.Pi) > 0.001 {
 		t.Errorf("Expected PI %f, got %f", math.Pi, result.Float64())
+	}
+}
+
+// NEW: TestProperties tests data property functionality
+func TestProperties(t *testing.T) {
+	rt := NewRuntime()
+	defer rt.Close()
+
+	context := rt.NewContext()
+	defer context.Close()
+
+	// Create and register Point class
+	pointConstructor, _, err := createPointClass(context)
+	if err != nil {
+		t.Fatalf("Failed to create Point class: %v", err)
+	}
+
+	// Register Point class globally
+	context.Globals().Set("Point", pointConstructor)
+
+	// Test instance properties
+	result, err := context.Eval(`
+        let p = new Point(1, 2);
+        [
+            p.version,           // Instance property
+            p.readOnlyFlag,      // Read-only instance property
+            typeof p.version,    // Should be string
+            typeof p.readOnlyFlag // Should be boolean
+        ];
+    `)
+	if err != nil {
+		t.Fatalf("Failed to evaluate instance properties: %v", err)
+	}
+	defer result.Free()
+
+	if result.GetIdx(0).String() != "1.0.0" {
+		t.Errorf("Expected version '1.0.0', got '%s'", result.GetIdx(0).String())
+	}
+	if !result.GetIdx(1).ToBool() {
+		t.Errorf("Expected readOnlyFlag true, got %t", result.GetIdx(1).ToBool())
+	}
+	if result.GetIdx(2).String() != "string" {
+		t.Errorf("Expected version type 'string', got '%s'", result.GetIdx(2).String())
+	}
+	if result.GetIdx(3).String() != "boolean" {
+		t.Errorf("Expected readOnlyFlag type 'boolean', got '%s'", result.GetIdx(3).String())
+	}
+}
+
+// NEW: TestStaticProperties tests static data property functionality
+func TestStaticProperties(t *testing.T) {
+	rt := NewRuntime()
+	defer rt.Close()
+
+	context := rt.NewContext()
+	defer context.Close()
+
+	// Create and register Point class
+	pointConstructor, _, err := createPointClass(context)
+	if err != nil {
+		t.Fatalf("Failed to create Point class: %v", err)
+	}
+
+	// Register Point class globally
+	context.Globals().Set("Point", pointConstructor)
+
+	// Test static properties
+	result, err := context.Eval(`
+        [
+            Point.PI_CONST,      // Static property (default flags)
+            Point.AUTHOR,        // Enumerable-only static property
+            typeof Point.PI_CONST,
+            typeof Point.AUTHOR
+        ];
+    `)
+	if err != nil {
+		t.Fatalf("Failed to evaluate static properties: %v", err)
+	}
+	defer result.Free()
+
+	if math.Abs(result.GetIdx(0).Float64()-math.Pi) > 0.001 {
+		t.Errorf("Expected PI_CONST %f, got %f", math.Pi, result.GetIdx(0).Float64())
+	}
+	if result.GetIdx(1).String() != "QuickJS-Go" {
+		t.Errorf("Expected AUTHOR 'QuickJS-Go', got '%s'", result.GetIdx(1).String())
+	}
+	if result.GetIdx(2).String() != "number" {
+		t.Errorf("Expected PI_CONST type 'number', got '%s'", result.GetIdx(2).String())
+	}
+	if result.GetIdx(3).String() != "string" {
+		t.Errorf("Expected AUTHOR type 'string', got '%s'", result.GetIdx(3).String())
+	}
+}
+
+// NEW: TestPropertyFlags tests property descriptor flags
+func TestPropertyFlags(t *testing.T) {
+	rt := NewRuntime()
+	defer rt.Close()
+
+	context := rt.NewContext()
+	defer context.Close()
+
+	// Create and register Point class
+	pointConstructor, _, err := createPointClass(context)
+	if err != nil {
+		t.Fatalf("Failed to create Point class: %v", err)
+	}
+
+	// Register Point class globally
+	context.Globals().Set("Point", pointConstructor)
+
+	// Test property descriptor flags
+	result, err := context.Eval(`
+        let p = new Point(1, 2)
+
+        // Test default flags for version (writable, enumerable, configurable)
+        let versionDesc = Object.getOwnPropertyDescriptor(p, 'version');
+
+        // Test read-only flags for readOnlyFlag (configurable only)
+        let readOnlyDesc = Object.getOwnPropertyDescriptor(p, 'readOnlyFlag');
+
+        // Test static property flags
+        let piDesc = Object.getOwnPropertyDescriptor(Point, 'PI_CONST');
+        let authorDesc = Object.getOwnPropertyDescriptor(Point, 'AUTHOR');
+
+        [
+            // Instance property with default flags
+            versionDesc.writable,     // Should be true
+            versionDesc.enumerable,   // Should be true
+            versionDesc.configurable, // Should be true
+
+            // Instance property with read-only flags
+            readOnlyDesc.writable,     // Should be false (read-only)
+            readOnlyDesc.enumerable,   // Should be false
+            readOnlyDesc.configurable, // Should be true
+
+            // Static property with default flags
+            piDesc.writable,          // Should be true
+            piDesc.enumerable,        // Should be true
+            piDesc.configurable,      // Should be true
+
+            // Static property with enumerable-only flags
+            authorDesc.writable,      // Should be false
+            authorDesc.enumerable,    // Should be true
+            authorDesc.configurable   // Should be false
+        ];
+    `)
+	if err != nil {
+		t.Fatalf("Failed to evaluate property flags: %v", err)
+	}
+	defer result.Free()
+
+	// Check version property flags (default: writable, enumerable, configurable)
+	if !result.GetIdx(0).ToBool() {
+		t.Errorf("Expected version.writable to be true")
+	}
+	if !result.GetIdx(1).ToBool() {
+		t.Errorf("Expected version.enumerable to be true")
+	}
+	if !result.GetIdx(2).ToBool() {
+		t.Errorf("Expected version.configurable to be true")
+	}
+
+	// Check readOnlyFlag property flags (configurable only)
+	if result.GetIdx(3).ToBool() {
+		t.Errorf("Expected readOnlyFlag.writable to be false")
+	}
+	if result.GetIdx(4).ToBool() {
+		t.Errorf("Expected readOnlyFlag.enumerable to be false")
+	}
+	if !result.GetIdx(5).ToBool() {
+		t.Errorf("Expected readOnlyFlag.configurable to be true")
+	}
+
+	// Check PI_CONST property flags (default: writable, enumerable, configurable)
+	if !result.GetIdx(6).ToBool() {
+		t.Errorf("Expected PI_CONST.writable to be true")
+	}
+	if !result.GetIdx(7).ToBool() {
+		t.Errorf("Expected PI_CONST.enumerable to be true")
+	}
+	if !result.GetIdx(8).ToBool() {
+		t.Errorf("Expected PI_CONST.configurable to be true")
+	}
+
+	// Check AUTHOR property flags (enumerable only)
+	if result.GetIdx(9).ToBool() {
+		t.Errorf("Expected AUTHOR.writable to be false")
+	}
+	if !result.GetIdx(10).ToBool() {
+		t.Errorf("Expected AUTHOR.enumerable to be true")
+	}
+	if result.GetIdx(11).ToBool() {
+		t.Errorf("Expected AUTHOR.configurable to be false")
+	}
+}
+
+// NEW: TestPropertyVsAccessorBehavior tests the behavioral differences between Properties and Accessors
+func TestPropertyVsAccessorBehavior(t *testing.T) {
+	rt := NewRuntime()
+	defer rt.Close()
+
+	context := rt.NewContext()
+	defer context.Close()
+
+	// Create and register Point class
+	pointConstructor, _, err := createPointClass(context)
+	if err != nil {
+		t.Fatalf("Failed to create Point class: %v", err)
+	}
+
+	// Register Point class globally
+	context.Globals().Set("Point", pointConstructor)
+
+	// Test behavioral differences between properties and accessors
+	result, err := context.Eval(`
+        let p = new Point(5, 10);
+        
+        // Test property behavior (direct data storage)
+        let originalVersion = p.version;
+        p.version = "2.0.0";  // Direct assignment to property
+        let newVersion = p.version;
+        
+        // Test accessor behavior (function calls)
+        let originalX = p.x;
+        p.x = 15;  // Calls setter function
+        let newX = p.x;  // Calls getter function
+        
+        // Test property descriptor differences
+        let versionDesc = Object.getOwnPropertyDescriptor(p, 'version');
+        let xDesc = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(p), 'x');
+        
+        [
+            originalVersion,      // "1.0.0"
+            newVersion,          // "2.0.0" (direct property assignment)
+            originalX,           // 5 (from constructor)
+            newX,               // 15 (from setter)
+            typeof versionDesc.value,   // "string" (data property has value)
+            typeof versionDesc.get,     // "undefined" (data property has no getter)
+            typeof xDesc.value,         // "undefined" (accessor has no value)
+            typeof xDesc.get           // "function" (accessor has getter)
+        ];
+    `)
+	if err != nil {
+		t.Fatalf("Failed to evaluate property vs accessor behavior: %v", err)
+	}
+	defer result.Free()
+
+	// Check property behavior (direct data storage)
+	if result.GetIdx(0).String() != "1.0.0" {
+		t.Errorf("Expected original version '1.0.0', got '%s'", result.GetIdx(0).String())
+	}
+	if result.GetIdx(1).String() != "2.0.0" {
+		t.Errorf("Expected new version '2.0.0', got '%s'", result.GetIdx(1).String())
+	}
+
+	// Check accessor behavior (function calls)
+	if result.GetIdx(2).Float64() != 5.0 {
+		t.Errorf("Expected original x 5.0, got %f", result.GetIdx(2).Float64())
+	}
+	if result.GetIdx(3).Float64() != 15.0 {
+		t.Errorf("Expected new x 15.0, got %f", result.GetIdx(3).Float64())
+	}
+
+	// Check property descriptor differences
+	if result.GetIdx(4).String() != "string" {
+		t.Errorf("Expected version property to have value, got %s", result.GetIdx(4).String())
+	}
+	if result.GetIdx(5).String() != "undefined" {
+		t.Errorf("Expected version property to have no getter, got %s", result.GetIdx(5).String())
+	}
+	if result.GetIdx(6).String() != "undefined" {
+		t.Errorf("Expected x accessor to have no value, got %s", result.GetIdx(6).String())
+	}
+	if result.GetIdx(7).String() != "function" {
+		t.Errorf("Expected x accessor to have getter function, got %s", result.GetIdx(7).String())
 	}
 }
 

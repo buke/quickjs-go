@@ -49,6 +49,9 @@ void* JS_VALUE_GET_PTR_Wrapper(JSValue val) {
 // Property flags (For class.go)
 int GetPropertyWritableConfigurable() { return JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE; }
 int GetPropertyConfigurable() { return JS_PROP_CONFIGURABLE; }
+int GetPropertyWritable() { return JS_PROP_WRITABLE; }
+int GetPropertyEnumerable() { return JS_PROP_ENUMERABLE; }
+int GetPropertyDefault() { return JS_PROP_WRITABLE | JS_PROP_ENUMERABLE | JS_PROP_CONFIGURABLE; }
 
 // TypedArray enum values (For context.go)
 int GetTypedArrayInt8() { return JS_TYPED_ARRAY_INT8; }
@@ -250,11 +253,14 @@ JSValue CreateCFunction(JSContext *ctx, const char *name,
 JSValue BindMembersToObject(JSContext *ctx, JSValue obj,
                            const MethodEntry *methods, int method_count,
                            const AccessorEntry *accessors, int accessor_count,
+                           const PropertyEntry *properties, int property_count,
                            int is_static);
 
 JSValue BindMethodToObject(JSContext *ctx, JSValue obj, const MethodEntry *method);
 
 JSValue BindAccessorToObject(JSContext *ctx, JSValue obj, const AccessorEntry *accessor);
+
+JSValue BindPropertyToObject(JSContext *ctx, JSValue obj, const PropertyEntry *property);
 
 // CreateClass - Complete class creation function
 // This function handles all QuickJS class creation steps:
@@ -274,7 +280,8 @@ JSValue CreateClass(JSContext *ctx,
                    JSClassDef *class_def,      // Go layer manages memory
                    int32_t constructor_id,
                    const MethodEntry *methods, int method_count,
-                   const AccessorEntry *accessors, int accessor_count) {
+                   const AccessorEntry *accessors, int accessor_count,
+                   const PropertyEntry *properties, int property_count) {
     
     JSValue proto, constructor;
     JSRuntime *rt = JS_GetRuntime(ctx);
@@ -312,7 +319,8 @@ JSValue CreateClass(JSContext *ctx,
     
     // Step 5: Bind instance members to prototype
     JSValue proto_result = BindMembersToObject(ctx, proto, methods, method_count,
-                                              accessors, accessor_count, 0);
+                                              accessors, accessor_count,
+                                              properties, property_count, 0);
     if (JS_IsException(proto_result)) {
         JS_FreeValue(ctx, proto);
         return proto_result;
@@ -334,7 +342,8 @@ JSValue CreateClass(JSContext *ctx,
     
     // Step 9: Bind static members to constructor
     JSValue constructor_result = BindMembersToObject(ctx, constructor, methods, method_count,
-                                                    accessors, accessor_count, 1);
+                                                    accessors, accessor_count,
+                                                    properties, property_count, 1);
     if (JS_IsException(constructor_result)) {
         JS_FreeValue(ctx, constructor);
         return constructor_result;
@@ -344,11 +353,12 @@ JSValue CreateClass(JSContext *ctx,
     return constructor;
 }
 
-// BindMembersToObject - Bind methods and accessors to a JavaScript object
+// BindMembersToObject - Bind methods, accessors, and properties to a JavaScript object
 // is_static: 0 for instance members, 1 for static members
 JSValue BindMembersToObject(JSContext *ctx, JSValue obj,
                            const MethodEntry *methods, int method_count,
                            const AccessorEntry *accessors, int accessor_count,
+                           const PropertyEntry *properties, int property_count,
                            int is_static) {
     // Bind methods
     for (int i = 0; i < method_count; i++) {
@@ -368,6 +378,17 @@ JSValue BindMembersToObject(JSContext *ctx, JSValue obj,
             JSValue accessor_result = BindAccessorToObject(ctx, obj, accessor);
             if (JS_IsException(accessor_result)) {
                 return accessor_result;
+            }
+        }
+    }
+    
+    // Bind properties (NEW: data properties support)
+    for (int i = 0; i < property_count; i++) {
+        const PropertyEntry *property = &properties[i];
+        if (property->is_static == is_static) {
+            JSValue property_result = BindPropertyToObject(ctx, obj, property);
+            if (JS_IsException(property_result)) {
+                return property_result;
             }
         }
     }
@@ -436,6 +457,28 @@ JSValue BindAccessorToObject(JSContext *ctx, JSValue obj, const AccessorEntry *a
         return JS_ThrowInternalError(ctx, "failed to bind accessor: %s", accessor->name);
     }
     
+    return JS_UNDEFINED;
+}
+
+// NEW: BindPropertyToObject - Bind a data property to a JavaScript object
+// This creates real data properties using JS_DefinePropertyValueStr
+JSValue BindPropertyToObject(JSContext *ctx, JSValue obj, const PropertyEntry *property) {
+    // Duplicate the value to ensure proper reference counting
+    // JS_DefinePropertyValueStr takes ownership of the value
+    JSValue property_value = JS_DupValue(ctx, property->value);
+    
+    // Define the data property using QuickJS API
+    // This creates a real data property, not an accessor property
+    int result = JS_DefinePropertyValueStr(ctx, obj, property->name, 
+                                          property_value, property->flags);
+    
+    if (result < 0) {
+        // If define failed, we need to free the duplicated value
+        JS_FreeValue(ctx, property_value);
+        return JS_ThrowInternalError(ctx, "failed to bind property: %s", property->name);
+    }
+    
+    // Success: property_value ownership has been transferred to QuickJS
     return JS_UNDEFINED;
 }
 

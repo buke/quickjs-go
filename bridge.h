@@ -35,6 +35,9 @@ extern int JS_IsObject_Wrapper(JSValue val);
 // Constant getters
 extern int GetPropertyWritableConfigurable();
 extern int GetPropertyConfigurable();
+extern int GetPropertyWritable();
+extern int GetPropertyEnumerable();
+extern int GetPropertyDefault();
 extern int GetTypedArrayInt8();
 extern int GetTypedArrayUint8();
 extern int GetTypedArrayUint8C();
@@ -122,6 +125,14 @@ typedef struct {
     int is_static;
 } AccessorEntry;
 
+// Property configuration structure for data properties
+typedef struct {
+    const char *name;
+    JSValue value;
+    int is_static;
+    int flags;
+} PropertyEntry;
+
 // Complete class creation function
 // C function allocates class_id internally and returns it via pointer
 // Go layer manages JSClassDef and class name memory
@@ -130,7 +141,8 @@ extern JSValue CreateClass(JSContext *ctx,
                           JSClassDef *class_def,      // Go layer manages memory
                           int32_t constructor_id,
                           const MethodEntry *methods, int method_count,
-                          const AccessorEntry *accessors, int accessor_count);
+                          const AccessorEntry *accessors, int accessor_count,
+                          const PropertyEntry *properties, int property_count);
 
 extern int ValueGetTag(JSValueConst v);
 extern JSValue LoadModuleBytecode(JSContext *ctx, const uint8_t *buf, size_t buf_len, int load_only);

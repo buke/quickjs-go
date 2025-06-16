@@ -89,7 +89,7 @@ type MethodEntry struct {
 	Name   string          // Method name in JavaScript
 	Func   ClassMethodFunc // Method implementation function
 	Static bool            // true for static methods, false for instance methods
-	Length int             // Expected parameter count, -1 for auto-detection
+	Length int             // Expected parameter count, 0 for default
 }
 
 // AccessorEntry represents an accessor binding configuration
@@ -99,6 +99,28 @@ type AccessorEntry struct {
 	Setter ClassSetterFunc // Optional setter function
 	Static bool            // true for static accessors, false for instance accessors
 }
+
+// PropertyEntry represents a property binding configuration
+type PropertyEntry struct {
+	Name   string // Property name in JavaScript
+	Value  Value  // Property value (JavaScript Value)
+	Static bool   // true for static properties, false for instance properties
+	Flags  int    // Property flags (writable, enumerable, configurable)
+}
+
+// =============================================================================
+// PROPERTY FLAGS CONSTANTS
+// =============================================================================
+
+// Property flags constants matching QuickJS
+const (
+	PropertyConfigurable = 1 << 0 // JS_PROP_CONFIGURABLE
+	PropertyWritable     = 1 << 1 // JS_PROP_WRITABLE
+	PropertyEnumerable   = 1 << 2 // JS_PROP_ENUMERABLE
+
+	// Default property flags (writable, enumerable, configurable)
+	PropertyDefault = PropertyConfigurable | PropertyWritable | PropertyEnumerable
+)
 
 // =============================================================================
 // CLASS BUILDER - FLUENT API FOR BUILDING JAVASCRIPT CLASSES
@@ -111,15 +133,17 @@ type ClassBuilder struct {
 	constructor ClassConstructorFunc
 	methods     []MethodEntry
 	accessors   []AccessorEntry
+	properties  []PropertyEntry // NEW: properties field
 }
 
 // NewClassBuilder creates a new ClassBuilder with the specified name
 // This is the entry point for building JavaScript classes
 func NewClassBuilder(name string) *ClassBuilder {
 	return &ClassBuilder{
-		name:      name,
-		methods:   make([]MethodEntry, 0),
-		accessors: make([]AccessorEntry, 0),
+		name:       name,
+		methods:    make([]MethodEntry, 0),
+		accessors:  make([]AccessorEntry, 0),
+		properties: make([]PropertyEntry, 0), // NEW: initialize properties slice
 	}
 }
 
@@ -180,6 +204,44 @@ func (cb *ClassBuilder) StaticAccessor(name string, getter ClassGetterFunc, sett
 		Getter: getter,
 		Setter: setter,
 		Static: true,
+	})
+	return cb
+}
+
+// =============================================================================
+// NEW: PROPERTY API METHODS
+// =============================================================================
+
+// Property adds a data property to the class instance
+// Default flags: writable, enumerable, configurable
+func (cb *ClassBuilder) Property(name string, value Value, flags ...int) *ClassBuilder {
+	propFlags := PropertyDefault
+	if len(flags) > 0 {
+		propFlags = flags[0]
+	}
+
+	cb.properties = append(cb.properties, PropertyEntry{
+		Name:   name,
+		Value:  value,
+		Static: false,
+		Flags:  propFlags,
+	})
+	return cb
+}
+
+// StaticProperty adds a data property to the class constructor
+// Default flags: writable, enumerable, configurable
+func (cb *ClassBuilder) StaticProperty(name string, value Value, flags ...int) *ClassBuilder {
+	propFlags := PropertyDefault
+	if len(flags) > 0 {
+		propFlags = flags[0]
+	}
+
+	cb.properties = append(cb.properties, PropertyEntry{
+		Name:   name,
+		Value:  value,
+		Static: true,
+		Flags:  propFlags,
 	})
 	return cb
 }
@@ -296,9 +358,33 @@ func (ctx *Context) createClass(builder *ClassBuilder) (Value, uint32, error) {
 		})
 	}
 
-	// Step 7: Prepare C array pointers (handle empty arrays)
+	// Step 7: NEW - Prepare property entries for C layer
+	var cProperties []C.PropertyEntry
+
+	for _, property := range builder.properties {
+		// Convert property name to C string
+		propertyName := C.CString(property.Name)
+		// Note: Don't defer free as C layer needs these strings during binding
+
+		// Convert static flag
+		isStatic := 0
+		if property.Static {
+			isStatic = 1
+		}
+
+		// Create C property entry
+		cProperties = append(cProperties, C.PropertyEntry{
+			name:      propertyName,
+			value:     property.Value.ref, // Use JSValue directly
+			is_static: C.int(isStatic),
+			flags:     C.int(property.Flags),
+		})
+	}
+
+	// Step 8: Prepare C array pointers (handle empty arrays)
 	var cMethodsPtr *C.MethodEntry
 	var cAccessorsPtr *C.AccessorEntry
+	var cPropertiesPtr *C.PropertyEntry // NEW
 
 	if len(cMethods) > 0 {
 		cMethodsPtr = &cMethods[0]
@@ -306,8 +392,11 @@ func (ctx *Context) createClass(builder *ClassBuilder) (Value, uint32, error) {
 	if len(cAccessors) > 0 {
 		cAccessorsPtr = &cAccessors[0]
 	}
+	if len(cProperties) > 0 { // NEW
+		cPropertiesPtr = &cProperties[0]
+	}
 
-	// Step 8: Call C function to create class (single call does all the work)
+	// Step 9: Call C function to create class (single call does all the work)
 	constructor := C.CreateClass(
 		ctx.ref,
 		&classID, // C function allocates class_id internally
@@ -317,9 +406,11 @@ func (ctx *Context) createClass(builder *ClassBuilder) (Value, uint32, error) {
 		C.int(len(cMethods)),
 		cAccessorsPtr,
 		C.int(len(cAccessors)),
+		cPropertiesPtr,          // NEW: properties parameter
+		C.int(len(cProperties)), // NEW: property count parameter
 	)
 
-	// Step 9: Error handling - clean up all stored handlers on failure
+	// Step 10: Error handling - clean up all stored handlers on failure
 	if C.JS_IsException(constructor) != 0 {
 		fmt.Printf("Failed to create class '%s'\n", builder.name)
 		// Clean up constructor handler
@@ -341,7 +432,7 @@ func (ctx *Context) createClass(builder *ClassBuilder) (Value, uint32, error) {
 		return Value{ctx: ctx, ref: constructor}, 0, ctx.Exception()
 	}
 
-	// Step 10: Register constructor -> classID mapping for unified access
+	// Step 11: Register constructor -> classID mapping for unified access
 	// This enables the global registry for NewInstance lookup
 	registerConstructorClassID(constructor, uint32(classID))
 
