@@ -1,6 +1,7 @@
 package quickjs
 
 import (
+	"fmt"
 	"sync"
 	"unsafe"
 )
@@ -146,6 +147,53 @@ func getContextAndFunction(ctx *C.JSContext, magic C.int, notFoundErr proxyError
 	}
 
 	return goCtx, fn, nil
+}
+
+// =============================================================================
+// MODULE-RELATED HELPER FUNCTIONS
+// =============================================================================
+
+// getContextAndModuleBuilder retrieves context and ModuleBuilder from module private value
+func getContextAndModuleBuilder(ctx *C.JSContext, m *C.JSModuleDef) (*Context, *ModuleBuilder, error) {
+	// Get Go Context from global mapping
+	goCtx := getContextFromJS(ctx)
+	if goCtx == nil {
+		return nil, nil, fmt.Errorf("Context not found during module initialization")
+	}
+
+	// Retrieve ModuleBuilder from module private value
+	privateValue := C.JS_GetModulePrivateValue(ctx, m)
+	if C.JS_IsException(privateValue) != 0 {
+		return nil, nil, fmt.Errorf("Failed to get module private value")
+	}
+
+	// Extract ModuleBuilder ID from private value using JS_ToInt32
+	var builderID C.int32_t
+	if C.JS_ToInt32(ctx, &builderID, privateValue) < 0 {
+		return nil, nil, fmt.Errorf("Failed to convert module private value to int32")
+	}
+
+	// Get ModuleBuilder from HandleStore
+	builderInterface, exists := goCtx.handleStore.Load(int32(builderID))
+	if !exists || builderInterface == nil {
+		return nil, nil, fmt.Errorf("ModuleBuilder not found in HandleStore")
+	}
+
+	// Type assertion to ModuleBuilder
+	builder, ok := builderInterface.(*ModuleBuilder)
+	if !ok {
+		return nil, nil, fmt.Errorf("Invalid ModuleBuilder type in HandleStore")
+	}
+
+	return goCtx, builder, nil
+}
+
+// throwModuleError creates and throws a module initialization error
+func throwModuleError(ctx *C.JSContext, err error) C.int {
+	errorMsg := C.CString(err.Error())
+	C.ThrowInternalError(ctx, errorMsg)
+	C.free(unsafe.Pointer(errorMsg))
+	return C.int(-1)
 }
 
 // =============================================================================
@@ -433,4 +481,43 @@ func goClassFinalizerProxy(rt *C.JSRuntime, val C.JSValue) {
 		// Always clean up HandleStore reference (corresponds to point.c: js_free_rt)
 		targetCtx.handleStore.Delete(handleID)
 	}
+}
+
+// =============================================================================
+// MODULE-RELATED PROXY FUNCTIONS - SIMPLIFIED
+// =============================================================================
+
+// Module initialization proxy function - Go export for C bridge (SIMPLIFIED)
+// This function serves as the bridge between QuickJS C API and Go ModuleBuilder functionality
+// Called by QuickJS when a module is being initialized
+// Corresponds to JSModuleInitFunc signature: int (*)(JSContext *ctx, JSModuleDef *m)
+//
+//export goModuleInitProxy
+func goModuleInitProxy(ctx *C.JSContext, m *C.JSModuleDef) C.int {
+	// Step 1: Get context and ModuleBuilder using helper
+	goCtx, builder, err := getContextAndModuleBuilder(ctx, m)
+	if err != nil {
+		return throwModuleError(ctx, err)
+	}
+
+	// Step 2: Set all export values using JS_SetModuleExport
+	for _, export := range builder.exports {
+		exportName := C.CString(export.Name)
+		result := C.JS_SetModuleExport(ctx, m, exportName, export.Value.ref)
+		C.free(unsafe.Pointer(exportName))
+
+		if result < 0 {
+			err := fmt.Errorf("Failed to set module export: %s", export.Name)
+			return throwModuleError(ctx, err)
+		}
+	}
+
+	// Step 3: Clean up HandleStore reference
+	privateValue := C.JS_GetModulePrivateValue(ctx, m)
+	var builderID C.int32_t
+	if C.JS_ToInt32(ctx, &builderID, privateValue) >= 0 {
+		goCtx.handleStore.Delete(int32(builderID))
+	}
+
+	return C.int(0)
 }

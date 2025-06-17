@@ -161,3 +161,12 @@ extern JSValue LoadModuleBytecode(JSContext *ctx, const uint8_t *buf, size_t buf
 extern void SetInterruptHandler(JSRuntime *rt);
 extern void ClearInterruptHandler(JSRuntime *rt);
 extern void SetExecuteTimeout(JSRuntime *rt, time_t timeout);
+
+// =============================================================================
+// MODULE-RELATED DECLARATIONS - NEW FOR MODULE BUILDER
+// =============================================================================
+
+// Module initialization proxy function
+// This function is called by QuickJS when a module is being initialized
+// It bridges between C QuickJS API and Go ModuleBuilder functionality
+extern int GoModuleInitProxy(JSContext *ctx, JSModuleDef *m);

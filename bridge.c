@@ -592,3 +592,21 @@ JSValue LoadModuleBytecode(JSContext *ctx, const uint8_t *buf, size_t buf_len, i
         return val;
     }
 }
+
+// ============================================================================
+// MODULE-RELATED FUNCTIONS - NEW FOR MODULE BUILDER
+// ============================================================================
+
+// Module initialization proxy function - C wrapper for Go export
+// This function serves as a bridge between QuickJS C API and Go ModuleBuilder functionality
+// Called by QuickJS when a module is being initialized
+// Corresponds to JSModuleInitFunc signature: int (*)(JSContext *ctx, JSModuleDef *m)
+int GoModuleInitProxy(JSContext *ctx, JSModuleDef *m) {
+    // Call the Go export function which handles the actual module initialization logic
+    // The Go function will:
+    // 1. Retrieve the ModuleBuilder from module private value
+    // 2. Set all export values using JS_SetModuleExport
+    // 3. Call user initialization function if provided
+    // 4. Handle error cases and resource cleanup
+    return goModuleInitProxy(ctx, m);
+}
