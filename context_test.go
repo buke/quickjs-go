@@ -274,6 +274,11 @@ func TestContextModules(t *testing.T) {
 			{"EmptyBytecode", func() error { _, err := ctx.LoadModuleBytecode([]byte{}); return err }},
 			{"InvalidBytecode", func() error { _, err := ctx.LoadModuleBytecode([]byte{0x01, 0x02, 0x03}); return err }},
 			{"MissingFile", func() error { _, err := ctx.LoadModuleFile("./nonexistent_file.js", "missing"); return err }},
+			{"ModuleThrowsError", func() error {
+				_, err := ctx.LoadModule(`export default 123; throw new Error('aah')`, "mod")
+				return err
+			}},
+			{"ModuleUndefinedVariable", func() error { _, err := ctx.LoadModule(`export default 123; blah`, "mod"); return err }},
 		}
 
 		for _, tt := range errorTests {
@@ -282,6 +287,7 @@ func TestContextModules(t *testing.T) {
 			})
 		}
 	})
+
 }
 
 func TestContextFunctions(t *testing.T) {
