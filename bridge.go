@@ -195,30 +195,109 @@ func goFunctionProxy(ctx *C.JSContext, thisVal C.JSValueConst,
 	return result.ref
 }
 
-// Class constructor proxy - handles new_target for inheritance support
+// Class constructor proxy - MODIFIED FOR SCHEME C
+// Handles new_target for inheritance support and implements Scheme C logic:
+// 1. Gets ClassBuilder from handleStore (not individual constructor function)
+// 2. Extracts instance properties from ClassBuilder
+// 3. Creates pre-configured instance with bound properties
+// 4. Calls constructor function with pre-created instance
+// 5. Associates returned Go object with the instance
 // Corresponds to QuickJS JSCFunctionType.constructor_magic
 //
 //export goClassConstructorProxy
 func goClassConstructorProxy(ctx *C.JSContext, newTarget C.JSValue,
 	argc C.int, argv *C.JSValue, magic C.int) C.JSValue {
 
-	// Get context and constructor using common helper
-	goCtx, fn, err := getContextAndFunction(ctx, magic, errConstructorNotFound)
-	if err != nil {
-		return throwProxyError(ctx, *err)
+	// Get context and ClassBuilder using common helper
+	goCtx, fn, perr := getContextAndFunction(ctx, magic, errConstructorNotFound)
+	if perr != nil {
+		return throwProxyError(ctx, *perr)
 	}
 
-	// Type assertion to ClassConstructorFunc signature
-	constructor, ok := fn.(ClassConstructorFunc)
+	// Type assertion to ClassBuilder (SCHEME C: stored entire ClassBuilder, not just constructor)
+	builder, ok := fn.(*ClassBuilder)
 	if !ok {
 		return throwProxyError(ctx, errInvalidConstructorType)
 	}
 
-	// Convert parameters and call constructor
-	newTargetValue := Value{ctx: goCtx, ref: newTarget}
+	// Extract class ID from newTarget for instance creation
+	classID, exists := getConstructorClassID(newTarget)
+	if !exists {
+		// This should not happen in normal cases since we register constructors
+		// But provide fallback for defensive programming
+		// return throwProxyError(ctx, proxyError{"InternalError", "Class ID not found for constructor"})
+		v := Value{ctx: goCtx, ref: newTarget}
+		classID, exists = v.resolveClassIDFromInheritance()
+	}
+	if !exists {
+		return throwProxyError(ctx, proxyError{"InternalError", "Class ID not found for constructor"})
+	}
+
+	// SCHEME C STEP 1: Extract instance properties from ClassBuilder
+	var instanceProperties []C.PropertyEntry
+	var instancePropertyNames []*C.char // Track C strings for cleanup
+
+	for _, property := range builder.properties {
+		// Only include instance properties (not static properties)
+		if !property.Static {
+			// Convert property name to C string
+			propertyName := C.CString(property.Name)
+			instancePropertyNames = append(instancePropertyNames, propertyName)
+
+			// Create C property entry for instance property
+			instanceProperties = append(instanceProperties, C.PropertyEntry{
+				name:      propertyName,
+				value:     property.Value.ref,
+				is_static: C.int(0), // Always instance property
+				flags:     C.int(property.Flags),
+			})
+		}
+	}
+
+	// Prepare C array pointer for instance properties
+	var instancePropertiesPtr *C.PropertyEntry
+	if len(instanceProperties) > 0 {
+		instancePropertiesPtr = &instanceProperties[0]
+	}
+
+	// SCHEME C STEP 2: Create instance with bound properties using modified CreateClassInstance
+	instance := C.CreateClassInstance(
+		ctx,
+		newTarget,
+		C.JSClassID(classID),
+		instancePropertiesPtr,
+		C.int(len(instanceProperties)),
+	)
+
+	// Clean up C strings after CreateClassInstance call
+	for _, cStr := range instancePropertyNames {
+		C.free(unsafe.Pointer(cStr))
+	}
+
+	// Check if instance creation failed
+	if C.JS_IsException(instance) != 0 {
+		return instance // Return the exception
+	}
+
+	// SCHEME C STEP 3: Call constructor function with pre-created instance
+	// Constructor receives the pre-created instance and returns Go object to associate
+	instanceValue := Value{ctx: goCtx, ref: instance}
 	args := convertCArgsToGoValues(argc, argv, goCtx)
-	result := constructor(goCtx, newTargetValue, args)
-	return result.ref
+	goObj, err := builder.constructor(goCtx, instanceValue, args)
+	if err != nil {
+		C.JS_FreeValue(ctx, instance)
+		errorMsg := C.CString(err.Error())
+		defer C.free(unsafe.Pointer(errorMsg))
+		return C.ThrowInternalError(ctx, errorMsg)
+	}
+
+	// SCHEME C STEP 4: Associate Go object with instance if constructor returned non-nil object
+	if goObj != nil {
+		handleID := goCtx.handleStore.Store(goObj)
+		C.JS_SetOpaque(instance, C.IntToOpaque(C.int32_t(handleID)))
+	}
+
+	return instance
 }
 
 // Class method proxy - handles both instance and static methods

@@ -49,6 +49,9 @@ void* JS_VALUE_GET_PTR_Wrapper(JSValue val) {
 // Property flags (For class.go)
 int GetPropertyWritableConfigurable() { return JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE; }
 int GetPropertyConfigurable() { return JS_PROP_CONFIGURABLE; }
+int GetPropertyWritable() { return JS_PROP_WRITABLE; }
+int GetPropertyEnumerable() { return JS_PROP_ENUMERABLE; }
+int GetPropertyDefault() { return JS_PROP_WRITABLE | JS_PROP_ENUMERABLE | JS_PROP_CONFIGURABLE; }
 
 // TypedArray enum values (For context.go)
 int GetTypedArrayInt8() { return JS_TYPED_ARRAY_INT8; }
@@ -124,13 +127,13 @@ JSValue GoClassMethodProxy(JSContext *ctx, JSValueConst this_val,
     return goClassMethodProxy(ctx, this_val, argc, argv, magic);
 }
 
-// Property getter proxy
+// Accessor getter proxy
 // Corresponds to QuickJS JSCFunctionType.getter_magic
 JSValue GoClassGetterProxy(JSContext *ctx, JSValueConst this_val, int magic) {
     return goClassGetterProxy(ctx, this_val, magic);
 }
 
-// Property setter proxy
+// Accessor setter proxy
 // Corresponds to QuickJS JSCFunctionType.setter_magic
 JSValue GoClassSetterProxy(JSContext *ctx, JSValueConst this_val, 
                           JSValueConst val, int magic) {
@@ -144,52 +147,6 @@ void GoClassFinalizerProxy(JSRuntime *rt, JSValue val) {
     goClassFinalizerProxy(rt, val);
 }
 
-// ============================================================================
-// NEWINSTANCE HELPER FUNCTION
-// ============================================================================
-
-// CreateClassInstance - encapsulates the object creation logic from NewInstance
-// This function handles:
-// 1. Getting prototype from constructor
-// 2. Creating JS object with correct prototype and class
-// 3. Setting opaque data
-// 4. Error handling and cleanup
-// 
-// Returns JS_EXCEPTION on any error, proper JSValue on success
-// This corresponds to the logic in point.c example
-JSValue CreateClassInstance(JSContext *ctx, JSValue constructor, 
-                           JSClassID class_id, int32_t handle_id) {
-    JSValue proto, obj;
-    
-    // Get prototype from constructor 
-    // Corresponds to point.c: proto = JS_GetPropertyStr(ctx, new_target, "prototype")
-    proto = JS_GetPropertyStr(ctx, constructor, "prototype");
-    if (JS_IsException(proto)) {
-        // Return the exception directly, caller will handle cleanup
-        return proto;
-    }
-    
-    // Create JS object with correct prototype and class
-    // Corresponds to point.c: obj = JS_NewObjectProtoClass(ctx, proto, js_point_class_id)
-    obj = JS_NewObjectProtoClass(ctx, proto, class_id);
-    
-    // Free prototype reference (always needed, regardless of obj creation result)
-    JS_FreeValue(ctx, proto);
-    
-    if (JS_IsException(obj)) {
-        // Return the exception directly, caller will handle cleanup
-        return obj;
-    }
-    
-    // Associate Go object with JS object
-    // Corresponds to point.c: JS_SetOpaque(obj, s)
-    // Use helper function to safely convert int32 to opaque pointer
-    if (handle_id != 0) {
-        JS_SetOpaque(obj, IntToOpaque(handle_id));
-    }
-    
-    return obj;
-}
 
 // ============================================================================
 // CREATECFUNCTION HELPER FUNCTION
@@ -249,12 +206,15 @@ JSValue CreateCFunction(JSContext *ctx, const char *name,
 // Forward declarations
 JSValue BindMembersToObject(JSContext *ctx, JSValue obj,
                            const MethodEntry *methods, int method_count,
+                           const AccessorEntry *accessors, int accessor_count,
                            const PropertyEntry *properties, int property_count,
                            int is_static);
 
 JSValue BindMethodToObject(JSContext *ctx, JSValue obj, const MethodEntry *method);
 
-JSValue BindPropertyToObject(JSContext *ctx, JSValue obj, const PropertyEntry *prop);
+JSValue BindAccessorToObject(JSContext *ctx, JSValue obj, const AccessorEntry *accessor);
+
+JSValue BindPropertyToObject(JSContext *ctx, JSValue obj, const PropertyEntry *property);
 
 // CreateClass - Complete class creation function
 // This function handles all QuickJS class creation steps:
@@ -274,6 +234,7 @@ JSValue CreateClass(JSContext *ctx,
                    JSClassDef *class_def,      // Go layer manages memory
                    int32_t constructor_id,
                    const MethodEntry *methods, int method_count,
+                   const AccessorEntry *accessors, int accessor_count,
                    const PropertyEntry *properties, int property_count) {
     
     JSValue proto, constructor;
@@ -312,6 +273,7 @@ JSValue CreateClass(JSContext *ctx,
     
     // Step 5: Bind instance members to prototype
     JSValue proto_result = BindMembersToObject(ctx, proto, methods, method_count,
+                                              accessors, accessor_count,
                                               properties, property_count, 0);
     if (JS_IsException(proto_result)) {
         JS_FreeValue(ctx, proto);
@@ -334,6 +296,7 @@ JSValue CreateClass(JSContext *ctx,
     
     // Step 9: Bind static members to constructor
     JSValue constructor_result = BindMembersToObject(ctx, constructor, methods, method_count,
+                                                    accessors, accessor_count,
                                                     properties, property_count, 1);
     if (JS_IsException(constructor_result)) {
         JS_FreeValue(ctx, constructor);
@@ -344,10 +307,11 @@ JSValue CreateClass(JSContext *ctx,
     return constructor;
 }
 
-// BindMembersToObject - Bind methods and properties to a JavaScript object
+// BindMembersToObject - Bind methods, accessors, and properties to a JavaScript object
 // is_static: 0 for instance members, 1 for static members
 JSValue BindMembersToObject(JSContext *ctx, JSValue obj,
                            const MethodEntry *methods, int method_count,
+                           const AccessorEntry *accessors, int accessor_count,
                            const PropertyEntry *properties, int property_count,
                            int is_static) {
     // Bind methods
@@ -361,13 +325,24 @@ JSValue BindMembersToObject(JSContext *ctx, JSValue obj,
         }
     }
     
-    // Bind properties
+    // Bind accessors
+    for (int i = 0; i < accessor_count; i++) {
+        const AccessorEntry *accessor = &accessors[i];
+        if (accessor->is_static == is_static) {
+            JSValue accessor_result = BindAccessorToObject(ctx, obj, accessor);
+            if (JS_IsException(accessor_result)) {
+                return accessor_result;
+            }
+        }
+    }
+    
+    // Bind properties (data properties support)
     for (int i = 0; i < property_count; i++) {
-        const PropertyEntry *prop = &properties[i];
-        if (prop->is_static == is_static) {
-            JSValue prop_result = BindPropertyToObject(ctx, obj, prop);
-            if (JS_IsException(prop_result)) {
-                return prop_result;
+        const PropertyEntry *property = &properties[i];
+        if (property->is_static == is_static) {
+            JSValue property_result = BindPropertyToObject(ctx, obj, property);
+            if (JS_IsException(property_result)) {
+                return property_result;
             }
         }
     }
@@ -395,28 +370,28 @@ JSValue BindMethodToObject(JSContext *ctx, JSValue obj, const MethodEntry *metho
     return JS_UNDEFINED;
 }
 
-// BindPropertyToObject - Bind a property to a JavaScript object
-JSValue BindPropertyToObject(JSContext *ctx, JSValue obj, const PropertyEntry *prop) {
-    JSAtom prop_atom = JS_NewAtom(ctx, prop->name);
+// BindAccessorToObject - Bind an accessor to a JavaScript object
+JSValue BindAccessorToObject(JSContext *ctx, JSValue obj, const AccessorEntry *accessor) {
+    JSAtom accessor_atom = JS_NewAtom(ctx, accessor->name);
     JSValue getter = JS_UNDEFINED;
     JSValue setter = JS_UNDEFINED;
     
     // Create getter
-    if (prop->getter_id != 0) {
-        getter = CreateCFunction(ctx, prop->name, 0,
-                                GetCFuncGetterMagic(), prop->getter_id);
+    if (accessor->getter_id != 0) {
+        getter = CreateCFunction(ctx, accessor->name, 0,
+                                GetCFuncGetterMagic(), accessor->getter_id);
         if (JS_IsException(getter)) {
-            JS_FreeAtom(ctx, prop_atom);
+            JS_FreeAtom(ctx, accessor_atom);
             return getter;
         }
     }
     
     // Create setter
-    if (prop->setter_id != 0) {
-        setter = CreateCFunction(ctx, prop->name, 1,
-                                GetCFuncSetterMagic(), prop->setter_id);
+    if (accessor->setter_id != 0) {
+        setter = CreateCFunction(ctx, accessor->name, 1,
+                                GetCFuncSetterMagic(), accessor->setter_id);
         if (JS_IsException(setter)) {
-            JS_FreeAtom(ctx, prop_atom);
+            JS_FreeAtom(ctx, accessor_atom);
             if (!JS_IsUndefined(getter)) {
                 JS_FreeValue(ctx, getter);
             }
@@ -424,19 +399,113 @@ JSValue BindPropertyToObject(JSContext *ctx, JSValue obj, const PropertyEntry *p
         }
     }
     
-    // Define property
-    int result = JS_DefinePropertyGetSet(ctx, obj, prop_atom, getter, setter,
+    // Define accessor
+    int result = JS_DefinePropertyGetSet(ctx, obj, accessor_atom, getter, setter,
                                         GetPropertyConfigurable());
     
-    JS_FreeAtom(ctx, prop_atom);
+    JS_FreeAtom(ctx, accessor_atom);
     
     if (result < 0) {
         if (!JS_IsUndefined(getter)) JS_FreeValue(ctx, getter);
         if (!JS_IsUndefined(setter)) JS_FreeValue(ctx, setter);
-        return JS_ThrowInternalError(ctx, "failed to bind property: %s", prop->name);
+        return JS_ThrowInternalError(ctx, "failed to bind accessor: %s", accessor->name);
     }
     
     return JS_UNDEFINED;
+}
+
+// BindPropertyToObject - Bind a data property to a JavaScript object
+// This creates real data properties using JS_DefinePropertyValueStr
+JSValue BindPropertyToObject(JSContext *ctx, JSValue obj, const PropertyEntry *property) {
+    // Duplicate the value to ensure proper reference counting
+    // JS_DefinePropertyValueStr takes ownership of the value
+    JSValue property_value = JS_DupValue(ctx, property->value);
+    
+    // Define the data property using QuickJS API
+    // This creates a real data property, not an accessor property
+    int result = JS_DefinePropertyValueStr(ctx, obj, property->name, 
+                                          property_value, property->flags);
+    
+    if (result < 0) {
+        // If define failed, we need to free the duplicated value
+        JS_FreeValue(ctx, property_value);
+        return JS_ThrowInternalError(ctx, "failed to bind property: %s", property->name);
+    }
+    
+    // Success: property_value ownership has been transferred to QuickJS
+    return JS_UNDEFINED;
+}
+
+
+
+// ============================================================================
+// SCHEME C: CREATECLASSINSTANCE HELPER FUNCTION - MODIFIED
+// ============================================================================
+
+// CreateClassInstance - encapsulates the object creation logic for Scheme C
+// MODIFIED FOR SCHEME C: This function now handles instance property binding
+// This function handles:
+// 1. Getting prototype from constructor
+// 2. Creating JS object with correct prototype and class
+// 3. Binding instance properties to the created object (NEW for Scheme C)
+// 4. Error handling and cleanup
+// 
+// Note: Go object association is now handled by constructor proxy, not here
+// Returns JS_EXCEPTION on any error, proper JSValue on success
+// This corresponds to the logic in point.c example with instance property support
+JSValue CreateClassInstance(JSContext *ctx, JSValue constructor, 
+                           JSClassID class_id,
+                           const PropertyEntry *instance_properties,
+                           int instance_property_count) {
+    JSValue proto, obj;
+
+    // Check QuickJS limits
+    if (class_id >= (1 << 16)) {
+        return JS_ThrowRangeError(ctx, "class ID exceeds maximum value");
+    }
+    
+    // Step 1: Get prototype from constructor 
+    // Corresponds to point.c: proto = JS_GetPropertyStr(ctx, new_target, "prototype")
+    proto = JS_GetPropertyStr(ctx, constructor, "prototype");
+    if (JS_IsException(proto)) {
+        // Return the exception directly, caller will handle cleanup
+        return proto;
+    }
+    
+    // Step 2: Create JS object with correct prototype and class
+    // Corresponds to point.c: obj = JS_NewObjectProtoClass(ctx, proto, js_point_class_id)
+    obj = JS_NewObjectProtoClass(ctx, proto, class_id);
+    
+    // Free prototype reference (always needed, regardless of obj creation result)
+    JS_FreeValue(ctx, proto);
+    
+    if (JS_IsException(obj)) {
+        // Return the exception directly, caller will handle cleanup
+        return obj;
+    }
+    
+    // Step 3: NEW FOR SCHEME C - Bind instance properties before constructor call
+    // This ensures instance properties are available when the constructor function runs
+    if (instance_properties && instance_property_count > 0) {
+        for (int i = 0; i < instance_property_count; i++) {
+            const PropertyEntry *property = &instance_properties[i];
+            
+            // Only process instance properties (static properties handled elsewhere)
+            if (property->is_static == 0) {
+                JSValue property_result = BindPropertyToObject(ctx, obj, property);
+                if (JS_IsException(property_result)) {
+                    // Clean up object on property binding failure
+                    JS_FreeValue(ctx, obj);
+                    return property_result;
+                }
+            }
+        }
+    }
+    
+    // Step 4: Return instance (Go object association handled by constructor proxy)
+    // In Scheme C, the constructor proxy will call this function, then call the 
+    // constructor function, and finally associate the returned Go object
+    return obj;
 }
 
 // ============================================================================
@@ -513,7 +582,7 @@ JSValue LoadModuleBytecode(JSContext *ctx, const uint8_t *buf, size_t buf_len, i
                 JS_FreeValue(ctx, obj);
                 return JS_EXCEPTION;
             }
-            js_module_set_import_meta(ctx, obj, FALSE, TRUE);
+            js_module_set_import_meta(ctx, obj, FALSE, FALSE);
             val = JS_EvalFunction(ctx, obj);
             val = js_std_await(ctx, val);
         } else {

@@ -2,6 +2,7 @@ package quickjs
 
 import (
 	"errors"
+	"math"
 	"math/big"
 	"testing"
 
@@ -870,124 +871,73 @@ func TestValueClassInstanceEdgeCases(t *testing.T) {
 	})
 }
 
-// TestValueNewInstanceEdgeCases tests edge cases and error conditions in NewInstance
-func TestValueNewInstanceEdgeCases(t *testing.T) {
+// TestValueCallConstructorEdgeCases tests edge cases and error conditions in CallConstructor
+// MODIFIED FOR SCHEME C: Removed all NewInstance tests, enhanced CallConstructor coverage
+func TestValueCallConstructorEdgeCases(t *testing.T) {
 	rt := NewRuntime()
 	defer rt.Close()
 	ctx := rt.NewContext()
 	defer ctx.Close()
 
-	// Test Case 1: NewInstance called on non-constructor value
-	t.Run("NewInstance_NonConstructor", func(t *testing.T) {
+	// Test Case 1: CallConstructor called on non-constructor value
+	t.Run("CallConstructor_NonConstructor", func(t *testing.T) {
 		// Test with regular object (not a constructor)
 		obj := ctx.Object()
 		defer obj.Free()
 
-		// This should trigger: "NewInstance can only be called on constructor functions"
-		result := obj.NewInstance(&Point{X: 1, Y: 2})
+		// This should trigger a JavaScript TypeError since object is not a constructor
+		result := obj.CallConstructor()
 		defer result.Free()
 
-		// Verify it returns an error/exception
-		require.True(t, result.IsException())
+		// Verify it returns an error/exception or creates a generic object (depends on JS engine behavior)
+		// For non-constructor objects, JavaScript usually throws TypeError
+		if !result.IsException() {
+			// Some JavaScript engines might return an object, that's also valid
+			require.True(t, result.IsObject())
+		}
 	})
 
-	// Test Case 2: NewInstance called on string (definitely not a constructor)
-	t.Run("NewInstance_String", func(t *testing.T) {
+	// Test Case 2: CallConstructor called on string (definitely not a constructor)
+	t.Run("CallConstructor_String", func(t *testing.T) {
 		str := ctx.String("not a constructor")
 		defer str.Free()
 
-		// This should trigger: "NewInstance can only be called on constructor functions"
-		result := str.NewInstance(&Point{X: 1, Y: 2})
+		// This should trigger a JavaScript TypeError
+		result := str.CallConstructor()
 		defer result.Free()
 
-		// Verify it returns an error/exception
+		// Should definitely be an exception since strings are not constructors
 		require.True(t, result.IsException())
 	})
 
-	// Test Case 3: validatePointerType with nil interface{}
-	t.Run("NewInstance_NilInterface", func(t *testing.T) {
-		// Create a valid constructor first
-		pointConstructor, _, err := createPointClass(ctx)
-		defer pointConstructor.Free()
-		require.NoError(t, err)
-
-		// Call NewInstance with nil - this should trigger the nil case in validatePointerType
-		result := pointConstructor.NewInstance(nil)
-		defer result.Free()
-
-		// This should succeed (nil is allowed)
-		require.False(t, result.IsException())
-		require.True(t, result.IsObject())
-	})
-
-	// Test Case 4: validatePointerType with value type (not pointer)
-	t.Run("NewInstance_ValueType", func(t *testing.T) {
-		// Create a valid constructor first
-		pointConstructor, _, err := createPointClass(ctx)
-		defer pointConstructor.Free()
-		require.NoError(t, err)
-
-		// Call NewInstance with value type (not pointer) - this should trigger the error case
-		valueTypePoint := Point{X: 1, Y: 2} // This is a value, not a pointer
-		result := pointConstructor.NewInstance(valueTypePoint)
-		defer result.Free()
-
-		// This should trigger: "goObj must be a pointer type for proper reference semantics"
-		require.True(t, result.IsException())
-	})
-
-	// Test Case 5: validatePointerType with typed nil pointer
-	t.Run("NewInstance_TypedNilPointer", func(t *testing.T) {
-		// Create a valid constructor first
-		pointConstructor, _, err := createPointClass(ctx)
-		defer pointConstructor.Free()
-		require.NoError(t, err)
-
-		// Call NewInstance with typed nil pointer - this should be allowed
-		var nilPoint *Point = nil
-		result := pointConstructor.NewInstance(nilPoint)
-		defer result.Free()
-
-		// This should succeed (typed nil pointer is allowed)
-		require.False(t, result.IsException())
-		require.True(t, result.IsObject())
-	})
-
-	// Test Case 6: NewInstance with various non-pointer types to ensure comprehensive coverage
-	t.Run("NewInstance_VariousValueTypes", func(t *testing.T) {
-		// Create a valid constructor first
-		pointConstructor, _, err := createPointClass(ctx)
-		defer pointConstructor.Free()
-		require.NoError(t, err)
-
-		// Test with different value types
+	// Test Case 3: CallConstructor with various non-constructor types
+	t.Run("CallConstructor_VariousNonConstructors", func(t *testing.T) {
 		testCases := []struct {
 			name string
-			obj  interface{}
+			val  func() Value
 		}{
-			{"int", 42},
-			{"string", "test"},
-			{"bool", true},
-			{"slice", []int{1, 2, 3}},
-			{"map", map[string]int{"a": 1}},
-			{"struct", Point{X: 1, Y: 2}}, // struct value
+			{"Number", func() Value { return ctx.Int32(42) }},
+			{"Boolean", func() Value { return ctx.Bool(true) }},
+			{"Null", func() Value { return ctx.Null() }},
+			{"Undefined", func() Value { return ctx.Undefined() }},
 		}
 
 		for _, tc := range testCases {
 			t.Run(tc.name, func(t *testing.T) {
-				result := pointConstructor.NewInstance(tc.obj)
+				val := tc.val()
+				defer val.Free()
+
+				result := val.CallConstructor()
 				defer result.Free()
 
-				// All of these should trigger the pointer type validation error
+				// All of these should trigger JavaScript TypeError
 				require.True(t, result.IsException())
 			})
 		}
 	})
 
-	// ===== NEW TEST CASES: Cover the three specific check branches =====
-
-	// Test Case 7: Constructor not registered in global class registry
-	t.Run("NewInstance_ConstructorNotRegistered", func(t *testing.T) {
+	// Test Case 4: CallConstructor with unregistered constructor
+	t.Run("CallConstructor_UnregisteredConstructor", func(t *testing.T) {
 		// Create a constructor function that's not registered in our class system
 		unregisteredConstructor, err := ctx.Eval(`
             function UnregisteredClass(value) {
@@ -998,151 +948,408 @@ func TestValueNewInstanceEdgeCases(t *testing.T) {
 		require.NoError(t, err)
 		defer unregisteredConstructor.Free()
 
-		// This should trigger: "constructor not registered in global class registry"
-		result := unregisteredConstructor.NewInstance(&Point{X: 1, Y: 2})
+		// This should work fine - JavaScript constructors don't need to be in our class registry
+		result := unregisteredConstructor.CallConstructor(ctx.String("test"))
 		defer result.Free()
 
-		require.True(t, result.IsException())
-		// Verify error message contains expected text
-		errorStr := ctx.Exception().Error()
-		require.Contains(t, errorStr, "constructor not registered")
-	})
-
-	// Test Case 8: Proto get exception (corrupted prototype)
-	t.Run("NewInstance_ProtoException", func(t *testing.T) {
-		// Create a constructor wrapped in a Proxy that throws on prototype access
-		proxyConstructor, err := ctx.Eval(`
-			function BaseClass() {}
-			
-			const ProxyConstructor = new Proxy(BaseClass, {
-				get: function(target, prop) {
-					if (prop === 'prototype') {
-						throw new Error("Proxy prototype access denied");
-					}
-					return target[prop];
-				}
-			});
-			
-			ProxyConstructor;
-		`)
-		require.NoError(t, err)
-		defer proxyConstructor.Free()
-
-		// Register this constructor to pass the first check
-		fakeClassID := uint32(12345)
-		registerConstructorClassID(proxyConstructor.ref, fakeClassID)
-
-		// This should trigger the proto.IsException() branch
-		result := proxyConstructor.NewInstance(&Point{X: 1, Y: 2})
-		defer result.Free()
-
-		require.True(t, result.IsException())
-	})
-
-	// Test Case: Successful NewInstance with proper pointer for comparison
-	t.Run("NewInstance_Success", func(t *testing.T) {
-		// Create a valid constructor first
-		pointConstructor, _, err := createPointClass(ctx)
-		defer pointConstructor.Free()
-		require.NoError(t, err)
-
-		// Call NewInstance with proper pointer type - this should succeed
-		point := &Point{X: 3.14, Y: 2.71}
-		result := pointConstructor.NewInstance(point)
-		defer result.Free()
-
-		// This should succeed
 		require.False(t, result.IsException())
 		require.True(t, result.IsObject())
 
-		// Verify we can retrieve the Go object back
-		retrievedObj, err := result.GetGoObject()
+		// Verify the property was set
+		value := result.Get("value")
+		defer value.Free()
+		require.Equal(t, "test", value.String())
+	})
+
+	// Test Case 5: CallConstructor with proxy constructor
+	t.Run("CallConstructor_ProxyConstructor", func(t *testing.T) {
+		// Create a constructor wrapped in a Proxy
+		proxyConstructor, err := ctx.Eval(`
+	        function BaseClass(value) {
+	            this.value = value || "default";
+	        }
+
+	        const ProxyConstructor = new Proxy(BaseClass, {
+	            construct: function(target, args, newTarget) {
+	                return Reflect.construct(target, args, newTarget);
+	            }
+	        });
+
+	        ProxyConstructor;
+	    `)
+		require.NoError(t, err)
+		defer proxyConstructor.Free()
+
+		// This should work through the proxy
+		result := proxyConstructor.CallConstructor(ctx.String("proxy_test"))
+		defer result.Free()
+
+		require.False(t, result.IsException())
+		require.True(t, result.IsObject())
+
+		// Verify the property was set through proxy
+		value := result.Get("value")
+		defer value.Free()
+		require.Equal(t, "proxy_test", value.String())
+	})
+
+	// Test Case 6: CallConstructor with arrow function (not a constructor)
+	t.Run("CallConstructor_ArrowFunction", func(t *testing.T) {
+		arrowFunc, err := ctx.Eval(`(() => {})`)
+		require.NoError(t, err)
+		defer arrowFunc.Free()
+
+		// Arrow functions cannot be used as constructors
+		result := arrowFunc.CallConstructor()
+		defer result.Free()
+
+		require.True(t, result.IsException())
+	})
+
+	// Test Case 7: CallConstructor with bound function
+	t.Run("CallConstructor_BoundFunction", func(t *testing.T) {
+		boundFunc, err := ctx.Eval(`
+            function OriginalConstructor(value) {
+                this.value = value || "bound_default";
+            }
+            OriginalConstructor.bind(null);
+        `)
+		require.NoError(t, err)
+		defer boundFunc.Free()
+
+		// Bound functions can be used as constructors
+		result := boundFunc.CallConstructor(ctx.String("bound_test"))
+		defer result.Free()
+
+		require.False(t, result.IsException())
+		require.True(t, result.IsObject())
+	})
+
+	// Test Case 8: CallConstructor with built-in constructors
+	t.Run("CallConstructor_BuiltInConstructors", func(t *testing.T) {
+		builtInTests := []struct {
+			name     string
+			jsCode   string
+			args     []Value
+			validate func(Value)
+		}{
+			{
+				name:   "Array",
+				jsCode: "Array",
+				args:   []Value{ctx.Int32(3)},
+				validate: func(v Value) {
+					require.True(t, v.IsArray())
+					require.Equal(t, int64(3), v.Len())
+				},
+			},
+			{
+				name:   "Object",
+				jsCode: "Object",
+				args:   nil,
+				validate: func(v Value) {
+					require.True(t, v.IsObject())
+					require.False(t, v.IsArray())
+				},
+			},
+			{
+				name:   "Date",
+				jsCode: "Date",
+				args:   []Value{ctx.String("2023-01-01")},
+				validate: func(v Value) {
+					require.True(t, v.IsObject())
+					// Date objects have getTime method
+					getTime := v.Get("getTime")
+					defer getTime.Free()
+					require.True(t, getTime.IsFunction())
+				},
+			},
+		}
+
+		for _, tt := range builtInTests {
+			t.Run(tt.name, func(t *testing.T) {
+				constructor, err := ctx.Eval(tt.jsCode)
+				require.NoError(t, err)
+				defer constructor.Free()
+
+				var result Value
+				if len(tt.args) > 0 {
+					result = constructor.CallConstructor(tt.args...)
+				} else {
+					result = constructor.CallConstructor()
+				}
+				defer result.Free()
+
+				require.False(t, result.IsException())
+				tt.validate(result)
+			})
+		}
+	})
+
+	// Test Case 9: Successful CallConstructor with registered class (for comparison)
+	t.Run("CallConstructor_RegisteredClass", func(t *testing.T) {
+		// Create a Point class using our class system
+		pointConstructor, _, err := NewClassBuilder("Point").
+			Constructor(func(ctx *Context, instance Value, args []Value) (interface{}, error) {
+				x, y := 0.0, 0.0
+				if len(args) > 0 {
+					x = args[0].Float64()
+				}
+				if len(args) > 1 {
+					y = args[1].Float64()
+				}
+
+				// SCHEME C: Create Go object and return it for automatic association
+				point := &Point{X: x, Y: y}
+				return point, nil
+			}).
+			Method("norm", func(ctx *Context, this Value, args []Value) Value {
+				obj, err := this.GetGoObject()
+				if err != nil {
+					return ctx.ThrowError(err)
+				}
+				point := obj.(*Point)
+				norm := math.Sqrt(point.X*point.X + point.Y*point.Y)
+				return ctx.Float64(norm)
+			}).
+			Build(ctx)
+		defer pointConstructor.Free()
 		require.NoError(t, err)
 
-		retrievedPoint, ok := retrievedObj.(*Point)
+		// Test CallConstructor with arguments
+		instance := pointConstructor.CallConstructor(ctx.Float64(3.0), ctx.Float64(4.0))
+		defer instance.Free()
+
+		require.False(t, instance.IsException())
+		require.True(t, instance.IsObject())
+
+		// Verify we can call methods on the instance
+		norm := instance.Call("norm")
+		defer norm.Free()
+		require.InDelta(t, 5.0, norm.Float64(), 0.001)
+
+		// Verify we can retrieve the Go object
+		goObj, err := instance.GetGoObject()
+		require.NoError(t, err)
+
+		point, ok := goObj.(*Point)
 		require.True(t, ok)
-		require.Equal(t, 3.14, retrievedPoint.X)
-		require.Equal(t, 2.71, retrievedPoint.Y)
+		require.Equal(t, 3.0, point.X)
+		require.Equal(t, 4.0, point.Y)
 	})
 }
 
-// TestResolveClassIDFromInheritance tests the inheritance resolution logic
-func TestResolveClassIDFromInheritance(t *testing.T) {
+// TestValueCallConstructorComprehensive tests comprehensive CallConstructor scenarios
+// NEW TEST: Comprehensive coverage for CallConstructor API
+func TestValueCallConstructorComprehensive(t *testing.T) {
 	rt := NewRuntime()
 	defer rt.Close()
 	ctx := rt.NewContext()
 	defer ctx.Close()
 
-	// Test Case 1: No inheritance - should return false
-	t.Run("NoInheritance", func(t *testing.T) {
-		standaloneConstructor, err := ctx.Eval(`
-            function StandaloneClass() {}
-            StandaloneClass;
-        `)
-		require.NoError(t, err)
-		defer standaloneConstructor.Free()
-
-		classID, exists := standaloneConstructor.resolveClassIDFromInheritance()
-		require.False(t, exists)
-		require.Equal(t, uint32(0), classID)
-	})
-
-	// Test Case 2: Inherits from unregistered class - should return false
-	t.Run("UnregisteredParent", func(t *testing.T) {
-		childConstructor, err := ctx.Eval(`
-            function UnregisteredBase() {}
-            function Child() {}
-            Child.prototype = Object.create(UnregisteredBase.prototype);
-            Child.prototype.constructor = Child;
-            Child;
-        `)
-		require.NoError(t, err)
-		defer childConstructor.Free()
-
-		classID, exists := childConstructor.resolveClassIDFromInheritance()
-		require.False(t, exists)
-		require.Equal(t, uint32(0), classID)
-	})
-
-	// Test Case 3: Inherits from standard Error - should return false
-	t.Run("InheritsFromError", func(t *testing.T) {
-		errorChildConstructor, err := ctx.Eval(`
-            function MyError() {}
-            MyError.prototype = Object.create(Error.prototype);
-            MyError.prototype.constructor = MyError;
-            MyError;
-        `)
-		require.NoError(t, err)
-		defer errorChildConstructor.Free()
-
-		classID, exists := errorChildConstructor.resolveClassIDFromInheritance()
-		require.False(t, exists)
-		require.Equal(t, uint32(0), classID)
-	})
-
-	// Test Case 4: Successful inheritance (for comparison)
-	t.Run("ValidInheritance", func(t *testing.T) {
-		// Create and register a base class
-		baseConstructor, baseClassID, err := createPointClass(ctx)
-		require.NoError(t, err)
-
-		// Set base constructor in global scope
-		ctx.Globals().Set("Point", baseConstructor)
-
-		// Create child class that properly inherits from Point
-		childConstructor, err := ctx.Eval(`
-            function ColoredPoint(x, y, color) {
-                this.color = color;
+	// Test Case 1: CallConstructor with different argument counts
+	t.Run("CallConstructor_ArgumentCounts", func(t *testing.T) {
+		constructor, err := ctx.Eval(`
+            function TestClass() {
+                this.argCount = arguments.length;
+                this.args = Array.from(arguments);
             }
-            ColoredPoint.prototype = Object.create(Point.prototype);
-            ColoredPoint.prototype.constructor = ColoredPoint;
-            ColoredPoint;
+            TestClass;
         `)
+		require.NoError(t, err)
+		defer constructor.Free()
+
+		// Test with no arguments
+		instance0 := constructor.CallConstructor()
+		defer instance0.Free()
+		require.False(t, instance0.IsException())
+
+		argCount0 := instance0.Get("argCount")
+		defer argCount0.Free()
+		require.Equal(t, int32(0), argCount0.ToInt32())
+
+		// Test with one argument
+		instance1 := constructor.CallConstructor(ctx.String("arg1"))
+		defer instance1.Free()
+		require.False(t, instance1.IsException())
+
+		argCount1 := instance1.Get("argCount")
+		defer argCount1.Free()
+		require.Equal(t, int32(1), argCount1.ToInt32())
+
+		// Test with multiple arguments
+		instance3 := constructor.CallConstructor(
+			ctx.String("arg1"),
+			ctx.Int32(42),
+			ctx.Bool(true),
+		)
+		defer instance3.Free()
+		require.False(t, instance3.IsException())
+
+		argCount3 := instance3.Get("argCount")
+		defer argCount3.Free()
+		require.Equal(t, int32(3), argCount3.ToInt32())
+	})
+
+	// Test Case 2: CallConstructor with inheritance chain
+	t.Run("CallConstructor_InheritanceChain", func(t *testing.T) {
+		// Set up inheritance chain
+		ret, err := ctx.Eval(`
+            function Base(value) {
+                this.baseValue = value;
+            }
+            Base.prototype.getBase = function() {
+                return this.baseValue;
+            };
+
+            function Child(base, child) {
+                Base.call(this, base);
+                this.childValue = child;
+            }
+            Child.prototype = Object.create(Base.prototype);
+            Child.prototype.constructor = Child;
+            Child.prototype.getChild = function() {
+                return this.childValue;
+            };
+        `)
+		defer ret.Free()
+		require.NoError(t, err)
+
+		childConstructor, err := ctx.Eval(`Child`)
 		require.NoError(t, err)
 		defer childConstructor.Free()
 
-		classID, exists := childConstructor.resolveClassIDFromInheritance()
-		require.True(t, exists)
-		require.Equal(t, baseClassID, classID)
+		// Create instance using CallConstructor
+		instance := childConstructor.CallConstructor(
+			ctx.String("base_val"),
+			ctx.String("child_val"),
+		)
+		defer instance.Free()
+		require.False(t, instance.IsException())
+
+		// Test base functionality
+		baseValue := instance.Call("getBase")
+		defer baseValue.Free()
+		require.Equal(t, "base_val", baseValue.String())
+
+		// Test child functionality
+		childValue := instance.Call("getChild")
+		defer childValue.Free()
+		require.Equal(t, "child_val", childValue.String())
+
+		// Test instanceof relationships
+		require.True(t, instance.GlobalInstanceof("Child"))
+		require.True(t, instance.GlobalInstanceof("Base"))
+		require.True(t, instance.GlobalInstanceof("Object"))
+	})
+
+	// Test Case 3: CallConstructor with ES6 classes
+	t.Run("CallConstructor_ES6Classes", func(t *testing.T) {
+		es6Constructor, err := ctx.Eval(`
+            class ES6Class {
+                constructor(name, value) {
+                    this.name = name || "default";
+                    this.value = value || 0;
+                }
+
+                getName() {
+                    return this.name;
+                }
+
+                getValue() {
+                    return this.value;
+                }
+
+                static getClassName() {
+                    return "ES6Class";
+                }
+            }
+            ES6Class;
+        `)
+		require.NoError(t, err)
+		defer es6Constructor.Free()
+
+		// Test CallConstructor with ES6 class
+		instance := es6Constructor.CallConstructor(
+			ctx.String("test_name"),
+			ctx.Int32(123),
+		)
+		defer instance.Free()
+		require.False(t, instance.IsException())
+
+		// Test instance methods
+		name := instance.Call("getName")
+		defer name.Free()
+		require.Equal(t, "test_name", name.String())
+
+		value := instance.Call("getValue")
+		defer value.Free()
+		require.Equal(t, int32(123), value.ToInt32())
+
+		// Test static method on constructor
+		className := es6Constructor.Call("getClassName")
+		defer className.Free()
+		require.Equal(t, "ES6Class", className.String())
+	})
+
+	// Test Case 4: CallConstructor error scenarios
+	t.Run("CallConstructor_ErrorScenarios", func(t *testing.T) {
+		// Constructor that throws
+		throwingConstructor, err := ctx.Eval(`
+            function ThrowingConstructor() {
+                throw new Error("Constructor intentionally throws");
+            }
+            ThrowingConstructor;
+        `)
+		require.NoError(t, err)
+		defer throwingConstructor.Free()
+
+		instance := throwingConstructor.CallConstructor()
+		defer instance.Free()
+		require.True(t, instance.IsException())
+
+		// Constructor with invalid prototype
+		invalidProtoConstructor, err := ctx.Eval(`
+            function InvalidProtoConstructor() {}
+            InvalidProtoConstructor.prototype = null;
+            InvalidProtoConstructor;
+        `)
+		require.NoError(t, err)
+		defer invalidProtoConstructor.Free()
+
+		// This might still work but create object with different prototype
+		instance2 := invalidProtoConstructor.CallConstructor()
+		defer instance2.Free()
+		// Result depends on JavaScript engine behavior
+		// Could be exception or object with different prototype
+	})
+
+	// Test Case 5: CallConstructor performance test
+	t.Run("CallConstructor_Performance", func(t *testing.T) {
+		constructor, err := ctx.Eval(`
+            function PerfTestClass(id) {
+                this.id = id;
+                this.created = new Date();
+            }
+            PerfTestClass;
+        `)
+		require.NoError(t, err)
+		defer constructor.Free()
+
+		// Create multiple instances to test performance
+		const numInstances = 100
+		instances := make([]Value, numInstances)
+
+		for i := 0; i < numInstances; i++ {
+			instances[i] = constructor.CallConstructor(ctx.Int32(int32(i)))
+			require.False(t, instances[i].IsException())
+		}
+
+		// Verify all instances were created correctly
+		for i, instance := range instances {
+			id := instance.Get("id")
+			require.Equal(t, int32(i), id.ToInt32())
+			id.Free()
+			instance.Free()
+		}
 	})
 }

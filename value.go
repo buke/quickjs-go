@@ -9,7 +9,6 @@ import (
 	"errors"
 	"math"
 	"math/big"
-	"reflect"
 	"unsafe"
 )
 
@@ -221,6 +220,17 @@ func (v Value) New(args ...Value) Value {
 }
 
 // CallConstructor calls the constructor with the given arguments.
+// SCHEME C: For class instances, use this method to create instances.
+// The class constructor function will receive a pre-created instance and initialize it.
+// Instance properties declared in ClassBuilder.Property() are automatically bound to the instance.
+//
+// Example usage:
+//
+//	constructor := ctx.Eval("MyClass")
+//	instance := constructor.CallConstructor(arg1, arg2)
+//
+// This replaces the previous NewInstance method and provides automatic property binding
+// and simplified constructor semantics where constructors work with pre-created instances.
 func (v Value) CallConstructor(args ...Value) Value {
 	cargs := []C.JSValue{}
 	for _, x := range args {
@@ -752,7 +762,7 @@ func (v Value) GetClassID() uint32 {
 }
 
 // GetGoObject retrieves Go object from JavaScript class instance
-// This method extracts the opaque data stored by NewInstance
+// This method extracts the opaque data stored by the constructor proxy
 func (v Value) GetGoObject() (interface{}, error) {
 	// First check if the value is an object
 	if !v.IsObject() {
@@ -792,62 +802,6 @@ func (v Value) IsInstanceOfConstructor(constructor Value) bool {
 	}
 
 	return C.JS_IsInstanceOf(v.ctx.ref, v.ref, constructor.ref) == 1
-}
-
-// =============================================================================
-// CLASS INSTANCE CREATION METHODS
-// =============================================================================
-
-// NewInstance creates a class instance using this value as new_target
-// This method should be called on constructor functions to create instances with proper inheritance support
-//
-// IMPORTANT: goObj must be a pointer type to ensure proper reference semantics and performance.
-//
-// Example usage in constructor functions:
-//
-//	func pointConstructor(ctx *Context, newTarget Value, args []Value) Value {
-//	    point := &Point{X: x, Y: y}  // Must be pointer
-//	    return newTarget.NewInstance(point)
-//	}
-func (v Value) NewInstance(goObj interface{}) Value {
-	// Validate that this value is a constructor function
-	if !v.IsConstructor() {
-		return v.ctx.ThrowTypeError("NewInstance can only be called on constructor functions")
-	}
-
-	// Validate pointer type for proper semantics
-	if err := validatePointerType(goObj); err != nil {
-		return v.ctx.ThrowTypeError(err.Error())
-	}
-
-	// Try to get classID directly from the constructor
-	classID, exists := getConstructorClassID(v.ref)
-
-	// If not found directly, try inheritance fallback by checking prototype chain
-	if !exists {
-		classID, exists = v.resolveClassIDFromInheritance()
-	}
-
-	if !exists {
-		return v.ctx.ThrowError(errors.New("constructor not registered in global class registry"))
-	}
-
-	// Store Go object in HandleStore for automatic memory management
-	var handleID int32 = 0
-	if goObj != nil {
-		handleID = v.ctx.handleStore.Store(goObj)
-	}
-
-	// Use C helper function to create the class instance
-	// This encapsulates all the complex prototype/object creation logic
-	jsObj := C.CreateClassInstance(v.ctx.ref, v.ref, C.JSClassID(classID), C.int32_t(handleID))
-
-	// Check if creation failed and clean up if necessary
-	if C.JS_IsException(jsObj) != 0 {
-		v.ctx.handleStore.Delete(handleID)
-		return Value{ctx: v.ctx, ref: jsObj}
-	}
-	return Value{ctx: v.ctx, ref: jsObj}
 }
 
 // resolveClassIDFromInheritance attempts to resolve classID by checking if this constructor
@@ -900,21 +854,4 @@ func (v Value) resolveClassIDFromInheritance() (uint32, bool) {
 	}
 
 	return 0, false
-}
-
-func validatePointerType(obj interface{}) error {
-	// Case 1: obj is nil interface{} - allow it
-	if obj == nil {
-		return nil
-	}
-
-	objValue := reflect.ValueOf(obj)
-
-	// Case 2: obj is a pointer type (including typed nil pointers) - allow it
-	if objValue.Kind() == reflect.Ptr {
-		return nil // Allow both nil and non-nil pointers
-	}
-
-	// Case 3: obj is a value type - reject it
-	return errors.New("goObj must be a pointer type for proper reference semantics")
 }

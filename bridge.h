@@ -35,6 +35,9 @@ extern int JS_IsObject_Wrapper(JSValue val);
 // Constant getters
 extern int GetPropertyWritableConfigurable();
 extern int GetPropertyConfigurable();
+extern int GetPropertyWritable();
+extern int GetPropertyEnumerable();
+extern int GetPropertyDefault();
 extern int GetTypedArrayInt8();
 extern int GetTypedArrayUint8();
 extern int GetTypedArrayUint8C();
@@ -70,6 +73,31 @@ extern int ValueGetTag(JSValueConst v);
 extern void* JS_VALUE_GET_PTR_Wrapper(JSValue val); 
 extern int JS_DeletePropertyInt64(JSContext *ctx, JSValueConst obj, int64_t idx, int flags);
 
+// Class creation structures
+// Method configuration structure
+typedef struct {
+    const char *name;
+    int32_t handler_id;
+    int length;
+    int is_static;
+} MethodEntry;
+
+// Accessor configuration structure
+typedef struct {
+    const char *name;
+    int32_t getter_id;
+    int32_t setter_id;
+    int is_static;
+} AccessorEntry;
+
+// Property configuration structure for data properties
+typedef struct {
+    const char *name;
+    JSValue value;
+    int is_static;
+    int flags;
+} PropertyEntry;
+
 // Function proxy for regular functions
 extern JSValue GoFunctionProxy(JSContext *ctx, JSValueConst this_val, 
                               int argc, JSValueConst *argv, int magic);
@@ -83,44 +111,16 @@ extern JSValue GoClassConstructorProxy(JSContext *ctx, JSValueConst new_target,
 extern JSValue GoClassMethodProxy(JSContext *ctx, JSValueConst this_val,
                                  int argc, JSValueConst *argv, int magic);
 
-// Property getter proxy
+// Accessor getter proxy
 extern JSValue GoClassGetterProxy(JSContext *ctx, JSValueConst this_val, int magic);
 
-// Property setter proxy  
+// Accessor setter proxy  
 extern JSValue GoClassSetterProxy(JSContext *ctx, JSValueConst this_val, 
                                  JSValueConst val, int magic);
 
 // Finalizer proxy - unified cleanup handler
 extern void GoClassFinalizerProxy(JSRuntime *rt, JSValue val);
 
-// NewInstance helper function - encapsulates object creation logic
-// This function handles the complex prototype/object creation logic from NewInstance
-// Returns JS_EXCEPTION on any error, proper JSValue on success
-extern JSValue CreateClassInstance(JSContext *ctx, JSValue constructor, 
-                                  JSClassID class_id, int32_t handle_id);
-
-// CreateCFunction - encapsulates C function creation logic
-// Parameters match JS_NewCFunction2: ctx, name, length, cproto, magic
-// Returns JS_EXCEPTION on any error, proper JSValue on success
-extern JSValue CreateCFunction(JSContext *ctx, const char *name, 
-                              int length, int func_type, int32_t handler_id);
-
-// Class creation structures
-// Method configuration structure
-typedef struct {
-    const char *name;
-    int32_t handler_id;
-    int length;
-    int is_static;
-} MethodEntry;
-
-// Property configuration structure
-typedef struct {
-    const char *name;
-    int32_t getter_id;
-    int32_t setter_id;
-    int is_static;
-} PropertyEntry;
 
 // Complete class creation function
 // C function allocates class_id internally and returns it via pointer
@@ -130,7 +130,29 @@ extern JSValue CreateClass(JSContext *ctx,
                           JSClassDef *class_def,      // Go layer manages memory
                           int32_t constructor_id,
                           const MethodEntry *methods, int method_count,
+                          const AccessorEntry *accessors, int accessor_count,
                           const PropertyEntry *properties, int property_count);
+
+// MODIFIED FOR SCHEME C: CreateClassInstance with instance property binding support
+// This function handles the instance creation and property binding for Scheme C:
+// 1. Getting prototype from constructor
+// 2. Creating JS object with correct prototype and class
+// 3. Binding instance properties to the created object (NEW)
+// 4. Error handling and cleanup
+// 
+// Note: Go object association is now handled by constructor proxy, not here
+// Returns JS_EXCEPTION on any error, proper JSValue on success
+extern JSValue CreateClassInstance(JSContext *ctx, JSValue constructor, 
+                                  JSClassID class_id,
+                                  const PropertyEntry *instance_properties,
+                                  int instance_property_count);
+
+// CreateCFunction - encapsulates C function creation logic
+// Parameters match JS_NewCFunction2: ctx, name, length, cproto, magic
+// Returns JS_EXCEPTION on any error, proper JSValue on success
+extern JSValue CreateCFunction(JSContext *ctx, const char *name, 
+                              int length, int func_type, int32_t handler_id);
+
 
 extern int ValueGetTag(JSValueConst v);
 extern JSValue LoadModuleBytecode(JSContext *ctx, const uint8_t *buf, size_t buf_len, int load_only);

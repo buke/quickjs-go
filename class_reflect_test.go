@@ -152,7 +152,7 @@ func TestReflectionBasicBinding(t *testing.T) {
 
 	ctx.Globals().Set("Person", constructor)
 
-	// Test instance creation and property access
+	// Test instance creation and accessor access
 	result, err := ctx.Eval(`
         let person = new Person();
         person.firstName = "John";
@@ -592,7 +592,7 @@ func TestReflectionConstructorErrors(t *testing.T) {
 
 	// Test positional argument conversion error
 	t.Run("PositionalArgumentError", func(t *testing.T) {
-		_, err := ctx.Eval(`
+		ret, err := ctx.Eval(`
             try {
                 // Pass an object where an int is expected for age
                 new Person("John", "Doe", {invalid: "object"}, 50000, true);
@@ -600,15 +600,16 @@ func TestReflectionConstructorErrors(t *testing.T) {
                 throw e;
             }
         `)
+		defer ret.Free()
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "constructor initialization failed")
 	})
 
 	// Test object argument conversion error
 	t.Run("ObjectArgumentError", func(t *testing.T) {
-		_, err := ctx.Eval(`
+		ret, err := ctx.Eval(`
             try {
-                // Pass an object where an int is expected for age property
+                // Pass an object where an int is expected for age accessor
                 new Person({
                     firstName: "John",
                     lastName: "Doe",
@@ -618,6 +619,7 @@ func TestReflectionConstructorErrors(t *testing.T) {
                 throw e;
             }
         `)
+		defer ret.Free()
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "constructor initialization failed")
 	})
@@ -653,7 +655,7 @@ func TestReflectionConstructorErrors(t *testing.T) {
 	})
 }
 
-func TestReflectionPropertySetterErrors(t *testing.T) {
+func TestReflectionAccessorSetterErrors(t *testing.T) {
 	rt := NewRuntime()
 	defer rt.Close()
 	ctx := rt.NewContext()
@@ -663,7 +665,7 @@ func TestReflectionPropertySetterErrors(t *testing.T) {
 	require.NoError(t, err)
 	ctx.Globals().Set("Person", constructor)
 
-	// Test property setter conversion error
+	// Test accessor setter conversion error
 	result, err := ctx.Eval(`
         (function() {
             let person = new Person();
@@ -691,7 +693,7 @@ func TestReflectionMarshalErrors(t *testing.T) {
 	require.NoError(t, err)
 	ctx.Globals().Set("ProblematicStruct", constructor)
 
-	// Test property getter marshal error
+	// Test accessor getter marshal error
 	result, err := ctx.Eval(`
         (function() {
             let obj = new ProblematicStruct();
@@ -750,7 +752,7 @@ func TestReflectionFieldTagEdgeCases(t *testing.T) {
 	require.NoError(t, err)
 	ctx.Globals().Set("EdgeCaseStruct", constructor)
 
-	// Test property names with empty tag names
+	// Test accessor names with empty tag names
 	result, err := ctx.Eval(`
         (function() {
             let obj = new EdgeCaseStruct();
@@ -855,7 +857,7 @@ func TestReflectionEdgeCases(t *testing.T) {
 		result, err := ctx.Eval(`
             (function() {
                 let obj = new PrivateStruct();
-                return Object.keys(obj).length; // Should have no enumerable properties
+                return Object.keys(obj).length; // Should have no enumerable accessors
             })();
         `)
 		require.NoError(t, err)
@@ -932,7 +934,7 @@ func TestReflectionMethodOnNonClassInstance(t *testing.T) {
 	require.Contains(t, result.String(), "failed to get instance data")
 }
 
-func TestReflectionPropertyGetterOnNonClassInstance(t *testing.T) {
+func TestReflectionAccessorGetterOnNonClassInstance(t *testing.T) {
 	rt := NewRuntime()
 	defer rt.Close()
 	ctx := rt.NewContext()
@@ -942,14 +944,14 @@ func TestReflectionPropertyGetterOnNonClassInstance(t *testing.T) {
 	require.NoError(t, err)
 	ctx.Globals().Set("Person", constructor)
 
-	// Test accessing property getter on wrong object type - covers createFieldGetter error branch
+	// Test accessing accessor getter on wrong object type - covers createFieldGetter error branch
 	result, err := ctx.Eval(`
         (function() {
             let person = new Person();
             let fakeObj = {};
             
             try {
-                // Get the property descriptor and call getter on wrong object
+                // Get the accessor descriptor and call getter on wrong object
                 let desc = Object.getOwnPropertyDescriptor(Person.prototype, 'firstName');
                 desc.get.call(fakeObj);
                 return "should_not_reach";
@@ -963,7 +965,7 @@ func TestReflectionPropertyGetterOnNonClassInstance(t *testing.T) {
 	require.Contains(t, result.String(), "failed to get instance data")
 }
 
-func TestReflectionPropertySetterOnNonClassInstance(t *testing.T) {
+func TestReflectionAccessorSetterOnNonClassInstance(t *testing.T) {
 	rt := NewRuntime()
 	defer rt.Close()
 	ctx := rt.NewContext()
@@ -973,14 +975,14 @@ func TestReflectionPropertySetterOnNonClassInstance(t *testing.T) {
 	require.NoError(t, err)
 	ctx.Globals().Set("Person", constructor)
 
-	// Test accessing property setter on wrong object type - covers createFieldSetter error branch
+	// Test accessing accessor setter on wrong object type - covers createFieldSetter error branch
 	result, err := ctx.Eval(`
         (function() {
             let person = new Person();
             let fakeObj = {};
             
             try {
-                // Get the property descriptor and call setter on wrong object
+                // Get the accessor descriptor and call setter on wrong object
                 let desc = Object.getOwnPropertyDescriptor(Person.prototype, 'firstName');
                 desc.set.call(fakeObj, "test");
                 return "should_not_reach";

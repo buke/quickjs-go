@@ -81,7 +81,7 @@ func (ctx *Context) BindClass(structType interface{}, options ...ReflectOption) 
 //	if err != nil { return err }
 //	constructor, classID, err := builder.
 //	    StaticMethod("Create", myCreateFunc).
-//	    ReadOnlyProperty("version", myVersionGetter).
+//	    ReadOnlyAccessor("version", myVersionGetter).
 //	    Build(ctx)
 func (ctx *Context) BindClassBuilder(structType interface{}, options ...ReflectOption) (*ClassBuilder, error) {
 	// Parse options with defaults (zero values are appropriate defaults)
@@ -103,7 +103,7 @@ func (ctx *Context) BindClassBuilder(structType interface{}, options ...ReflectO
 	}
 
 	// Build ClassBuilder using reflection analysis
-	return buildClassFromReflection(className, typ, opts)
+	return buildClassFromReflection(ctx, className, typ, opts)
 }
 
 // getReflectType extracts reflect.Type from various input types
@@ -141,28 +141,32 @@ func getReflectType(structType interface{}) (reflect.Type, error) {
 }
 
 // buildClassFromReflection creates a ClassBuilder from reflection analysis
-func buildClassFromReflection(className string, typ reflect.Type, opts *ReflectOptions) (*ClassBuilder, error) {
+// MODIFIED FOR SCHEME C: Constructor signature changed to receive instance and return Go object
+func buildClassFromReflection(ctx *Context, className string, typ reflect.Type, opts *ReflectOptions) (*ClassBuilder, error) {
 	builder := NewClassBuilder(className)
 
-	// Add default constructor with mixed parameter support
-	builder.Constructor(func(ctx *Context, newTarget Value, args []Value) Value {
-		// Create new instance of the struct
-		instance := reflect.New(typ).Interface()
+	// SCHEME C: Modified constructor with new signature
+	// Constructor now receives pre-created instance and returns Go object to associate
+	builder.Constructor(func(ctx *Context, instance Value, args []Value) (interface{}, error) {
+		// Create new Go object instance
+		goObject := reflect.New(typ).Interface()
 
 		// Initialize from constructor arguments using mixed parameter strategy
 		if len(args) > 0 {
-			if err := initializeFromArgs(instance, args, typ, ctx); err != nil {
-				return ctx.ThrowError(fmt.Errorf("constructor initialization failed: %w", err))
+			if err := initializeFromArgs(goObject, args, typ, ctx); err != nil {
+				return nil, fmt.Errorf("constructor initialization failed: %w", err)
 			}
 		}
 
-		return newTarget.NewInstance(instance)
+		// SCHEME C: Return Go object for automatic association with instance
+		// The framework handles accessor-based synchronization automatically
+		return goObject, nil
 	})
 
-	// Add properties (only exported fields)
-	addReflectionProperties(builder, typ, opts)
+	// Add accessors (only exported fields) - unchanged
+	addReflectionAccessors(builder, typ, opts)
 
-	// Add methods (only exported methods)
+	// Add methods (only exported methods) - unchanged
 	addReflectionMethods(builder, typ, opts)
 
 	return builder, nil
@@ -263,9 +267,9 @@ func addReflectionMethods(builder *ClassBuilder, typ reflect.Type, opts *Reflect
 	}
 }
 
-// addReflectionProperties scans struct fields and adds them as properties
+// addReflectionAccessors scans struct fields and adds them as accessors
 // Only exported fields are processed to maintain Go encapsulation principles
-func addReflectionProperties(builder *ClassBuilder, typ reflect.Type, opts *ReflectOptions) {
+func addReflectionAccessors(builder *ClassBuilder, typ reflect.Type, opts *ReflectOptions) {
 	for i := 0; i < typ.NumField(); i++ {
 		field := typ.Field(i)
 
@@ -283,8 +287,8 @@ func addReflectionProperties(builder *ClassBuilder, typ reflect.Type, opts *Refl
 		getter := createFieldGetter(field, i)
 		setter := createFieldSetter(field, i)
 
-		// Add property to builder (instance properties by default)
-		builder.Property(tagInfo.Name, getter, setter)
+		// Add accessor to builder (instance accessors by default)
+		builder.Accessor(tagInfo.Name, getter, setter)
 	}
 }
 
@@ -375,7 +379,7 @@ func createFieldGetter(field reflect.StructField, fieldIndex int) ClassGetterFun
 		}
 
 		// In our implementation, fieldIndex is always valid since it comes from
-		// the loop in addReflectionProperties, and fieldValue is always valid
+		// the loop in addReflectionAccessors, and fieldValue is always valid
 		// for exported fields that we bind
 		fieldValue := objValue.Field(fieldIndex)
 

@@ -737,11 +737,11 @@ When unmarshaling into `interface{}`, the following types are used:
 
 ### Class Binding
 
-QuickJS-Go provides powerful class binding capabilities that allow you to seamlessly bridge Go structs to JavaScript classes.
+QuickJS-Go provides powerful class binding capabilities that allow you to seamlessly bridge Go structs to JavaScript classes with automatic memory management and inheritance support.
 
 #### Manual Class Binding
 
-Create JavaScript classes manually with full control over methods and properties:
+Create JavaScript classes manually with full control over methods, properties, and accessors:
 
 ```go
 package main
@@ -754,6 +754,7 @@ import (
 
 type Point struct {
     X, Y float64
+    Name string
 }
 
 func (p *Point) Distance() float64 {
@@ -773,34 +774,44 @@ func main() {
 
     // Create Point class using ClassBuilder
     pointConstructor, _, err := quickjs.NewClassBuilder("Point").
-        Constructor(func(ctx *quickjs.Context, newTarget quickjs.Value, args []quickjs.Value) quickjs.Value {
+        Constructor(func(ctx *quickjs.Context, instance quickjs.Value, args []quickjs.Value) (interface{}, error) {
             x, y := 0.0, 0.0
-            if len(args) > 0 { x = args[0].ToFloat64() }
-            if len(args) > 1 { y = args[1].ToFloat64() }
+            name := "Unnamed Point"
             
-            point := &Point{X: x, Y: y}
-            return newTarget.NewInstance(point)
+            if len(args) > 0 { x = args[0].Float64() }
+            if len(args) > 1 { y = args[1].Float64() }
+            if len(args) > 2 { name = args[2].String() }
+            
+            // Return Go object for automatic association
+            return &Point{X: x, Y: y, Name: name}, nil
         }).
-        Property("x", 
+        // Accessors provide getter/setter functionality with custom logic
+        Accessor("x", 
             func(ctx *quickjs.Context, this quickjs.Value) quickjs.Value {
                 point, _ := this.GetGoObject()
                 return ctx.Float64(point.(*Point).X)
             },
             func(ctx *quickjs.Context, this quickjs.Value, value quickjs.Value) quickjs.Value {
                 point, _ := this.GetGoObject()
-                point.(*Point).X = value.ToFloat64()
-                return value
+                point.(*Point).X = value.Float64()
+                return ctx.Undefined()
             }).
-        Property("y",
+        Accessor("y",
             func(ctx *quickjs.Context, this quickjs.Value) quickjs.Value {
                 point, _ := this.GetGoObject()
                 return ctx.Float64(point.(*Point).Y)
             },
             func(ctx *quickjs.Context, this quickjs.Value, value quickjs.Value) quickjs.Value {
                 point, _ := this.GetGoObject()
-                point.(*Point).Y = value.ToFloat64()
-                return value
+                point.(*Point).Y = value.Float64()
+                return ctx.Undefined()
             }).
+        // Properties are bound directly to each instance (faster for static values)
+        Property("version", ctx.String("1.0.0")).
+        Property("type", ctx.String("Point")).
+        // Read-only property
+        Property("readOnly", ctx.Bool(true), quickjs.PropertyConfigurable).
+        // Instance methods
         Method("distance", func(ctx *quickjs.Context, this quickjs.Value, args []quickjs.Value) quickjs.Value {
             point, _ := this.GetGoObject()
             return ctx.Float64(point.(*Point).Distance())
@@ -808,10 +819,21 @@ func main() {
         Method("move", func(ctx *quickjs.Context, this quickjs.Value, args []quickjs.Value) quickjs.Value {
             point, _ := this.GetGoObject()
             dx, dy := 0.0, 0.0
-            if len(args) > 0 { dx = args[0].ToFloat64() }
-            if len(args) > 1 { dy = args[1].ToFloat64() }
+            if len(args) > 0 { dx = args[0].Float64() }
+            if len(args) > 1 { dy = args[1].Float64() }
             point.(*Point).Move(dx, dy)
             return ctx.Undefined()
+        }).
+        Method("getName", func(ctx *quickjs.Context, this quickjs.Value, args []quickjs.Value) quickjs.Value {
+            point, _ := this.GetGoObject()
+            return ctx.String(point.(*Point).Name)
+        }).
+        // Static method
+        StaticMethod("origin", func(ctx *quickjs.Context, this quickjs.Value, args []quickjs.Value) quickjs.Value {
+            // Create a new Point at origin
+            origin := &Point{X: 0, Y: 0, Name: "Origin"}
+            jsVal, _ := ctx.Marshal(origin)
+            return jsVal
         }).
         Build(ctx)
 
@@ -824,27 +846,57 @@ func main() {
 
     // Use in JavaScript
     result, _ := ctx.Eval(`
-        const p = new Point(3, 4);
+        const p = new Point(3, 4, "My Point");
         const dist1 = p.distance();
         p.move(1, 1);
         const dist2 = p.distance();
         
+        // Static method usage
+        const origin = Point.origin();
+        
         ({ 
-            initial: dist1, 
-            afterMove: dist2, 
-            x: p.x, 
-            y: p.y 
+            // Accessor usage
+            x: p.x,
+            y: p.y,
+            // Property usage
+            version: p.version,
+            type: p.type,
+            readOnly: p.readOnly,
+            hasOwnProperty: p.hasOwnProperty('version'), // true for properties
+            // Method results
+            name: p.getName(),
+            initialDistance: dist1,
+            finalDistance: dist2,
+            // Static method result
+            originDistance: Math.sqrt(origin.x * origin.x + origin.y * origin.y)
         });
     `)
     defer result.Free()
     
     fmt.Println("Result:", result.JSONStringify())
+    
+    // Demonstrate the difference between accessors and properties
+    propertyTest, _ := ctx.Eval(`
+        const p1 = new Point(1, 1);
+        const p2 = new Point(2, 2);
+        
+        // Properties are instance-specific values
+        const sameVersion = p1.version === p2.version; // true, same static value
+        
+        // Accessors provide dynamic values from Go object
+        const differentX = p1.x !== p2.x; // true, different values from Go objects
+        
+        ({ sameVersion, differentX });
+    `)
+    defer propertyTest.Free()
+    
+    fmt.Println("Property vs Accessor:", propertyTest.JSONStringify())
 }
 ```
 
 #### Automatic Class Binding with Reflection
 
-Automatically generate JavaScript classes from Go structs using reflection:
+Automatically generate JavaScript classes from Go structs using reflection. **Important: Go struct fields are automatically converted to JavaScript class accessors, providing getter/setter functionality that directly maps to the underlying Go object fields, ensuring automatic synchronization between JavaScript and Go.**
 
 ```go
 package main
@@ -855,14 +907,14 @@ import (
 )
 
 type User struct {
-    ID        int64     `js:"id"`
-    Name      string    `js:"name"`
-    Email     string    `json:"email_address"`
-    Age       int       `js:"age"`
-    IsActive  bool      `js:"is_active"`
-    Scores    []float32 `js:"scores"`    // Becomes Float32Array
-    private   string    // Not accessible
-    Secret    string    `js:"-"`         // Explicitly ignored
+    ID        int64     `js:"id"`           // Becomes accessor: user.id
+    Name      string    `js:"name"`         // Becomes accessor: user.name
+    Email     string    `json:"email_address"` // Becomes accessor: user.email_address
+    Age       int       `js:"age"`          // Becomes accessor: user.age
+    IsActive  bool      `js:"is_active"`    // Becomes accessor: user.is_active
+    Scores    []float32 `js:"scores"`       // Becomes accessor: user.scores (Float32Array)
+    private   string    // Not accessible (unexported)
+    Secret    string    `js:"-"`            // Explicitly ignored
 }
 
 func (u *User) GetFullInfo() string {
@@ -914,15 +966,51 @@ func main() {
         user2.UpdateEmail("bob.smith@example.com");
         user2.AddScore(95.0);
         
+        // Access fields via accessors (directly map to Go struct fields)
+        user2.age = 31;        // Setter: modifies the Go struct field
+        const newAge = user2.age; // Getter: reads from the Go struct field
+        
         ({
             info: user2.GetFullInfo(),
-            email: user2.email_address,
+            email: user2.email_address,  // Accessor getter
+            age: newAge,                 // Modified via accessor setter
             scoresType: user2.scores instanceof Float32Array,
             scoresLength: user2.scores.length
         });
     `)
     defer result2.Free()
     fmt.Println("Named:", result2.JSONStringify())
+
+    // Demonstrate field accessor automatic synchronization
+    result3, _ := ctx.Eval(`
+        const user3 = new User(3, "Charlie", "charlie@example.com", 35, true, []);
+        
+        // Field accessors provide direct access to Go struct fields with automatic sync
+        const originalName = user3.name;  // Getter: reads Go struct field
+        
+        user3.name = "Charles";           // Setter: modifies Go struct field immediately
+        const newName = user3.name;       // Getter: reads modified field
+        
+        // Changes are automatically synchronized with Go object
+        const info = user3.GetFullInfo(); // Method sees the changed name immediately
+        
+        // Verify synchronization by changing multiple fields
+        user3.age = 36;
+        user3.email_address = "charles.updated@example.com";
+        const updatedInfo = user3.GetFullInfo();
+        
+        ({
+            originalName: originalName,
+            newName: newName,
+            infoAfterNameChange: info,
+            finalInfo: updatedInfo,
+            // Demonstrate that Go object is truly synchronized
+            goObjectAge: user3.age,
+            goObjectEmail: user3.email_address
+        });
+    `)
+    defer result3.Free()
+    fmt.Println("Auto-sync demonstration:", result3.JSONStringify())
 }
 ```
 
@@ -939,10 +1027,10 @@ import (
 )
 
 type APIClient struct {
-    BaseURL    string `js:"baseUrl"`
-    APIKey     string `js:"-"`          // Hidden from JavaScript
-    Version    string `js:"version"`
-    UserAgent  string `js:"userAgent"`
+    BaseURL    string `js:"baseUrl"`      // Becomes accessor: client.baseUrl
+    APIKey     string `js:"-"`            // Hidden from JavaScript
+    Version    string `js:"version"`      // Becomes accessor: client.version
+    UserAgent  string `js:"userAgent"`    // Becomes accessor: client.userAgent
 }
 
 func (c *APIClient) Get(endpoint string) string {
@@ -982,16 +1070,25 @@ func main() {
             userAgent: "MyApp/1.0"
         });
         
+        // Field accessors work for all exported fields with automatic sync
+        const originalUrl = client.baseUrl;  // Getter
+        client.baseUrl = "https://api.example.com/v2/"; // Setter: updates Go struct
+        const newUrl = client.baseUrl;       // Getter shows updated value
+        
         ({
             get: client.Get("/users"),
             post: typeof client.Post !== 'undefined' ? client.Post("/users", {name: "test"}) : "undefined",
             hasInternal: typeof client.InternalMethod !== 'undefined',
-            hasAPIKey: typeof client.APIKey !== 'undefined'
+            hasAPIKey: typeof client.APIKey !== 'undefined',
+            originalUrl: originalUrl,
+            newUrl: newUrl,
+            // Field accessor changes are reflected in method calls
+            getWithNewUrl: client.Get("/users")
         });
     `)
     defer result.Free()
     
-    fmt.Println("Filtered binding:", result.JSONStringify())
+    fmt.Println("Filtered binding with auto-sync:", result.JSONStringify())
 }
 ```
 
@@ -1008,8 +1105,8 @@ import (
 )
 
 type Vehicle struct {
-    Brand string `js:"brand"`
-    Model string `js:"model"`
+    Brand string `js:"brand"`  // Accessor: vehicle.brand
+    Model string `js:"model"`  // Accessor: vehicle.model
 }
 
 func (v *Vehicle) Start() string {
@@ -1035,13 +1132,31 @@ func main() {
             }
             
             getInfo() {
+                // Inherited field accessors work in JavaScript subclasses with auto-sync
                 return this.Start() + " with " + this.doors + " doors";
+            }
+            
+            setBrandAndModel(brand, model) {
+                // Field accessors can be used to modify Go struct fields with immediate sync
+                this.brand = brand;  // Setter accessor: immediate Go struct update
+                this.model = model;  // Setter accessor: immediate Go struct update
             }
         }
         
-        // Test inheritance
+        // Test inheritance with field accessors and auto-sync
         const car = new Car("Toyota", "Camry", 4);
-        globalThis.result = car.getInfo();
+        const info1 = car.getInfo();
+        
+        // Modify via inherited field accessors - changes are immediately reflected
+        car.setBrandAndModel("Honda", "Accord");
+        const info2 = car.getInfo();
+        
+        globalThis.result = { 
+            original: info1, 
+            modified: info2,
+            brand: car.brand,  // Getter accessor: reads current Go struct value
+            model: car.model   // Getter accessor: reads current Go struct value
+        };
     `)
     if err != nil {
         panic(err)
@@ -1049,7 +1164,145 @@ func main() {
 
     result := ctx.Globals().Get("result")
     defer result.Free()
-    fmt.Println("Inheritance:", result.String())
+    fmt.Println("Inheritance with Auto-sync Accessors:", result.JSONStringify())
+}
+```
+
+#### Direct Constructor Calls
+
+Use `CallConstructor` for direct class instantiation from Go:
+
+```go
+package main
+
+import (
+    "fmt"
+    "github.com/buke/quickjs-go"
+)
+
+type Point struct {
+    X, Y float64
+}
+
+func main() {
+    rt := quickjs.NewRuntime()
+    defer rt.Close()
+    ctx := rt.NewContext()
+    defer ctx.Close()
+
+    // Create Point class
+    pointConstructor, _, err := quickjs.NewClassBuilder("Point").
+        Constructor(func(ctx *quickjs.Context, instance quickjs.Value, args []quickjs.Value) (interface{}, error) {
+            x, y := 0.0, 0.0
+            if len(args) > 0 { x = args[0].Float64() }
+            if len(args) > 1 { y = args[1].Float64() }
+            return &Point{X: x, Y: y}, nil
+        }).
+        Method("toString", func(ctx *quickjs.Context, this quickjs.Value, args []quickjs.Value) quickjs.Value {
+            point, _ := this.GetGoObject()
+            p := point.(*Point)
+            return ctx.String(fmt.Sprintf("Point(%g, %g)", p.X, p.Y))
+        }).
+        Build(ctx)
+
+    if err != nil {
+        panic(err)
+    }
+
+    // Direct constructor call from Go
+    instance := pointConstructor.CallConstructor(ctx.Float64(10), ctx.Float64(20))
+    defer instance.Free()
+
+    // Call method on the instance
+    result := instance.Call("toString")
+    defer result.Free()
+
+    fmt.Println("Direct call result:", result.String()) // Point(10, 20)
+
+    // Get Go object from JavaScript instance
+    goObj, err := instance.GetGoObject()
+    if err == nil {
+        point := goObj.(*Point)
+        fmt.Printf("Go object: {X: %g, Y: %g}\n", point.X, point.Y)
+    }
+}
+```
+
+#### Error Handling in Constructors
+
+Handle constructor errors gracefully:
+
+```go
+package main
+
+import (
+    "fmt"
+    "errors"
+    "strings"
+    "github.com/buke/quickjs-go"
+)
+
+type ValidatedUser struct {
+    Name  string
+    Email string
+}
+
+func main() {
+    rt := quickjs.NewRuntime()
+    defer rt.Close()
+    ctx := rt.NewContext()
+    defer ctx.Close()
+
+    // Create class with constructor validation
+    userConstructor, _, err := quickjs.NewClassBuilder("ValidatedUser").
+        Constructor(func(ctx *quickjs.Context, instance quickjs.Value, args []quickjs.Value) (interface{}, error) {
+            if len(args) < 2 {
+                return nil, errors.New("ValidatedUser requires name and email")
+            }
+            
+            name := args[0].String()
+            email := args[1].String()
+            
+            if name == "" {
+                return nil, errors.New("name cannot be empty")
+            }
+            
+            if email == "" || !strings.Contains(email, "@") {
+                return nil, errors.New("invalid email address")
+            }
+            
+            return &ValidatedUser{Name: name, Email: email}, nil
+        }).
+        Method("getInfo", func(ctx *quickjs.Context, this quickjs.Value, args []quickjs.Value) quickjs.Value {
+            user, _ := this.GetGoObject()
+            u := user.(*ValidatedUser)
+            return ctx.String(fmt.Sprintf("%s <%s>", u.Name, u.Email))
+        }).
+        Build(ctx)
+
+    if err != nil {
+        panic(err)
+    }
+
+    ctx.Globals().Set("ValidatedUser", userConstructor)
+
+    // Test constructor error handling
+    result, _ := ctx.Eval(`
+        try {
+            const user1 = new ValidatedUser("Alice", "alice@example.com");
+            const info1 = user1.getInfo();
+            
+            const user2 = new ValidatedUser("", "invalid-email");
+            const info2 = user2.getInfo();
+            
+            [info1, info2];
+        } catch (error) {
+            error.message;
+        }
+    `)
+    defer result.Free()
+    
+    fmt.Println("Constructor error handling:", result.String())
 }
 ```
 
@@ -1058,25 +1311,38 @@ func main() {
 **Manual Class Binding:**
 - Full control over class structure and behavior
 - Support for instance and static methods/properties
-- Read-only, write-only, and read-write properties
-- Constructor with `new.target` support for inheritance
+- Data properties with automatic instance binding
+- Read-only, write-only, and read-write accessors
+- Constructor with error handling and instance pre-creation
 - Automatic memory management with finalizers
 
 **Automatic Reflection Binding:**
 - Zero-boilerplate class generation from Go structs
 - Smart constructor supporting both positional and named parameters
+- **Automatic field-to-accessor mapping**: Go struct fields become JavaScript accessors with getter/setter functionality
+- **Real-time synchronization**: Changes to JavaScript properties immediately update the underlying Go struct fields
+- **Bidirectional data binding**: Go method calls see JavaScript-side changes instantly
 - Automatic property mapping with `js` and `json` tag support
 - Method binding with proper parameter/return value conversion
 - TypedArray support for numeric slice fields
 - Configurable filtering for methods and fields
 
+**Key Synchronization Features:**
+- **Immediate updates**: `obj.field = value` immediately modifies the Go struct field
+- **Live data access**: Go methods always see the current JavaScript-side values
+- **No manual sync required**: Changes are automatically propagated between JavaScript and Go
+- **Type-safe conversion**: Values are properly converted between JavaScript and Go types
+- **Memory efficient**: Direct field access without intermediate serialization
+
 **Shared Features:**
 - Full JavaScript inheritance support
 - Seamless integration with Marshal/Unmarshal system
 - TypedArray support for binary data
-- Automatic memory management
+- Constructor error handling with JavaScript exceptions
+- Automatic memory management and cleanup
 - Thread-safe operation
 - Class instance validation and type checking
+- Direct constructor calls from Go code
 
 ### Bytecode Compiler
 
