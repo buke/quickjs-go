@@ -589,11 +589,6 @@ JSValue LoadModuleBytecode(JSContext *ctx, const uint8_t *buf, size_t buf_len, i
             val = JS_EvalFunction(ctx, obj);
         }
         
-        if (JS_IsException(val)) {
-            JS_FreeValue(ctx, obj);
-            return val;
-        }
-        
         return val;
     }
 }
