@@ -592,7 +592,7 @@ func TestReflectionConstructorErrors(t *testing.T) {
 
 	// Test positional argument conversion error
 	t.Run("PositionalArgumentError", func(t *testing.T) {
-		_, err := ctx.Eval(`
+		ret, err := ctx.Eval(`
             try {
                 // Pass an object where an int is expected for age
                 new Person("John", "Doe", {invalid: "object"}, 50000, true);
@@ -600,13 +600,14 @@ func TestReflectionConstructorErrors(t *testing.T) {
                 throw e;
             }
         `)
+		defer ret.Free()
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "constructor initialization failed")
 	})
 
 	// Test object argument conversion error
 	t.Run("ObjectArgumentError", func(t *testing.T) {
-		_, err := ctx.Eval(`
+		ret, err := ctx.Eval(`
             try {
                 // Pass an object where an int is expected for age accessor
                 new Person({
@@ -618,6 +619,7 @@ func TestReflectionConstructorErrors(t *testing.T) {
                 throw e;
             }
         `)
+		defer ret.Free()
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "constructor initialization failed")
 	})

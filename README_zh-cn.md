@@ -737,11 +737,11 @@ func main() {
 
 ### 类绑定
 
-QuickJS-Go 提供强大的类绑定功能，允许您无缝地将 Go 结构体桥接到 JavaScript 类。
+QuickJS-Go 提供强大的类绑定功能，允许您无缝地将 Go 结构体桥接到 JavaScript 类，具有自动内存管理和继承支持。
 
 #### 手动类绑定
 
-手动创建 JavaScript 类，完全控制方法和属性：
+手动创建 JavaScript 类，完全控制方法、属性和访问器：
 
 ```go
 package main
@@ -754,6 +754,7 @@ import (
 
 type Point struct {
     X, Y float64
+    Name string
 }
 
 func (p *Point) Distance() float64 {
@@ -773,34 +774,44 @@ func main() {
 
     // 使用 ClassBuilder 创建 Point 类
     pointConstructor, _, err := quickjs.NewClassBuilder("Point").
-        Constructor(func(ctx *quickjs.Context, newTarget quickjs.Value, args []quickjs.Value) quickjs.Value {
+        Constructor(func(ctx *quickjs.Context, instance quickjs.Value, args []quickjs.Value) (interface{}, error) {
             x, y := 0.0, 0.0
-            if len(args) > 0 { x = args[0].ToFloat64() }
-            if len(args) > 1 { y = args[1].ToFloat64() }
+            name := "未命名点"
             
-            point := &Point{X: x, Y: y}
-            return newTarget.NewInstance(point)
+            if len(args) > 0 { x = args[0].Float64() }
+            if len(args) > 1 { y = args[1].Float64() }
+            if len(args) > 2 { name = args[2].String() }
+            
+            // 返回 Go 对象进行自动关联
+            return &Point{X: x, Y: y, Name: name}, nil
         }).
-        Property("x", 
+        // 访问器提供带有自定义逻辑的 getter/setter 功能
+        Accessor("x", 
             func(ctx *quickjs.Context, this quickjs.Value) quickjs.Value {
                 point, _ := this.GetGoObject()
                 return ctx.Float64(point.(*Point).X)
             },
             func(ctx *quickjs.Context, this quickjs.Value, value quickjs.Value) quickjs.Value {
                 point, _ := this.GetGoObject()
-                point.(*Point).X = value.ToFloat64()
-                return value
+                point.(*Point).X = value.Float64()
+                return ctx.Undefined()
             }).
-        Property("y",
+        Accessor("y",
             func(ctx *quickjs.Context, this quickjs.Value) quickjs.Value {
                 point, _ := this.GetGoObject()
                 return ctx.Float64(point.(*Point).Y)
             },
             func(ctx *quickjs.Context, this quickjs.Value, value quickjs.Value) quickjs.Value {
                 point, _ := this.GetGoObject()
-                point.(*Point).Y = value.ToFloat64()
-                return value
+                point.(*Point).Y = value.Float64()
+                return ctx.Undefined()
             }).
+        // 属性直接绑定到每个实例（对静态值来说更快）
+        Property("version", ctx.String("1.0.0")).
+        Property("type", ctx.String("Point")).
+        // 只读属性
+        Property("readOnly", ctx.Bool(true), quickjs.PropertyConfigurable).
+        // 实例方法
         Method("distance", func(ctx *quickjs.Context, this quickjs.Value, args []quickjs.Value) quickjs.Value {
             point, _ := this.GetGoObject()
             return ctx.Float64(point.(*Point).Distance())
@@ -808,10 +819,21 @@ func main() {
         Method("move", func(ctx *quickjs.Context, this quickjs.Value, args []quickjs.Value) quickjs.Value {
             point, _ := this.GetGoObject()
             dx, dy := 0.0, 0.0
-            if len(args) > 0 { dx = args[0].ToFloat64() }
-            if len(args) > 1 { dy = args[1].ToFloat64() }
+            if len(args) > 0 { dx = args[0].Float64() }
+            if len(args) > 1 { dy = args[1].Float64() }
             point.(*Point).Move(dx, dy)
             return ctx.Undefined()
+        }).
+        Method("getName", func(ctx *quickjs.Context, this quickjs.Value, args []quickjs.Value) quickjs.Value {
+            point, _ := this.GetGoObject()
+            return ctx.String(point.(*Point).Name)
+        }).
+        // 静态方法
+        StaticMethod("origin", func(ctx *quickjs.Context, this quickjs.Value, args []quickjs.Value) quickjs.Value {
+            // 在原点创建新的 Point
+            origin := &Point{X: 0, Y: 0, Name: "原点"}
+            jsVal, _ := ctx.Marshal(origin)
+            return jsVal
         }).
         Build(ctx)
 
@@ -824,27 +846,57 @@ func main() {
 
     // 在 JavaScript 中使用
     result, _ := ctx.Eval(`
-        const p = new Point(3, 4);
+        const p = new Point(3, 4, "我的点");
         const dist1 = p.distance();
         p.move(1, 1);
         const dist2 = p.distance();
         
+        // 静态方法使用
+        const origin = Point.origin();
+        
         ({ 
-            initial: dist1, 
-            afterMove: dist2, 
-            x: p.x, 
-            y: p.y 
+            // 访问器使用
+            x: p.x,
+            y: p.y,
+            // 属性使用
+            version: p.version,
+            type: p.type,
+            readOnly: p.readOnly,
+            hasOwnProperty: p.hasOwnProperty('version'), // 属性为 true
+            // 方法结果
+            name: p.getName(),
+            initialDistance: dist1,
+            finalDistance: dist2,
+            // 静态方法结果
+            originDistance: Math.sqrt(origin.x * origin.x + origin.y * origin.y)
         });
     `)
     defer result.Free()
     
     fmt.Println("结果:", result.JSONStringify())
+    
+    // 演示访问器和属性的区别
+    propertyTest, _ := ctx.Eval(`
+        const p1 = new Point(1, 1);
+        const p2 = new Point(2, 2);
+        
+        // 属性是实例特定的值
+        const sameVersion = p1.version === p2.version; // true，相同的静态值
+        
+        // 访问器提供来自 Go 对象的动态值
+        const differentX = p1.x !== p2.x; // true，来自 Go 对象的不同值
+        
+        ({ sameVersion, differentX });
+    `)
+    defer propertyTest.Free()
+    
+    fmt.Println("属性与访问器:", propertyTest.JSONStringify())
 }
 ```
 
 #### 自动反射类绑定
 
-使用反射自动从 Go 结构体生成 JavaScript 类：
+使用反射自动从 Go 结构体生成 JavaScript 类。Go 结构体字段会自动转换为 JavaScript 类访问器，提供 getter/setter 功能，直接映射到底层 Go 对象字段。
 
 ```go
 package main
@@ -855,14 +907,14 @@ import (
 )
 
 type User struct {
-    ID        int64     `js:"id"`
-    Name      string    `js:"name"`
-    Email     string    `json:"email_address"`
-    Age       int       `js:"age"`
-    IsActive  bool      `js:"is_active"`
-    Scores    []float32 `js:"scores"`    // 变成 Float32Array
-    private   string    // 不可访问
-    Secret    string    `js:"-"`         // 明确忽略
+    ID        int64     `js:"id"`           // 变成访问器: user.id
+    Name      string    `js:"name"`         // 变成访问器: user.name
+    Email     string    `json:"email_address"` // 变成访问器: user.email_address
+    Age       int       `js:"age"`          // 变成访问器: user.age
+    IsActive  bool      `js:"is_active"`    // 变成访问器: user.is_active
+    Scores    []float32 `js:"scores"`       // 变成访问器: user.scores (Float32Array)
+    private   string    // 不可访问（未导出）
+    Secret    string    `js:"-"`            // 明确忽略
 }
 
 func (u *User) GetFullInfo() string {
@@ -914,15 +966,41 @@ func main() {
         user2.UpdateEmail("xiaohong.new@example.com");
         user2.AddScore(95.0);
         
+        // 通过访问器访问字段（直接映射到 Go 结构体字段）
+        user2.age = 31;        // Setter: 修改 Go 结构体字段
+        const newAge = user2.age; // Getter: 从 Go 结构体字段读取
+        
         ({
             info: user2.GetFullInfo(),
-            email: user2.email_address,
+            email: user2.email_address,  // 访问器 getter
+            age: newAge,                 // 通过访问器 setter 修改
             scoresType: user2.scores instanceof Float32Array,
             scoresLength: user2.scores.length
         });
     `)
     defer result2.Free()
     fmt.Println("命名参数:", result2.JSONStringify())
+
+    // 演示字段访问器行为
+    result3, _ := ctx.Eval(`
+        const user3 = new User(3, "小刚", "xiaogang@example.com", 35, true, []);
+        
+        // 字段访问器提供对 Go 结构体字段的直接访问
+        const originalName = user3.name;  // Getter: 读取 Go 结构体字段
+        user3.name = "小刚同学";           // Setter: 修改 Go 结构体字段
+        const newName = user3.name;       // Getter: 读取修改后的字段
+        
+        // 更改会反映在 Go 对象中
+        const info = user3.GetFullInfo(); // 方法看到更改的名称
+        
+        ({
+            originalName: originalName,
+            newName: newName,
+            infoWithNewName: info
+        });
+    `)
+    defer result3.Free()
+    fmt.Println("字段访问器:", result3.JSONStringify())
 }
 ```
 
@@ -939,10 +1017,10 @@ import (
 )
 
 type APIClient struct {
-    BaseURL    string `js:"baseUrl"`
-    APIKey     string `js:"-"`          // 从 JavaScript 隐藏
-    Version    string `js:"version"`
-    UserAgent  string `js:"userAgent"`
+    BaseURL    string `js:"baseUrl"`      // 变成访问器: client.baseUrl
+    APIKey     string `js:"-"`            // 从 JavaScript 隐藏
+    Version    string `js:"version"`      // 变成访问器: client.version
+    UserAgent  string `js:"userAgent"`    // 变成访问器: client.userAgent
 }
 
 func (c *APIClient) Get(endpoint string) string {
@@ -982,11 +1060,20 @@ func main() {
             userAgent: "MyApp/1.0"
         });
         
+        // 字段访问器对所有导出字段都有效
+        const originalUrl = client.baseUrl;  // Getter
+        client.baseUrl = "https://api.example.com/v2/"; // Setter: 更新 Go 结构体
+        const newUrl = client.baseUrl;       // Getter 显示更新的值
+        
         ({
             get: client.Get("/users"),
             post: typeof client.Post !== 'undefined' ? client.Post("/users", {name: "test"}) : "undefined",
             hasInternal: typeof client.InternalMethod !== 'undefined',
-            hasAPIKey: typeof client.APIKey !== 'undefined'
+            hasAPIKey: typeof client.APIKey !== 'undefined',
+            originalUrl: originalUrl,
+            newUrl: newUrl,
+            // 字段访问器更改会反映在方法调用中
+            getWithNewUrl: client.Get("/users")
         });
     `)
     defer result.Free()
@@ -1008,8 +1095,8 @@ import (
 )
 
 type Vehicle struct {
-    Brand string `js:"brand"`
-    Model string `js:"model"`
+    Brand string `js:"brand"`  // 访问器: vehicle.brand
+    Model string `js:"model"`  // 访问器: vehicle.model
 }
 
 func (v *Vehicle) Start() string {
@@ -1035,13 +1122,31 @@ func main() {
             }
             
             getInfo() {
+                // 继承的字段访问器在 JavaScript 子类中工作
                 return this.Start() + " 有 " + this.doors + " 个门";
+            }
+            
+            setBrandAndModel(brand, model) {
+                // 字段访问器可以用来修改 Go 结构体字段
+                this.brand = brand;  // Setter 访问器
+                this.model = model;  // Setter 访问器
             }
         }
         
-        // 测试继承
+        // 测试字段访问器的继承
         const car = new Car("丰田", "凯美瑞", 4);
-        globalThis.result = car.getInfo();
+        const info1 = car.getInfo();
+        
+        // 通过继承的字段访问器修改
+        car.setBrandAndModel("本田", "雅阁");
+        const info2 = car.getInfo();
+        
+        globalThis.result = { 
+            original: info1, 
+            modified: info2,
+            brand: car.brand,  // Getter 访问器
+            model: car.model   // Getter 访问器
+        };
     `)
     if err != nil {
         panic(err)
@@ -1049,7 +1154,145 @@ func main() {
 
     result := ctx.Globals().Get("result")
     defer result.Free()
-    fmt.Println("继承:", result.String())
+    fmt.Println("继承与访问器:", result.JSONStringify())
+}
+```
+
+#### 直接构造函数调用
+
+使用 `CallConstructor` 从 Go 直接实例化类：
+
+```go
+package main
+
+import (
+    "fmt"
+    "github.com/buke/quickjs-go"
+)
+
+type Point struct {
+    X, Y float64
+}
+
+func main() {
+    rt := quickjs.NewRuntime()
+    defer rt.Close()
+    ctx := rt.NewContext()
+    defer ctx.Close()
+
+    // 创建 Point 类
+    pointConstructor, _, err := quickjs.NewClassBuilder("Point").
+        Constructor(func(ctx *quickjs.Context, instance quickjs.Value, args []quickjs.Value) (interface{}, error) {
+            x, y := 0.0, 0.0
+            if len(args) > 0 { x = args[0].Float64() }
+            if len(args) > 1 { y = args[1].Float64() }
+            return &Point{X: x, Y: y}, nil
+        }).
+        Method("toString", func(ctx *quickjs.Context, this quickjs.Value, args []quickjs.Value) quickjs.Value {
+            point, _ := this.GetGoObject()
+            p := point.(*Point)
+            return ctx.String(fmt.Sprintf("Point(%g, %g)", p.X, p.Y))
+        }).
+        Build(ctx)
+
+    if err != nil {
+        panic(err)
+    }
+
+    // 从 Go 直接调用构造函数
+    instance := pointConstructor.CallConstructor(ctx.Float64(10), ctx.Float64(20))
+    defer instance.Free()
+
+    // 调用实例方法
+    result := instance.Call("toString")
+    defer result.Free()
+
+    fmt.Println("直接调用结果:", result.String()) // Point(10, 20)
+
+    // 从 JavaScript 实例获取 Go 对象
+    goObj, err := instance.GetGoObject()
+    if err == nil {
+        point := goObj.(*Point)
+        fmt.Printf("Go 对象: {X: %g, Y: %g}\n", point.X, point.Y)
+    }
+}
+```
+
+#### 构造函数错误处理
+
+优雅地处理构造函数错误：
+
+```go
+package main
+
+import (
+    "fmt"
+    "errors"
+    "strings"
+    "github.com/buke/quickjs-go"
+)
+
+type ValidatedUser struct {
+    Name  string
+    Email string
+}
+
+func main() {
+    rt := quickjs.NewRuntime()
+    defer rt.Close()
+    ctx := rt.NewContext()
+    defer ctx.Close()
+
+    // 创建带有构造函数验证的类
+    userConstructor, _, err := quickjs.NewClassBuilder("ValidatedUser").
+        Constructor(func(ctx *quickjs.Context, instance quickjs.Value, args []quickjs.Value) (interface{}, error) {
+            if len(args) < 2 {
+                return nil, errors.New("ValidatedUser 需要姓名和邮箱")
+            }
+            
+            name := args[0].String()
+            email := args[1].String()
+            
+            if name == "" {
+                return nil, errors.New("姓名不能为空")
+            }
+            
+            if email == "" || !strings.Contains(email, "@") {
+                return nil, errors.New("无效的邮箱地址")
+            }
+            
+            return &ValidatedUser{Name: name, Email: email}, nil
+        }).
+        Method("getInfo", func(ctx *quickjs.Context, this quickjs.Value, args []quickjs.Value) quickjs.Value {
+            user, _ := this.GetGoObject()
+            u := user.(*ValidatedUser)
+            return ctx.String(fmt.Sprintf("%s <%s>", u.Name, u.Email))
+        }).
+        Build(ctx)
+
+    if err != nil {
+        panic(err)
+    }
+
+    ctx.Globals().Set("ValidatedUser", userConstructor)
+
+    // 测试构造函数错误处理
+    result, _ := ctx.Eval(`
+        try {
+            const user1 = new ValidatedUser("小明", "xiaoming@example.com");
+            const info1 = user1.getInfo();
+            
+            const user2 = new ValidatedUser("", "invalid-email");
+            const info2 = user2.getInfo();
+            
+            [info1, info2];
+        } catch (error) {
+            error.message;
+        }
+    `)
+    defer result.Free()
+    
+    fmt.Println("构造函数错误处理:", result.String())
 }
 ```
 
@@ -1058,13 +1301,16 @@ func main() {
 **手动类绑定：**
 - 完全控制类结构和行为
 - 支持实例和静态方法/属性
-- 只读、只写和读写属性
-- 支持继承的 `new.target` 构造函数
+- 带有自动实例绑定的数据属性
+- 只读、只写和读写访问器
+- 带有错误处理和实例预创建的构造函数
 - 带有终结器的自动内存管理
 
 **自动反射绑定：**
 - 从 Go 结构体零样板代码生成类
 - 智能构造函数支持位置和命名参数
+- **自动字段到访问器映射**: Go 结构体字段变成 JavaScript 访问器，具有 getter/setter 功能
+- 直接字段访问: `obj.field = value` 修改底层 Go 结构体字段
 - 带有 `js` 和 `json` 标签支持的自动属性映射
 - 方法绑定和正确的参数/返回值转换
 - 数值切片字段的 TypedArray 支持
@@ -1074,9 +1320,11 @@ func main() {
 - 完整的 JavaScript 继承支持
 - 与 Marshal/Unmarshal 系统无缝集成
 - 二进制数据的 TypedArray 支持
-- 自动内存管理
+- 带有 JavaScript 异常的构造函数错误处理
+- 自动内存管理和清理
 - 线程安全操作
 - 类实例验证和类型检查
+- 从 Go 代码直接构造函数调用
 
 ### Bytecode 编译和执行
 

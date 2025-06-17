@@ -257,7 +257,7 @@ func TestBridgeInvalidFunctionType(t *testing.T) {
 	})
 }
 
-// Test for class constructor proxy errors
+// Test for class constructor proxy errors - MODIFIED FOR SCHEME C
 func TestBridgeClassConstructorErrors(t *testing.T) {
 	// Test class constructor proxy error handling
 	t.Run("ConstructorContextNotFound", func(t *testing.T) {
@@ -266,10 +266,11 @@ func TestBridgeClassConstructorErrors(t *testing.T) {
 		ctx := rt.NewContext()
 		defer ctx.Close()
 
-		// Create a class with constructor
+		// MODIFIED FOR SCHEME C: Create class with new constructor signature
 		constructor, _, err := NewClassBuilder("TestClass").
-			Constructor(func(ctx *Context, newTarget Value, args []Value) Value {
-				return newTarget.NewInstance(&Point{X: 1, Y: 2})
+			Constructor(func(ctx *Context, instance Value, args []Value) (interface{}, error) {
+				// SCHEME C: Return Go object for automatic association
+				return &Point{X: 1, Y: 2}, nil
 			}).
 			Build(ctx)
 		require.NoError(t, err)
@@ -312,10 +313,11 @@ func TestBridgeClassConstructorErrors(t *testing.T) {
 		ctx := rt.NewContext()
 		defer ctx.Close()
 
-		// Create a class with constructor
+		// MODIFIED FOR SCHEME C: Create class with new constructor signature
 		constructor, _, err := NewClassBuilder("TestClass").
-			Constructor(func(ctx *Context, newTarget Value, args []Value) Value {
-				return newTarget.NewInstance(&Point{X: 1, Y: 2})
+			Constructor(func(ctx *Context, instance Value, args []Value) (interface{}, error) {
+				// SCHEME C: Return Go object for automatic association
+				return &Point{X: 1, Y: 2}, nil
 			}).
 			Build(ctx)
 		require.NoError(t, err)
@@ -350,27 +352,33 @@ func TestBridgeClassConstructorErrors(t *testing.T) {
 		ctx := rt.NewContext()
 		defer ctx.Close()
 
-		// Create a class with constructor
+		// MODIFIED FOR SCHEME C: Create class with new constructor signature
 		constructor, _, err := NewClassBuilder("TestClass").
-			Constructor(func(ctx *Context, newTarget Value, args []Value) Value {
-				return newTarget.NewInstance(&Point{X: 1, Y: 2})
+			Constructor(func(ctx *Context, instance Value, args []Value) (interface{}, error) {
+				// SCHEME C: Return Go object for automatic association
+				return &Point{X: 1, Y: 2}, nil
 			}).
 			Build(ctx)
 		require.NoError(t, err)
 
 		ctx.Globals().Set("TestClass", constructor)
 
-		// Find constructor function ID and replace with invalid type
+		// SCHEME C: Find ClassBuilder (not individual constructor function) and replace with invalid type
 		var constructorID int32
 		var originalHandle cgo.Handle
 		ctx.handleStore.handles.Range(func(key, value interface{}) bool {
-			constructorID = key.(int32)
-			originalHandle = value.(cgo.Handle)
-			return false // Stop after first item
+			handleValue := value.(cgo.Handle).Value()
+			// SCHEME C: Look for ClassBuilder, not ClassConstructorFunc
+			if _, ok := handleValue.(*ClassBuilder); ok {
+				constructorID = key.(int32)
+				originalHandle = value.(cgo.Handle)
+				return false // Stop after finding ClassBuilder
+			}
+			return true
 		})
 
 		// Create invalid handle with wrong type and store it
-		invalidHandle := cgo.NewHandle("not a constructor function")
+		invalidHandle := cgo.NewHandle("not a ClassBuilder")
 		ctx.handleStore.handles.Store(constructorID, invalidHandle)
 
 		// Call constructor - triggers type assertion failure
@@ -395,9 +403,86 @@ func TestBridgeClassConstructorErrors(t *testing.T) {
 
 		t.Log("Successfully triggered goClassConstructorProxy type assertion failure branch")
 	})
+
+	// NEW TEST FOR SCHEME C: Test class ID resolution failure
+	t.Run("ClassIDNotFound", func(t *testing.T) {
+		rt := NewRuntime()
+		defer rt.Close()
+		ctx := rt.NewContext()
+		defer ctx.Close()
+
+		// Create class with constructor
+		constructor, _, err := NewClassBuilder("TestClass").
+			Constructor(func(ctx *Context, instance Value, args []Value) (interface{}, error) {
+				return &Point{X: 1, Y: 2}, nil
+			}).
+			Build(ctx)
+		require.NoError(t, err)
+
+		ctx.Globals().Set("TestClass", constructor)
+
+		// Manually remove constructor from global registry to simulate class ID not found
+		constructorKey := jsValueToKey(constructor.ref)
+		globalConstructorRegistry.Delete(constructorKey)
+
+		// Call constructor - triggers "Class ID not found for constructor" branch
+		result, err := ctx.Eval(`
+            try {
+                new TestClass();
+            } catch(e) {
+                e.toString();
+            }
+        `)
+
+		if err != nil {
+			require.Contains(t, err.Error(), "Class ID not found")
+		} else {
+			defer result.Free()
+			require.Contains(t, result.String(), "Class ID not found")
+		}
+
+		t.Log("Successfully triggered goClassConstructorProxy Class ID not found branch")
+	})
+
+	// NEW TEST FOR SCHEME C: Test instance property binding
+	t.Run("InstancePropertyBinding", func(t *testing.T) {
+		rt := NewRuntime()
+		defer rt.Close()
+		ctx := rt.NewContext()
+		defer ctx.Close()
+
+		// Create class with instance properties
+		constructor, _, err := NewClassBuilder("TestClass").
+			Constructor(func(ctx *Context, instance Value, args []Value) (interface{}, error) {
+				return &Point{X: 1, Y: 2}, nil
+			}).
+			Property("version", ctx.String("1.0.0")).
+			Property("readOnly", ctx.Bool(true), PropertyConfigurable).
+			Build(ctx)
+		require.NoError(t, err)
+
+		ctx.Globals().Set("TestClass", constructor)
+
+		// Test that instance properties are properly bound during construction
+		result, err := ctx.Eval(`
+            let obj = new TestClass();
+            [obj.version, obj.readOnly, typeof obj.version, typeof obj.readOnly];
+        `)
+		require.NoError(t, err)
+		defer result.Free()
+
+		// Verify instance properties were bound correctly
+		require.Equal(t, "1.0.0", result.GetIdx(0).String())
+		require.True(t, result.GetIdx(1).ToBool())
+		require.Equal(t, "string", result.GetIdx(2).String())
+		require.Equal(t, "boolean", result.GetIdx(3).String())
+
+		t.Log("Successfully tested SCHEME C instance property binding")
+	})
+
 }
 
-// Test for class method proxy errors
+// Test for class method proxy errors - unchanged
 func TestBridgeClassMethodErrors(t *testing.T) {
 	// Test class method proxy error handling
 	t.Run("MethodContextNotFound", func(t *testing.T) {
@@ -406,10 +491,10 @@ func TestBridgeClassMethodErrors(t *testing.T) {
 		ctx := rt.NewContext()
 		defer ctx.Close()
 
-		// Create a class with method
+		// MODIFIED FOR SCHEME C: Create class with new constructor signature
 		constructor, _, err := NewClassBuilder("TestClass").
-			Constructor(func(ctx *Context, newTarget Value, args []Value) Value {
-				return newTarget.NewInstance(&Point{X: 1, Y: 2})
+			Constructor(func(ctx *Context, instance Value, args []Value) (interface{}, error) {
+				return &Point{X: 1, Y: 2}, nil
 			}).
 			Method("testMethod", func(ctx *Context, this Value, args []Value) Value {
 				return ctx.String("method called")
@@ -460,10 +545,10 @@ func TestBridgeClassMethodErrors(t *testing.T) {
 		ctx := rt.NewContext()
 		defer ctx.Close()
 
-		// Create a class with method
+		// MODIFIED FOR SCHEME C: Create class with new constructor signature
 		constructor, _, err := NewClassBuilder("TestClass").
-			Constructor(func(ctx *Context, newTarget Value, args []Value) Value {
-				return newTarget.NewInstance(&Point{X: 1, Y: 2})
+			Constructor(func(ctx *Context, instance Value, args []Value) (interface{}, error) {
+				return &Point{X: 1, Y: 2}, nil
 			}).
 			Method("testMethod", func(ctx *Context, this Value, args []Value) Value {
 				return ctx.String("method called")
@@ -511,10 +596,10 @@ func TestBridgeClassMethodErrors(t *testing.T) {
 		ctx := rt.NewContext()
 		defer ctx.Close()
 
-		// Create a class with method
+		// MODIFIED FOR SCHEME C: Create class with new constructor signature
 		constructor, _, err := NewClassBuilder("TestClass").
-			Constructor(func(ctx *Context, newTarget Value, args []Value) Value {
-				return newTarget.NewInstance(&Point{X: 1, Y: 2})
+			Constructor(func(ctx *Context, instance Value, args []Value) (interface{}, error) {
+				return &Point{X: 1, Y: 2}, nil
 			}).
 			Method("testMethod", func(ctx *Context, this Value, args []Value) Value {
 				return ctx.String("method called")
@@ -597,7 +682,7 @@ func TestBridgeClassMethodErrors(t *testing.T) {
 	})
 }
 
-// Test for class getter proxy errors
+// Test for class getter proxy errors - unchanged except constructor signature
 func TestBridgeClassGetterErrors(t *testing.T) {
 	// Test class getter proxy error handling
 	t.Run("GetterContextNotFound", func(t *testing.T) {
@@ -606,10 +691,10 @@ func TestBridgeClassGetterErrors(t *testing.T) {
 		ctx := rt.NewContext()
 		defer ctx.Close()
 
-		// Create a class with getter accessor
+		// MODIFIED FOR SCHEME C: Create class with new constructor signature
 		constructor, _, err := NewClassBuilder("TestClass").
-			Constructor(func(ctx *Context, newTarget Value, args []Value) Value {
-				return newTarget.NewInstance(&Point{X: 1, Y: 2})
+			Constructor(func(ctx *Context, instance Value, args []Value) (interface{}, error) {
+				return &Point{X: 1, Y: 2}, nil
 			}).
 			Accessor("testProp", func(ctx *Context, this Value) Value {
 				return ctx.String("getter called")
@@ -660,10 +745,10 @@ func TestBridgeClassGetterErrors(t *testing.T) {
 		ctx := rt.NewContext()
 		defer ctx.Close()
 
-		// Create a class with getter accessor
+		// MODIFIED FOR SCHEME C: Create class with new constructor signature
 		constructor, _, err := NewClassBuilder("TestClass").
-			Constructor(func(ctx *Context, newTarget Value, args []Value) Value {
-				return newTarget.NewInstance(&Point{X: 1, Y: 2})
+			Constructor(func(ctx *Context, instance Value, args []Value) (interface{}, error) {
+				return &Point{X: 1, Y: 2}, nil
 			}).
 			Accessor("testProp", func(ctx *Context, this Value) Value {
 				return ctx.String("getter called")
@@ -711,10 +796,10 @@ func TestBridgeClassGetterErrors(t *testing.T) {
 		ctx := rt.NewContext()
 		defer ctx.Close()
 
-		// Create a class with getter accessor
+		// MODIFIED FOR SCHEME C: Create class with new constructor signature
 		constructor, _, err := NewClassBuilder("TestClass").
-			Constructor(func(ctx *Context, newTarget Value, args []Value) Value {
-				return newTarget.NewInstance(&Point{X: 1, Y: 2})
+			Constructor(func(ctx *Context, instance Value, args []Value) (interface{}, error) {
+				return &Point{X: 1, Y: 2}, nil
 			}).
 			Accessor("testProp", func(ctx *Context, this Value) Value {
 				return ctx.String("getter called")
@@ -797,7 +882,7 @@ func TestBridgeClassGetterErrors(t *testing.T) {
 	})
 }
 
-// Test for class setter proxy errors
+// Test for class setter proxy errors - unchanged except constructor signature
 func TestBridgeClassSetterErrors(t *testing.T) {
 	// Test class setter proxy error handling
 	t.Run("SetterContextNotFound", func(t *testing.T) {
@@ -806,10 +891,10 @@ func TestBridgeClassSetterErrors(t *testing.T) {
 		ctx := rt.NewContext()
 		defer ctx.Close()
 
-		// Create a class with setter accessor
+		// MODIFIED FOR SCHEME C: Create class with new constructor signature
 		constructor, _, err := NewClassBuilder("TestClass").
-			Constructor(func(ctx *Context, newTarget Value, args []Value) Value {
-				return newTarget.NewInstance(&Point{X: 1, Y: 2})
+			Constructor(func(ctx *Context, instance Value, args []Value) (interface{}, error) {
+				return &Point{X: 1, Y: 2}, nil
 			}).
 			Accessor("testProp", nil, func(ctx *Context, this Value, value Value) Value {
 				return ctx.Undefined()
@@ -861,10 +946,10 @@ func TestBridgeClassSetterErrors(t *testing.T) {
 		ctx := rt.NewContext()
 		defer ctx.Close()
 
-		// Create a class with setter accessor
+		// MODIFIED FOR SCHEME C: Create class with new constructor signature
 		constructor, _, err := NewClassBuilder("TestClass").
-			Constructor(func(ctx *Context, newTarget Value, args []Value) Value {
-				return newTarget.NewInstance(&Point{X: 1, Y: 2})
+			Constructor(func(ctx *Context, instance Value, args []Value) (interface{}, error) {
+				return &Point{X: 1, Y: 2}, nil
 			}).
 			Accessor("testProp", nil, func(ctx *Context, this Value, value Value) Value {
 				return ctx.Undefined()
@@ -913,10 +998,10 @@ func TestBridgeClassSetterErrors(t *testing.T) {
 		ctx := rt.NewContext()
 		defer ctx.Close()
 
-		// Create a class with setter accessor
+		// MODIFIED FOR SCHEME C: Create class with new constructor signature
 		constructor, _, err := NewClassBuilder("TestClass").
-			Constructor(func(ctx *Context, newTarget Value, args []Value) Value {
-				return newTarget.NewInstance(&Point{X: 1, Y: 2})
+			Constructor(func(ctx *Context, instance Value, args []Value) (interface{}, error) {
+				return &Point{X: 1, Y: 2}, nil
 			}).
 			Accessor("testProp", nil, func(ctx *Context, this Value, value Value) Value {
 				return ctx.Undefined()
@@ -1000,6 +1085,7 @@ func TestBridgeClassSetterErrors(t *testing.T) {
 	})
 }
 
+// Test for class finalizer context iteration - unchanged except constructor signature
 func TestBridgeClassFinalizerContextIteration(t *testing.T) {
 	t.Run("MultipleContextsIteration", func(t *testing.T) {
 		// Create multiple runtimes and contexts to test iteration
@@ -1021,10 +1107,11 @@ func TestBridgeClassFinalizerContextIteration(t *testing.T) {
 		// Create classes in all contexts
 		for i, ctx := range []*Context{ctx1, ctx2, ctx3} {
 			constructor, _, err := NewClassBuilder(fmt.Sprintf("TestClass%d", i)).
-				Constructor(func(ctx *Context, newTarget Value, args []Value) Value {
+				Constructor(func(ctx *Context, instance Value, args []Value) (interface{}, error) {
+					// MODIFIED FOR SCHEME C: Return Go object for automatic association
 					// Create a simple object that implements finalizer
 					obj := &Point{X: float64(i), Y: float64(i)}
-					return newTarget.NewInstance(obj)
+					return obj, nil
 				}).
 				Build(ctx)
 			require.NoError(t, err)
@@ -1045,5 +1132,109 @@ func TestBridgeClassFinalizerContextIteration(t *testing.T) {
 		runtime.GC()
 
 		t.Log("Successfully tested goClassFinalizerProxy context iteration branches")
+	})
+}
+
+// NEW TEST FOR SCHEME C: Test CreateClassInstance C function behavior
+func TestBridgeCreateClassInstanceEdgeCases(t *testing.T) {
+	t.Run("CreateClassInstance_NoProperties", func(t *testing.T) {
+		rt := NewRuntime()
+		defer rt.Close()
+		ctx := rt.NewContext()
+		defer ctx.Close()
+
+		// Create class without instance properties
+		constructor, _, err := NewClassBuilder("NoPropsClass").
+			Constructor(func(ctx *Context, instance Value, args []Value) (interface{}, error) {
+				return &Point{X: 1, Y: 2}, nil
+			}).
+			Build(ctx)
+		require.NoError(t, err)
+
+		ctx.Globals().Set("NoPropsClass", constructor)
+
+		// Test that instances are created successfully even without properties
+		result, err := ctx.Eval(`
+            let obj = new NoPropsClass();
+            typeof obj;
+        `)
+		require.NoError(t, err)
+		defer result.Free()
+		require.Equal(t, "object", result.String())
+
+		t.Log("Successfully tested CreateClassInstance with no instance properties")
+	})
+
+	t.Run("CreateClassInstance_ManyProperties", func(t *testing.T) {
+		rt := NewRuntime()
+		defer rt.Close()
+		ctx := rt.NewContext()
+		defer ctx.Close()
+
+		// Create class with many instance properties
+		builder := NewClassBuilder("ManyPropsClass").
+			Constructor(func(ctx *Context, instance Value, args []Value) (interface{}, error) {
+				return &Point{X: 1, Y: 2}, nil
+			})
+
+		// Add multiple instance properties
+		for i := 0; i < 10; i++ {
+			builder = builder.Property(fmt.Sprintf("prop%d", i), ctx.String(fmt.Sprintf("value%d", i)))
+		}
+
+		constructor, _, err := builder.Build(ctx)
+		require.NoError(t, err)
+
+		ctx.Globals().Set("ManyPropsClass", constructor)
+
+		// Test that all properties are bound correctly
+		result, err := ctx.Eval(`
+            let obj = new ManyPropsClass();
+            [obj.prop0, obj.prop5, obj.prop9];
+        `)
+		require.NoError(t, err)
+		defer result.Free()
+
+		require.Equal(t, "value0", result.GetIdx(0).String())
+		require.Equal(t, "value5", result.GetIdx(1).String())
+		require.Equal(t, "value9", result.GetIdx(2).String())
+
+		t.Log("Successfully tested CreateClassInstance with many instance properties")
+	})
+}
+
+// NEW TEST FOR SCHEME C: Test CreateClassInstance failure scenarios
+func TestBridgeCreateClassInstanceFailures(t *testing.T) {
+	t.Run("CreateClassInstance_CException", func(t *testing.T) {
+		rt := NewRuntime()
+		defer rt.Close()
+		ctx := rt.NewContext()
+		defer ctx.Close()
+
+		// Create class
+		constructor, originalClassID, err := NewClassBuilder("TestClass").
+			Constructor(func(ctx *Context, instance Value, args []Value) (interface{}, error) {
+				return &Point{X: 1, Y: 2}, nil
+			}).
+			Build(ctx)
+		require.NoError(t, err)
+
+		ctx.Globals().Set("TestClass", constructor)
+
+		// Replace with invalid class ID to trigger JS_NewObjectProtoClass failure
+		constructorKey := jsValueToKey(constructor.ref)
+		globalConstructorRegistry.Store(constructorKey, uint32(999999))
+
+		// This should trigger CreateClassInstance to return JS_EXCEPTION
+		result, err := ctx.Eval(`new TestClass()`)
+		defer result.Free()
+
+		// Restore for cleanup
+		globalConstructorRegistry.Store(constructorKey, originalClassID)
+
+		// Should get an error
+		require.Error(t, err)
+
+		t.Log("Successfully triggered CreateClassInstance JS_EXCEPTION branch")
 	})
 }

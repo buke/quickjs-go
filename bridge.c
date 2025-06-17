@@ -147,52 +147,6 @@ void GoClassFinalizerProxy(JSRuntime *rt, JSValue val) {
     goClassFinalizerProxy(rt, val);
 }
 
-// ============================================================================
-// NEWINSTANCE HELPER FUNCTION
-// ============================================================================
-
-// CreateClassInstance - encapsulates the object creation logic from NewInstance
-// This function handles:
-// 1. Getting prototype from constructor
-// 2. Creating JS object with correct prototype and class
-// 3. Setting opaque data
-// 4. Error handling and cleanup
-// 
-// Returns JS_EXCEPTION on any error, proper JSValue on success
-// This corresponds to the logic in point.c example
-JSValue CreateClassInstance(JSContext *ctx, JSValue constructor, 
-                           JSClassID class_id, int32_t handle_id) {
-    JSValue proto, obj;
-    
-    // Get prototype from constructor 
-    // Corresponds to point.c: proto = JS_GetPropertyStr(ctx, new_target, "prototype")
-    proto = JS_GetPropertyStr(ctx, constructor, "prototype");
-    if (JS_IsException(proto)) {
-        // Return the exception directly, caller will handle cleanup
-        return proto;
-    }
-    
-    // Create JS object with correct prototype and class
-    // Corresponds to point.c: obj = JS_NewObjectProtoClass(ctx, proto, js_point_class_id)
-    obj = JS_NewObjectProtoClass(ctx, proto, class_id);
-    
-    // Free prototype reference (always needed, regardless of obj creation result)
-    JS_FreeValue(ctx, proto);
-    
-    if (JS_IsException(obj)) {
-        // Return the exception directly, caller will handle cleanup
-        return obj;
-    }
-    
-    // Associate Go object with JS object
-    // Corresponds to point.c: JS_SetOpaque(obj, s)
-    // Use helper function to safely convert int32 to opaque pointer
-    if (handle_id != 0) {
-        JS_SetOpaque(obj, IntToOpaque(handle_id));
-    }
-    
-    return obj;
-}
 
 // ============================================================================
 // CREATECFUNCTION HELPER FUNCTION
@@ -382,7 +336,7 @@ JSValue BindMembersToObject(JSContext *ctx, JSValue obj,
         }
     }
     
-    // Bind properties (NEW: data properties support)
+    // Bind properties (data properties support)
     for (int i = 0; i < property_count; i++) {
         const PropertyEntry *property = &properties[i];
         if (property->is_static == is_static) {
@@ -460,7 +414,7 @@ JSValue BindAccessorToObject(JSContext *ctx, JSValue obj, const AccessorEntry *a
     return JS_UNDEFINED;
 }
 
-// NEW: BindPropertyToObject - Bind a data property to a JavaScript object
+// BindPropertyToObject - Bind a data property to a JavaScript object
 // This creates real data properties using JS_DefinePropertyValueStr
 JSValue BindPropertyToObject(JSContext *ctx, JSValue obj, const PropertyEntry *property) {
     // Duplicate the value to ensure proper reference counting
@@ -480,6 +434,78 @@ JSValue BindPropertyToObject(JSContext *ctx, JSValue obj, const PropertyEntry *p
     
     // Success: property_value ownership has been transferred to QuickJS
     return JS_UNDEFINED;
+}
+
+
+
+// ============================================================================
+// SCHEME C: CREATECLASSINSTANCE HELPER FUNCTION - MODIFIED
+// ============================================================================
+
+// CreateClassInstance - encapsulates the object creation logic for Scheme C
+// MODIFIED FOR SCHEME C: This function now handles instance property binding
+// This function handles:
+// 1. Getting prototype from constructor
+// 2. Creating JS object with correct prototype and class
+// 3. Binding instance properties to the created object (NEW for Scheme C)
+// 4. Error handling and cleanup
+// 
+// Note: Go object association is now handled by constructor proxy, not here
+// Returns JS_EXCEPTION on any error, proper JSValue on success
+// This corresponds to the logic in point.c example with instance property support
+JSValue CreateClassInstance(JSContext *ctx, JSValue constructor, 
+                           JSClassID class_id,
+                           const PropertyEntry *instance_properties,
+                           int instance_property_count) {
+    JSValue proto, obj;
+
+    // Check QuickJS limits
+    if (class_id >= (1 << 16)) {
+        return JS_ThrowRangeError(ctx, "class ID exceeds maximum value");
+    }
+    
+    // Step 1: Get prototype from constructor 
+    // Corresponds to point.c: proto = JS_GetPropertyStr(ctx, new_target, "prototype")
+    proto = JS_GetPropertyStr(ctx, constructor, "prototype");
+    if (JS_IsException(proto)) {
+        // Return the exception directly, caller will handle cleanup
+        return proto;
+    }
+    
+    // Step 2: Create JS object with correct prototype and class
+    // Corresponds to point.c: obj = JS_NewObjectProtoClass(ctx, proto, js_point_class_id)
+    obj = JS_NewObjectProtoClass(ctx, proto, class_id);
+    
+    // Free prototype reference (always needed, regardless of obj creation result)
+    JS_FreeValue(ctx, proto);
+    
+    if (JS_IsException(obj)) {
+        // Return the exception directly, caller will handle cleanup
+        return obj;
+    }
+    
+    // Step 3: NEW FOR SCHEME C - Bind instance properties before constructor call
+    // This ensures instance properties are available when the constructor function runs
+    if (instance_properties && instance_property_count > 0) {
+        for (int i = 0; i < instance_property_count; i++) {
+            const PropertyEntry *property = &instance_properties[i];
+            
+            // Only process instance properties (static properties handled elsewhere)
+            if (property->is_static == 0) {
+                JSValue property_result = BindPropertyToObject(ctx, obj, property);
+                if (JS_IsException(property_result)) {
+                    // Clean up object on property binding failure
+                    JS_FreeValue(ctx, obj);
+                    return property_result;
+                }
+            }
+        }
+    }
+    
+    // Step 4: Return instance (Go object association handled by constructor proxy)
+    // In Scheme C, the constructor proxy will call this function, then call the 
+    // constructor function, and finally associate the returned Go object
+    return obj;
 }
 
 // ============================================================================

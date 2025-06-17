@@ -38,10 +38,10 @@ func getFinalizeCount() int64 {
 	return atomic.LoadInt64(&finalizeCallCount)
 }
 
-// createPointClass creates a Point class for testing with simplified NewInstance
+// createPointClass creates a Point class for testing with SCHEME C constructor
 func createPointClass(ctx *Context) (Value, uint32, error) {
 	return NewClassBuilder("Point").
-		Constructor(func(ctx *Context, newTarget Value, args []Value) Value {
+		Constructor(func(ctx *Context, instance Value, args []Value) (interface{}, error) {
 			x, y := 0.0, 0.0
 			if len(args) > 0 {
 				x = args[0].Float64()
@@ -50,9 +50,9 @@ func createPointClass(ctx *Context) (Value, uint32, error) {
 				y = args[1].Float64()
 			}
 
+			// SCHEME C: Create Go object and return it for automatic association
 			point := &Point{X: x, Y: y}
-			// Use simplified NewInstance (automatic classID retrieval)
-			return newTarget.NewInstance(point)
+			return point, nil
 		}).
 		Method("norm", func(ctx *Context, this Value, args []Value) Value {
 			obj, err := this.GetGoObject()
@@ -108,8 +108,8 @@ func createPointClass(ctx *Context) (Value, uint32, error) {
 				return ctx.Undefined()
 			}).
 		StaticMethod("zero", func(ctx *Context, this Value, args []Value) Value {
-			// Use simplified NewInstance for static method as well
-			return this.NewInstance(&Point{X: 0, Y: 0})
+			// SCHEME C: Use CallConstructor for static method
+			return this.CallConstructor()
 		}).
 		StaticAccessor("PI",
 			func(ctx *Context, this Value) Value { // static getter
@@ -671,12 +671,12 @@ func TestInheritanceAndNewTarget(t *testing.T) {
                 super(x, y);
                 this.z = z || 0;
             }
-            
+
             norm() {
                 return Math.sqrt(this.x * this.x + this.y * this.y + this.z * this.z);
             }
         }
-        
+
         let p3d1 = new Point3D(3, 4, 12);
         p3d1.norm(); // sqrt(3^2 + 4^2 + 12^2) = sqrt(169) = 13
     `)
@@ -893,8 +893,8 @@ func TestErrorHandling(t *testing.T) {
 
 	// Test creating class with empty name
 	ctor, _, err := NewClassBuilder("").
-		Constructor(func(ctx *Context, newTarget Value, args []Value) Value {
-			return ctx.Undefined()
+		Constructor(func(ctx *Context, instance Value, args []Value) (interface{}, error) {
+			return nil, nil
 		}).
 		Method("getValue", func(ctx *Context, this Value, args []Value) Value {
 			return ctx.Float64(0)
@@ -971,10 +971,10 @@ func TestMemoryManagement(t *testing.T) {
 	for i := 0; i < 5; i++ {
 		className := fmt.Sprintf("TestClass%d", i)
 		constructor, _, err := NewClassBuilder(className).
-			Constructor(func(ctx *Context, newTarget Value, args []Value) Value {
+			Constructor(func(ctx *Context, instance Value, args []Value) (interface{}, error) {
 				point := &Point{X: float64(i), Y: float64(i * 2)}
-				// Use simplified NewInstance
-				return newTarget.NewInstance(point)
+				// SCHEME C: Return Go object for automatic association
+				return point, nil
 			}).
 			Method("getValue", func(ctx *Context, this Value, args []Value) Value {
 				return ctx.Float64(float64(i))
@@ -1034,24 +1034,24 @@ func TestComplexClassHierarchy(t *testing.T) {
                 super(x, y);
                 this.color = color || 'black';
             }
-            
+
             getColor() {
                 return this.color;
             }
         }
-        
+
         // Second level inheritance
         class NamedColoredPoint extends ColoredPoint {
             constructor(x, y, color, name) {
                 super(x, y, color);
                 this.name = name || 'unnamed';
             }
-            
+
             toString() {
                 return this.name + ': ' + super.toString() + ' (' + this.color + ')';
             }
         }
-        
+
         let ncp1 = new NamedColoredPoint(3, 4, 'red', 'MyPoint');
         [
             ncp1 instanceof Point,
@@ -1168,7 +1168,7 @@ func TestUnifiedConstructorMapping(t *testing.T) {
 		t.Errorf("Reflection constructor classID mismatch: expected %d, got %d", reflectClassID, reflectRetrievedID)
 	}
 
-	// Test that both can create instances with the simplified API
+	// Test that both can create instances with the CallConstructor API
 	ctx.Globals().Set("ManualPoint", manualConstructor)
 	ctx.Globals().Set("ReflectPoint", reflectConstructor)
 
@@ -1203,8 +1203,8 @@ func TestReadOnlyAndWriteOnlyAccessors(t *testing.T) {
 
 	// Test ReadOnlyAccessor
 	constructor1, _, err := NewClassBuilder("ReadOnlyTest").
-		Constructor(func(ctx *Context, newTarget Value, args []Value) Value {
-			return newTarget.NewInstance(&Point{X: 10, Y: 20})
+		Constructor(func(ctx *Context, instance Value, args []Value) (interface{}, error) {
+			return &Point{X: 10, Y: 20}, nil
 		}).
 		Accessor("readOnlyX", func(ctx *Context, this Value) Value {
 			obj, _ := this.GetGoObject()
@@ -1238,8 +1238,8 @@ func TestReadOnlyAndWriteOnlyAccessors(t *testing.T) {
 
 	// Test WriteOnlyAccessor
 	constructor2, _, err := NewClassBuilder("WriteOnlyTest").
-		Constructor(func(ctx *Context, newTarget Value, args []Value) Value {
-			return newTarget.NewInstance(&Point{X: 0, Y: 0})
+		Constructor(func(ctx *Context, instance Value, args []Value) (interface{}, error) {
+			return &Point{X: 0, Y: 0}, nil
 		}).
 		Accessor("writeOnlyX", nil, func(ctx *Context, this Value, value Value) Value {
 			obj, _ := this.GetGoObject()
@@ -1278,8 +1278,8 @@ func TestReadOnlyAndWriteOnlyAccessors(t *testing.T) {
 
 	// Test StaticReadOnlyAccessor
 	constructor3, _, err := NewClassBuilder("StaticReadOnlyTest").
-		Constructor(func(ctx *Context, newTarget Value, args []Value) Value {
-			return newTarget.NewInstance(&Point{X: 0, Y: 0})
+		Constructor(func(ctx *Context, instance Value, args []Value) (interface{}, error) {
+			return &Point{X: 0, Y: 0}, nil
 		}).
 		StaticAccessor("VERSION", func(ctx *Context, this Value) Value {
 			return ctx.String("1.0.0")
@@ -1306,5 +1306,135 @@ func TestReadOnlyAndWriteOnlyAccessors(t *testing.T) {
 	if result3.GetIdx(0).String() != "1.0.0" || result3.GetIdx(1).String() != "1.0.0" {
 		t.Errorf("StaticReadOnly accessor failed: expected ['1.0.0', '1.0.0'], got ['%s', '%s']",
 			result3.GetIdx(0).String(), result3.GetIdx(1).String())
+	}
+}
+
+// NEW: TestCallConstructorAPI tests the CallConstructor API directly
+func TestCallConstructorAPI(t *testing.T) {
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	// Create Point class
+	pointConstructor, _, err := createPointClass(ctx)
+	if err != nil {
+		t.Fatalf("Failed to create Point class: %v", err)
+	}
+	defer pointConstructor.Free()
+
+	// Test CallConstructor with no arguments
+	instance1 := pointConstructor.CallConstructor()
+	defer instance1.Free()
+
+	if instance1.IsException() {
+		t.Fatalf("CallConstructor with no args failed: %v", ctx.Exception())
+	}
+
+	// Verify instance properties
+	if !instance1.Has("x") || !instance1.Has("y") {
+		t.Errorf("Instance missing accessor properties")
+	}
+
+	if !instance1.Has("version") || !instance1.Has("readOnlyFlag") {
+		t.Errorf("Instance missing data properties")
+	}
+
+	// Test CallConstructor with arguments
+	arg1 := ctx.Float64(10.5)
+	arg2 := ctx.Float64(20.5)
+	defer arg1.Free()
+	defer arg2.Free()
+
+	instance2 := pointConstructor.CallConstructor(arg1, arg2)
+	defer instance2.Free()
+
+	if instance2.IsException() {
+		t.Fatalf("CallConstructor with args failed: %v", ctx.Exception())
+	}
+
+	// Verify constructor arguments were applied
+	x := instance2.Get("x")
+	y := instance2.Get("y")
+	defer x.Free()
+	defer y.Free()
+
+	if math.Abs(x.Float64()-10.5) > 0.001 {
+		t.Errorf("Expected x=10.5, got %f", x.Float64())
+	}
+	if math.Abs(y.Float64()-20.5) > 0.001 {
+		t.Errorf("Expected y=20.5, got %f", y.Float64())
+	}
+
+	// Verify instance properties are present
+	version := instance2.Get("version")
+	readOnlyFlag := instance2.Get("readOnlyFlag")
+	defer version.Free()
+	defer readOnlyFlag.Free()
+
+	if version.String() != "1.0.0" {
+		t.Errorf("Expected version '1.0.0', got '%s'", version.String())
+	}
+	if !readOnlyFlag.ToBool() {
+		t.Errorf("Expected readOnlyFlag true, got %t", readOnlyFlag.ToBool())
+	}
+}
+
+// NEW: TestSchemeCSynchronization tests that property changes sync with Go object
+func TestSchemeCSynchronization(t *testing.T) {
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	// Create Point class
+	pointConstructor, _, err := createPointClass(ctx)
+	if err != nil {
+		t.Fatalf("Failed to create Point class: %v", err)
+	}
+
+	ctx.Globals().Set("Point", pointConstructor)
+
+	// Test that accessor changes sync with Go object
+	result, err := ctx.Eval(`
+        let p = new Point(1, 2);
+        
+        // Change values via accessors
+        p.x = 100;
+        p.y = 200;
+        
+        // Read back via accessors  
+        [p.x, p.y];
+    `)
+	if err != nil {
+		t.Fatalf("Failed to evaluate synchronization test: %v", err)
+	}
+	defer result.Free()
+
+	if result.GetIdx(0).Float64() != 100.0 || result.GetIdx(1).Float64() != 200.0 {
+		t.Errorf("Accessor synchronization failed: expected [100, 200], got [%f, %f]",
+			result.GetIdx(0).Float64(), result.GetIdx(1).Float64())
+	}
+
+	// Test that we can retrieve the Go object and verify synchronization
+	instance, err := ctx.Eval(`p`)
+	if err != nil {
+		t.Fatalf("Failed to get instance: %v", err)
+	}
+	defer instance.Free()
+
+	goObj, err := instance.GetGoObject()
+	if err != nil {
+		t.Fatalf("Failed to get Go object: %v", err)
+	}
+
+	point, ok := goObj.(*Point)
+	if !ok {
+		t.Fatalf("Expected *Point, got %T", goObj)
+	}
+
+	if point.X != 100.0 || point.Y != 200.0 {
+		t.Errorf("Go object synchronization failed: expected Point(100, 200), got Point(%f, %f)",
+			point.X, point.Y)
 	}
 }
