@@ -25,9 +25,9 @@ jobs:
                 make clean
                 
                 # Production optimization flags for Linux x86_64
+                # Use CFLAGS_OPT instead of modifying CFLAGS to preserve CONFIG_VERSION
                 export CFLAGS_OPT="-O3 -DNDEBUG -ffast-math -funroll-loops -fomit-frame-pointer"
                 export CFLAGS_OPT="$CFLAGS_OPT -fstrict-aliasing -march=x86-64 -mtune=generic"
-                export CFLAGS_OPT="$CFLAGS_OPT -DOPTIMIZE=1 -DSHORT_OPCODES=1 -DDIRECT_DISPATCH=1"
                 
                 # Build with Link Time Optimization
                 make -e CONFIG_LTO=y CFLAGS_OPT="$CFLAGS_OPT" libquickjs.a
@@ -68,7 +68,6 @@ jobs:
                 # Production optimization flags for Linux ARM64
                 export CFLAGS_OPT="-O3 -DNDEBUG -ffast-math -funroll-loops -fomit-frame-pointer"
                 export CFLAGS_OPT="$CFLAGS_OPT -fstrict-aliasing -march=armv8-a -mtune=generic"
-                export CFLAGS_OPT="$CFLAGS_OPT -DOPTIMIZE=1 -DSHORT_OPCODES=1 -DDIRECT_DISPATCH=1"
                 
                 make -e CONFIG_LTO=y CFLAGS_OPT="$CFLAGS_OPT" libquickjs.a
                 
@@ -100,18 +99,12 @@ jobs:
                 make clean
                 
                 # Production optimization flags for macOS x86_64
-                export CFLAGS_PROD="-O3 -DNDEBUG -ffast-math -funroll-loops -fomit-frame-pointer"
-                export CFLAGS_PROD="$CFLAGS_PROD -fstrict-aliasing -mmacosx-version-min=12.0"
-                export CFLAGS_PROD="$CFLAGS_PROD -target x86_64-apple-macos12 -arch x86_64"
-                export CFLAGS_PROD="$CFLAGS_PROD -DOPTIMIZE=1 -DSHORT_OPCODES=1 -DDIRECT_DISPATCH=1"
+                # Preserve original CFLAGS and CONFIG_VERSION, only override CFLAGS_OPT
+                export CFLAGS_OPT="-O3 -DNDEBUG -ffast-math -funroll-loops -fomit-frame-pointer"
+                export CFLAGS_OPT="$CFLAGS_OPT -fstrict-aliasing -mmacosx-version-min=12.0"
+                export CFLAGS_OPT="$CFLAGS_OPT -target x86_64-apple-macos12 -arch x86_64"
                 
-                # Temporarily modify Makefile for cross-compilation
-                sed -i '.bak' "s/CFLAGS += -Wextra/CFLAGS += -Wextra $CFLAGS_PROD/" Makefile
-                
-                make -e CONFIG_LTO=y libquickjs.a
-                
-                # Restore original Makefile
-                mv Makefile.bak Makefile
+                make -e CONFIG_LTO=y CFLAGS_OPT="$CFLAGS_OPT" libquickjs.a
                 
                 file libquickjs.a
                 size libquickjs.a
@@ -141,16 +134,11 @@ jobs:
                 make clean
                 
                 # Production optimization flags for macOS ARM64 (Apple Silicon)
-                export CFLAGS_PROD="-O3 -DNDEBUG -ffast-math -funroll-loops -fomit-frame-pointer"
-                export CFLAGS_PROD="$CFLAGS_PROD -fstrict-aliasing -mmacosx-version-min=12.0"
-                export CFLAGS_PROD="$CFLAGS_PROD -target arm64-apple-macos12 -arch arm64 -mcpu=apple-a14"
-                export CFLAGS_PROD="$CFLAGS_PROD -DOPTIMIZE=1 -DSHORT_OPCODES=1 -DDIRECT_DISPATCH=1"
+                export CFLAGS_OPT="-O3 -DNDEBUG -ffast-math -funroll-loops -fomit-frame-pointer"
+                export CFLAGS_OPT="$CFLAGS_OPT -fstrict-aliasing -mmacosx-version-min=12.0"
+                export CFLAGS_OPT="$CFLAGS_OPT -target arm64-apple-macos12 -arch arm64 -mcpu=apple-a14"
                 
-                sed -i '.bak' "s/CFLAGS += -Wextra/CFLAGS += -Wextra $CFLAGS_PROD/" Makefile
-                
-                make -e CONFIG_LTO=y libquickjs.a
-                
-                mv Makefile.bak Makefile
+                make -e CONFIG_LTO=y CFLAGS_OPT="$CFLAGS_OPT" libquickjs.a
                 
                 file libquickjs.a
                 size libquickjs.a
@@ -187,7 +175,7 @@ jobs:
                 # Production optimization flags for Windows x86
                 $env:CFLAGS_OPT = "-O3 -DNDEBUG -ffast-math -funroll-loops -fomit-frame-pointer"
                 $env:CFLAGS_OPT += " -fstrict-aliasing -march=i686 -mtune=generic"
-                $env:CFLAGS_OPT += " -D_WIN32_WINNT=0x0601 -DOPTIMIZE=1 -DSHORT_OPCODES=1 -DDIRECT_DISPATCH=1"
+                $env:CFLAGS_OPT += " -D_WIN32_WINNT=0x0601"
                 
                 make -e CONFIG_WIN32=y CONFIG_M32=y CONFIG_LTO=y CFLAGS_OPT="$env:CFLAGS_OPT" libquickjs.a
                 
@@ -226,7 +214,7 @@ jobs:
                 # Production optimization flags for Windows x64
                 $env:CFLAGS_OPT = "-O3 -DNDEBUG -ffast-math -funroll-loops -fomit-frame-pointer"
                 $env:CFLAGS_OPT += " -fstrict-aliasing -march=x86-64 -mtune=generic"
-                $env:CFLAGS_OPT += " -D_WIN32_WINNT=0x0601 -DOPTIMIZE=1 -DSHORT_OPCODES=1 -DDIRECT_DISPATCH=1"
+                $env:CFLAGS_OPT += " -D_WIN32_WINNT=0x0601"
                 
                 make -e CONFIG_WIN32=y CONFIG_LTO=y CFLAGS_OPT="$env:CFLAGS_OPT" libquickjs.a
                 
