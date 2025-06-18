@@ -166,6 +166,16 @@ extern void SetExecuteTimeout(JSRuntime *rt, time_t timeout);
 // MODULE-RELATED DECLARATIONS - NEW FOR MODULE BUILDER
 // =============================================================================
 
+// Module creation helper function
+// This function encapsulates QuickJS module creation steps:
+// 1. Create C module with initialization function
+// 2. Pre-declare all exports using JS_AddModuleExport
+// 3. Set module private value for initialization access
+// Returns 0 on success, -1 on failure
+extern int CreateModule(JSContext *ctx, const char *module_name,
+                       const char **export_names, int export_count,
+                       int32_t builder_id);
+
 // Module initialization proxy function
 // This function is called by QuickJS when a module is being initialized
 // It bridges between C QuickJS API and Go ModuleBuilder functionality

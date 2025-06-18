@@ -17,12 +17,6 @@ func TestModuleBuilder_Basic(t *testing.T) {
 	ctx := rt.NewContext()
 	defer ctx.Close()
 
-	t.Run("EmptyModule", func(t *testing.T) {
-		module := NewModuleBuilder("empty")
-		err := module.Build(ctx)
-		require.NoError(t, err)
-	})
-
 	t.Run("ModuleWithExports", func(t *testing.T) {
 		addFunc := ctx.Function(func(ctx *Context, this Value, args []Value) Value {
 			if len(args) >= 2 {
@@ -173,6 +167,12 @@ func TestModuleBuilder_ErrorHandling(t *testing.T) {
 	ctx := rt.NewContext()
 	defer ctx.Close()
 
+	t.Run("EmptyModule", func(t *testing.T) {
+		module := NewModuleBuilder("empty")
+		err := module.Build(ctx)
+		require.Error(t, err)
+	})
+
 	t.Run("EmptyModuleName", func(t *testing.T) {
 		module := NewModuleBuilder("")
 		err := module.Build(ctx)
@@ -300,4 +300,51 @@ func TestModuleBuilder_Integration(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, "Recovery successful", result.String())
 	})
+}
+
+func TestModuleBuilder_ErrorBranches(t *testing.T) {
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	t.Run("ModuleInitContextError", func(t *testing.T) {
+		// Create module
+		module := NewModuleBuilder("error-test-1").
+			Export("value", ctx.String("test"))
+		err := module.Build(ctx)
+		require.NoError(t, err)
+
+		// Unregister context before module initialization
+		unregisterContext(ctx.ref)
+
+		// Import will fail during initialization
+		_, err = ctx.Eval(`import('error-test-1')`, EvalAwait(true))
+
+		// Re-register for cleanup
+		registerContext(ctx.ref, ctx)
+
+		// Should get context error
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "Context not found")
+	})
+
+	t.Run("ModuleInitHandleStoreError", func(t *testing.T) {
+		// Create module
+		module := NewModuleBuilder("error-test-2").
+			Export("value", ctx.String("test"))
+		err := module.Build(ctx)
+		require.NoError(t, err)
+
+		// Clear handle store before module initialization
+		ctx.handleStore.Clear()
+
+		// Import will fail during initialization
+		_, err = ctx.Eval(`import('error-test-2')`, EvalAwait(true))
+
+		// Should get handle store error
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "Function not found")
+	})
+
 }

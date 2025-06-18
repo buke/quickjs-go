@@ -132,7 +132,7 @@ func throwProxyError(ctx *C.JSContext, err proxyError) C.JSValue {
 
 // getContextAndFunction retrieves context and function from HandleStore
 // Returns (context, function, error). If error is not nil, caller should return throwProxyError(ctx, error)
-func getContextAndFunction(ctx *C.JSContext, magic C.int, notFoundErr proxyError) (*Context, interface{}, *proxyError) {
+func getContextAndObject(ctx *C.JSContext, magic C.int, notFoundErr proxyError) (*Context, interface{}, *proxyError) {
 	// Get Go Context from global mapping
 	goCtx := getContextFromJS(ctx)
 	if goCtx == nil {
@@ -155,35 +155,21 @@ func getContextAndFunction(ctx *C.JSContext, magic C.int, notFoundErr proxyError
 
 // getContextAndModuleBuilder retrieves context and ModuleBuilder from module private value
 func getContextAndModuleBuilder(ctx *C.JSContext, m *C.JSModuleDef) (*Context, *ModuleBuilder, error) {
-	// Get Go Context from global mapping
-	goCtx := getContextFromJS(ctx)
-	if goCtx == nil {
-		return nil, nil, fmt.Errorf("Context not found during module initialization")
-	}
 
 	// Retrieve ModuleBuilder from module private value
 	privateValue := C.JS_GetModulePrivateValue(ctx, m)
-	if C.JS_IsException(privateValue) != 0 {
-		return nil, nil, fmt.Errorf("Failed to get module private value")
-	}
 
 	// Extract ModuleBuilder ID from private value using JS_ToInt32
 	var builderID C.int32_t
-	if C.JS_ToInt32(ctx, &builderID, privateValue) < 0 {
-		return nil, nil, fmt.Errorf("Failed to convert module private value to int32")
-	}
+	C.JS_ToInt32(ctx, &builderID, privateValue)
 
-	// Get ModuleBuilder from HandleStore
-	builderInterface, exists := goCtx.handleStore.Load(int32(builderID))
-	if !exists || builderInterface == nil {
-		return nil, nil, fmt.Errorf("ModuleBuilder not found in HandleStore")
+	goCtx, builderInterface, err := getContextAndObject(ctx, C.int(builderID), errFunctionNotFound)
+	if err != nil {
+		return nil, nil, fmt.Errorf("Failed to get context and ModuleBuilder: %v", err.message)
 	}
 
 	// Type assertion to ModuleBuilder
-	builder, ok := builderInterface.(*ModuleBuilder)
-	if !ok {
-		return nil, nil, fmt.Errorf("Invalid ModuleBuilder type in HandleStore")
-	}
+	builder, _ := builderInterface.(*ModuleBuilder)
 
 	return goCtx, builder, nil
 }
@@ -226,7 +212,7 @@ func goFunctionProxy(ctx *C.JSContext, thisVal C.JSValueConst,
 	argc C.int, argv *C.JSValueConst, magic C.int) C.JSValue {
 
 	// Get context and function using common helper
-	goCtx, fn, err := getContextAndFunction(ctx, magic, errFunctionNotFound)
+	goCtx, fn, err := getContextAndObject(ctx, magic, errFunctionNotFound)
 	if err != nil {
 		return throwProxyError(ctx, *err)
 	}
@@ -257,7 +243,7 @@ func goClassConstructorProxy(ctx *C.JSContext, newTarget C.JSValue,
 	argc C.int, argv *C.JSValue, magic C.int) C.JSValue {
 
 	// Get context and ClassBuilder using common helper
-	goCtx, fn, perr := getContextAndFunction(ctx, magic, errConstructorNotFound)
+	goCtx, fn, perr := getContextAndObject(ctx, magic, errConstructorNotFound)
 	if perr != nil {
 		return throwProxyError(ctx, *perr)
 	}
@@ -356,7 +342,7 @@ func goClassMethodProxy(ctx *C.JSContext, thisVal C.JSValue,
 	argc C.int, argv *C.JSValue, magic C.int) C.JSValue {
 
 	// Get context and method using common helper
-	goCtx, fn, err := getContextAndFunction(ctx, magic, errMethodNotFound)
+	goCtx, fn, err := getContextAndObject(ctx, magic, errMethodNotFound)
 	if err != nil {
 		return throwProxyError(ctx, *err)
 	}
@@ -381,7 +367,7 @@ func goClassMethodProxy(ctx *C.JSContext, thisVal C.JSValue,
 func goClassGetterProxy(ctx *C.JSContext, thisVal C.JSValue, magic C.int) C.JSValue {
 
 	// Get context and getter using common helper
-	goCtx, fn, err := getContextAndFunction(ctx, magic, errGetterNotFound)
+	goCtx, fn, err := getContextAndObject(ctx, magic, errGetterNotFound)
 	if err != nil {
 		return throwProxyError(ctx, *err)
 	}
@@ -406,7 +392,7 @@ func goClassSetterProxy(ctx *C.JSContext, thisVal C.JSValue,
 	val C.JSValue, magic C.int) C.JSValue {
 
 	// Get context and setter using common helper
-	goCtx, fn, err := getContextAndFunction(ctx, magic, errSetterNotFound)
+	goCtx, fn, err := getContextAndObject(ctx, magic, errSetterNotFound)
 	if err != nil {
 		return throwProxyError(ctx, *err)
 	}
@@ -503,13 +489,8 @@ func goModuleInitProxy(ctx *C.JSContext, m *C.JSModuleDef) C.int {
 	// Step 2: Set all export values using JS_SetModuleExport
 	for _, export := range builder.exports {
 		exportName := C.CString(export.Name)
-		result := C.JS_SetModuleExport(ctx, m, exportName, export.Value.ref)
+		C.JS_SetModuleExport(ctx, m, exportName, export.Value.ref)
 		C.free(unsafe.Pointer(exportName))
-
-		if result < 0 {
-			err := fmt.Errorf("Failed to set module export: %s", export.Name)
-			return throwModuleError(ctx, err)
-		}
 	}
 
 	// Step 3: Clean up HandleStore reference

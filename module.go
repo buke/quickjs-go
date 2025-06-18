@@ -94,36 +94,46 @@ func createModule(ctx *Context, builder *ModuleBuilder) error {
 		return fmt.Errorf("module validation failed: %v", err)
 	}
 
-	// Step 2: Create C module with initialization function
-	moduleName := C.CString(builder.name)
-	defer C.free(unsafe.Pointer(moduleName))
-
-	// Store ModuleBuilder in HandleStore for initialization function access
+	// Step 2: Store ModuleBuilder in HandleStore for initialization function access
 	builderID := ctx.handleStore.Store(builder)
 
-	// Create C module with proxy initialization function
-	cModule := C.JS_NewCModule(ctx.ref, moduleName, (*C.JSModuleInitFunc)(C.GoModuleInitProxy))
-	if cModule == nil {
+	// Step 3: Prepare export names for C function
+	exportNames := make([]*C.char, len(builder.exports))
+	exportCount := len(builder.exports)
+
+	// Convert Go strings to C strings
+	for i, export := range builder.exports {
+		exportNames[i] = C.CString(export.Name)
+	}
+
+	// Prepare parameters for C function call
+	moduleName := C.CString(builder.name)
+	var exportNamesPtr **C.char
+	if exportCount > 0 {
+		exportNamesPtr = &exportNames[0]
+	}
+
+	// Step 4: Call C function to create module
+	result := C.CreateModule(
+		ctx.ref,
+		moduleName,
+		exportNamesPtr,
+		C.int(exportCount),
+		C.int32_t(builderID),
+	)
+
+	// Step 5: Clean up C strings
+	C.free(unsafe.Pointer(moduleName))
+	for _, cStr := range exportNames {
+		C.free(unsafe.Pointer(cStr))
+	}
+
+	// Step 6: Check result and handle errors
+	if result < 0 {
+		// Clean up HandleStore on failure
 		ctx.handleStore.Delete(builderID)
-		return fmt.Errorf("failed to create C module: %s", builder.name)
+		return ctx.Exception()
 	}
-
-	// Step 3: Pre-declare all exports (JS_AddModuleExport phase)
-	// This must be done before module instantiation
-	for _, export := range builder.exports {
-		exportName := C.CString(export.Name)
-		result := C.JS_AddModuleExport(ctx.ref, cModule, exportName)
-		C.free(unsafe.Pointer(exportName))
-
-		if result < 0 {
-			ctx.handleStore.Delete(builderID)
-			return fmt.Errorf("failed to add module export: %s", export.Name)
-		}
-	}
-
-	// Step 4: Store builderID as module private value for initialization access
-	builderValue := ctx.Int32(int32(builderID))
-	C.JS_SetModulePrivateValue(ctx.ref, cModule, builderValue.ref)
 
 	// Module is now created and registered, ready for import
 	return nil
