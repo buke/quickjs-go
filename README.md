@@ -35,7 +35,6 @@ we prebuilt quickjs static library for the following platforms:
 | v0.2.x     | v2023-12-09 |
 | v0.1.x     | v2021-03-27 |
 
-
 ## Features
 
 - Evaluate script
@@ -45,15 +44,18 @@ we prebuilt quickjs static library for the following platforms:
 - Simple exception throwing and catching
 - **Marshal/Unmarshal Go values to/from JavaScript values**
 - **Full TypedArray support (Int8Array, Uint8Array, Float32Array, etc.)**
-- **Class Binding with manual and automatic reflection-based approaches**
+- **Create JavaScript Classes from Go with ClassBuilder**
+- **Create JavaScript Modules from Go with ModuleBuilder**
 
 ## Guidelines
 
 1. Free `quickjs.Runtime` and `quickjs.Context` once you are done using them.
-2. Free `quickjs.Value`'s returned by `Eval()` and `EvalFile()`. All other values do not need to be freed, as they get garbage-collected.
+2. Manually free `quickjs.Value` when no longer needed to prevent memory leaks. QuickJS uses reference counting, so if a value is referenced by other objects, you only need to ensure the referencing objects are properly freed.
 3. Use `ctx.Loop()` wait for promise/job result after you using promise/job
 4. You may access the stacktrace of an error returned by `Eval()` or `EvalFile()` by casting it to a `*quickjs.Error`.
 5. Make new copies of arguments should you want to return them in functions you created.
+6. When creating modules, ensure proper resource cleanup by deferring `Free()` on exported function values.
+7. Use `EvalAwait(true)` when evaluating JavaScript code that contains `import()` statements to handle async module loading.
 
 ## Usage
 
@@ -221,7 +223,7 @@ func main() {
 
 ### TypedArray Support
 
-QuickJS-Go provides full support for JavaScript TypedArrays, enabling efficient binary data processing between Go and JavaScript.
+QuickJS-Go provides support for JavaScript TypedArrays, enabling binary data processing between Go and JavaScript.
 
 #### Creating TypedArrays from Go
 
@@ -459,7 +461,7 @@ func main() {
 
 ### Marshal/Unmarshal Go Values
 
-QuickJS-Go provides seamless conversion between Go and JavaScript values through the `Marshal` and `Unmarshal` methods.
+QuickJS-Go provides conversion between Go and JavaScript values through the `Marshal` and `Unmarshal` methods.
 
 #### Basic Types
 
@@ -735,13 +737,231 @@ When unmarshaling into `interface{}`, the following types are used:
 - `*big.Int` for BigInt
 - `[]byte` for ArrayBuffer
 
-### Class Binding
+### Create JavaScript Modules from Go with ModuleBuilder
 
-QuickJS-Go provides powerful class binding capabilities that allow you to seamlessly bridge Go structs to JavaScript classes with automatic memory management and inheritance support.
+The ModuleBuilder API allows you to create JavaScript modules from Go code, making Go functions, values, and objects available for standard ES6 import syntax in JavaScript applications.
 
-#### Manual Class Binding
+#### Basic Module Creation
 
-Create JavaScript classes manually with full control over methods, properties, and accessors:
+```go
+package main
+
+import (
+    "fmt"
+    "github.com/buke/quickjs-go"
+)
+
+func main() {
+    rt := quickjs.NewRuntime()
+    defer rt.Close()
+    ctx := rt.NewContext()
+    defer ctx.Close()
+
+    // Create a math module with Go functions and values
+    addFunc := ctx.Function(func(ctx *quickjs.Context, this quickjs.Value, args []quickjs.Value) quickjs.Value {
+        if len(args) >= 2 {
+            return ctx.Float64(args[0].Float64() + args[1].Float64())
+        }
+        return ctx.Float64(0)
+    })
+    defer addFunc.Free()
+
+    // Build the module using fluent API
+    module := quickjs.NewModuleBuilder("math").
+        Export("PI", ctx.Float64(3.14159)).
+        Export("add", addFunc).
+        Export("version", ctx.String("1.0.0")).
+        Export("default", ctx.String("Math Module"))
+
+    err := module.Build(ctx)
+    if err != nil {
+        panic(err)
+    }
+
+    // Use the module in JavaScript with standard ES6 import
+    result, err := ctx.Eval(`
+        (async function() {
+            // Named imports
+            const { PI, add, version } = await import('math');
+            
+            // Use imported functions and values
+            const sum = add(PI, 1.0);
+            return { sum, version };
+        })()
+    `, quickjs.EvalAwait(true))
+    defer result.Free()
+
+    if err != nil {
+        panic(err)
+    }
+
+    fmt.Println("Module result:", result.JSONStringify())
+    // Output: Module result: {"sum":4.14159,"version":"1.0.0"}
+}
+```
+
+#### Advanced Module Features
+
+```go
+package main
+
+import (
+    "fmt"
+    "github.com/buke/quickjs-go"
+)
+
+func main() {
+    rt := quickjs.NewRuntime()
+    defer rt.Close()
+    ctx := rt.NewContext()
+    defer ctx.Close()
+
+    // Create a utilities module with complex objects
+    config := ctx.Object()
+    config.Set("appName", ctx.String("MyApp"))
+    config.Set("version", ctx.String("2.0.0"))
+    config.Set("debug", ctx.Bool(true))
+    defer config.Free()
+
+    greetFunc := ctx.Function(func(ctx *quickjs.Context, this quickjs.Value, args []quickjs.Value) quickjs.Value {
+        name := "World"
+        if len(args) > 0 {
+            name = args[0].String()
+        }
+        return ctx.String(fmt.Sprintf("Hello, %s!", name))
+    })
+    defer greetFunc.Free()
+
+    // Create module with various export types
+    module := quickjs.NewModuleBuilder("utils").
+        Export("config", config).                    // Object export
+        Export("greet", greetFunc).                  // Function export
+        Export("constants", ctx.ParseJSON(`{"MAX": 100, "MIN": 1}`)).  // JSON export
+        Export("default", ctx.String("Utils Library"))  // Default export
+
+    err := module.Build(ctx)
+    if err != nil {
+        panic(err)
+    }
+
+    // Use mixed imports in JavaScript
+    result, err := ctx.Eval(`
+        (async function() {
+            // Import from multiple modules
+            const { add, PI } = await import('math');
+            const { upper } = await import('strings');
+            
+            // Combine functionality
+            const sum = add(PI, 1);
+            const message = "Result: " + sum.toFixed(2);
+            const finalMessage = upper(message);
+            
+            return finalMessage;
+        })()
+    `, quickjs.EvalAwait(true))
+    defer result.Free()
+
+    if err != nil {
+        panic(err)
+    }
+
+    fmt.Println("Advanced module result:", result.JSONStringify())
+}
+```
+
+#### Multiple Module Integration
+
+```go
+package main
+
+import (
+    "fmt"
+    "strings"
+    "github.com/buke/quickjs-go"
+)
+
+func main() {
+    rt := quickjs.NewRuntime()
+    defer rt.Close()
+    ctx := rt.NewContext()
+    defer ctx.Close()
+
+    // Create math module
+    addFunc := ctx.Function(func(ctx *quickjs.Context, this quickjs.Value, args []quickjs.Value) quickjs.Value {
+        if len(args) >= 2 {
+            return ctx.Float64(args[0].Float64() + args[1].Float64())
+        }
+        return ctx.Float64(0)
+    })
+    defer addFunc.Free()
+
+    mathModule := quickjs.NewModuleBuilder("math").
+        Export("add", addFunc).
+        Export("PI", ctx.Float64(3.14159))
+
+    // Create string utilities module
+    upperFunc := ctx.Function(func(ctx *quickjs.Context, this quickjs.Value, args []quickjs.Value) quickjs.Value {
+        if len(args) > 0 {
+            return ctx.String(strings.ToUpper(args[0].String()))
+        }
+        return ctx.String("")
+    })
+    defer upperFunc.Free()
+
+    stringModule := quickjs.NewModuleBuilder("strings").
+        Export("upper", upperFunc)
+
+    // Build both modules
+    err := mathModule.Build(ctx)
+    if err != nil {
+        panic(err)
+    }
+
+    err = stringModule.Build(ctx)
+    if err != nil {
+        panic(err)
+    }
+
+    // Use multiple modules together
+    result, err := ctx.Eval(`
+        (async function() {
+            // Import from multiple modules
+            const { add, PI } = await import('math');
+            const { upper } = await import('strings');
+            
+            // Combine functionality
+            const sum = add(PI, 1);
+            const message = "Result: " + sum.toFixed(2);
+            const finalMessage = upper(message);
+            
+            return finalMessage;
+        })()
+    `, quickjs.EvalAwait(true))
+    defer result.Free()
+
+    if err != nil {
+        panic(err)
+    }
+
+    fmt.Println("Multiple modules result:", result.String())
+    // Output: Multiple modules result: RESULT: 4.14
+}
+```
+
+#### ModuleBuilder API Reference
+
+**Core Methods:**
+- `NewModuleBuilder(name)` - Create a new module builder with the specified name
+- `Export(name, value)` - Add a named export to the module (chainable method)
+- `Build(ctx)` - Register the module in the JavaScript context
+
+### Create JavaScript Classes from Go with ClassBuilder
+
+The ClassBuilder API allows you to create JavaScript classes from Go code.
+
+#### Manual Class Creation
+
+Create JavaScript classes manually with control over methods, properties, and accessors:
 
 ```go
 package main
@@ -806,7 +1026,7 @@ func main() {
                 point.(*Point).Y = value.Float64()
                 return ctx.Undefined()
             }).
-        // Properties are bound directly to each instance (faster for static values)
+        // Properties are bound directly to each instance
         Property("version", ctx.String("1.0.0")).
         Property("type", ctx.String("Point")).
         // Read-only property
@@ -894,9 +1114,9 @@ func main() {
 }
 ```
 
-#### Automatic Class Binding with Reflection
+#### Automatic Class Creation with Reflection
 
-Automatically generate JavaScript classes from Go structs using reflection. **Important: Go struct fields are automatically converted to JavaScript class accessors, providing getter/setter functionality that directly maps to the underlying Go object fields, ensuring automatic synchronization between JavaScript and Go.**
+Automatically generate JavaScript classes from Go structs using reflection. Go struct fields are automatically converted to JavaScript class accessors, providing getter/setter functionality that directly maps to the underlying Go object fields.
 
 ```go
 package main
@@ -981,18 +1201,18 @@ func main() {
     defer result2.Free()
     fmt.Println("Named:", result2.JSONStringify())
 
-    // Demonstrate field accessor automatic synchronization
+    // Demonstrate field accessor synchronization
     result3, _ := ctx.Eval(`
         const user3 = new User(3, "Charlie", "charlie@example.com", 35, true, []);
         
-        // Field accessors provide direct access to Go struct fields with automatic sync
+        // Field accessors provide direct access to Go struct fields
         const originalName = user3.name;  // Getter: reads Go struct field
         
-        user3.name = "Charles";           // Setter: modifies Go struct field immediately
+        user3.name = "Charles";           // Setter: modifies Go struct field
         const newName = user3.name;       // Getter: reads modified field
         
-        // Changes are automatically synchronized with Go object
-        const info = user3.GetFullInfo(); // Method sees the changed name immediately
+        // Changes are synchronized with Go object
+        const info = user3.GetFullInfo(); // Method sees the changed name
         
         // Verify synchronization by changing multiple fields
         user3.age = 36;
@@ -1004,345 +1224,15 @@ func main() {
             newName: newName,
             infoAfterNameChange: info,
             finalInfo: updatedInfo,
-            // Demonstrate that Go object is truly synchronized
+            // Demonstrate that Go object is synchronized
             goObjectAge: user3.age,
             goObjectEmail: user3.email_address
         });
     `)
     defer result3.Free()
-    fmt.Println("Auto-sync demonstration:", result3.JSONStringify())
+    fmt.Println("Synchronization demonstration:", result3.JSONStringify())
 }
 ```
-
-#### Advanced Reflection Options
-
-Customize automatic binding with filtering and configuration options:
-
-```go
-package main
-
-import (
-    "fmt"
-    "github.com/buke/quickjs-go"
-)
-
-type APIClient struct {
-    BaseURL    string `js:"baseUrl"`      // Becomes accessor: client.baseUrl
-    APIKey     string `js:"-"`            // Hidden from JavaScript
-    Version    string `js:"version"`      // Becomes accessor: client.version
-    UserAgent  string `js:"userAgent"`    // Becomes accessor: client.userAgent
-}
-
-func (c *APIClient) Get(endpoint string) string {
-    return fmt.Sprintf("GET %s%s", c.BaseURL, endpoint)
-}
-
-func (c *APIClient) Post(endpoint string, data interface{}) string {
-    return fmt.Sprintf("POST %s%s with data", c.BaseURL, endpoint)
-}
-
-func (c *APIClient) InternalMethod() string {
-    return "This should be hidden"
-}
-
-func main() {
-    rt := quickjs.NewRuntime()
-    defer rt.Close()
-    ctx := rt.NewContext()
-    defer ctx.Close()
-
-    // Create class with custom options
-    clientConstructor, _, err := ctx.BindClass(&APIClient{},
-        quickjs.WithMethodPrefix("Get"), // Only include Get* and Post* methods
-        quickjs.WithIgnoredMethods("InternalMethod"), // Explicitly ignore methods
-        quickjs.WithIgnoredFields("APIKey"), // Ignore additional fields beyond tags
-    )
-    if err != nil {
-        panic(err)
-    }
-
-    ctx.Globals().Set("APIClient", clientConstructor)
-
-    result, _ := ctx.Eval(`
-        const client = new APIClient({
-            baseUrl: "https://api.example.com/v1/",
-            version: "1.0",
-            userAgent: "MyApp/1.0"
-        });
-        
-        // Field accessors work for all exported fields with automatic sync
-        const originalUrl = client.baseUrl;  // Getter
-        client.baseUrl = "https://api.example.com/v2/"; // Setter: updates Go struct
-        const newUrl = client.baseUrl;       // Getter shows updated value
-        
-        ({
-            get: client.Get("/users"),
-            post: typeof client.Post !== 'undefined' ? client.Post("/users", {name: "test"}) : "undefined",
-            hasInternal: typeof client.InternalMethod !== 'undefined',
-            hasAPIKey: typeof client.APIKey !== 'undefined',
-            originalUrl: originalUrl,
-            newUrl: newUrl,
-            // Field accessor changes are reflected in method calls
-            getWithNewUrl: client.Get("/users")
-        });
-    `)
-    defer result.Free()
-    
-    fmt.Println("Filtered binding with auto-sync:", result.JSONStringify())
-}
-```
-
-#### Class Inheritance Support
-
-JavaScript classes can inherit from Go-registered classes:
-
-```go
-package main
-
-import (
-    "fmt"
-    "github.com/buke/quickjs-go"
-)
-
-type Vehicle struct {
-    Brand string `js:"brand"`  // Accessor: vehicle.brand
-    Model string `js:"model"`  // Accessor: vehicle.model
-}
-
-func (v *Vehicle) Start() string {
-    return fmt.Sprintf("Starting %s %s", v.Brand, v.Model)
-}
-
-func main() {
-    rt := quickjs.NewRuntime()
-    defer rt.Close()
-    ctx := rt.NewContext()
-    defer ctx.Close()
-
-    // Register base Vehicle class
-    vehicleConstructor, _, _ := ctx.BindClass(&Vehicle{})
-    ctx.Globals().Set("Vehicle", vehicleConstructor)
-
-    // Create Car class that extends Vehicle in JavaScript
-    _, err := ctx.Eval(`
-        class Car extends Vehicle {
-            constructor(brand, model, doors) {
-                super({ brand, model });
-                this.doors = doors;
-            }
-            
-            getInfo() {
-                // Inherited field accessors work in JavaScript subclasses with auto-sync
-                return this.Start() + " with " + this.doors + " doors";
-            }
-            
-            setBrandAndModel(brand, model) {
-                // Field accessors can be used to modify Go struct fields with immediate sync
-                this.brand = brand;  // Setter accessor: immediate Go struct update
-                this.model = model;  // Setter accessor: immediate Go struct update
-            }
-        }
-        
-        // Test inheritance with field accessors and auto-sync
-        const car = new Car("Toyota", "Camry", 4);
-        const info1 = car.getInfo();
-        
-        // Modify via inherited field accessors - changes are immediately reflected
-        car.setBrandAndModel("Honda", "Accord");
-        const info2 = car.getInfo();
-        
-        globalThis.result = { 
-            original: info1, 
-            modified: info2,
-            brand: car.brand,  // Getter accessor: reads current Go struct value
-            model: car.model   // Getter accessor: reads current Go struct value
-        };
-    `)
-    if err != nil {
-        panic(err)
-    }
-
-    result := ctx.Globals().Get("result")
-    defer result.Free()
-    fmt.Println("Inheritance with Auto-sync Accessors:", result.JSONStringify())
-}
-```
-
-#### Direct Constructor Calls
-
-Use `CallConstructor` for direct class instantiation from Go:
-
-```go
-package main
-
-import (
-    "fmt"
-    "github.com/buke/quickjs-go"
-)
-
-type Point struct {
-    X, Y float64
-}
-
-func main() {
-    rt := quickjs.NewRuntime()
-    defer rt.Close()
-    ctx := rt.NewContext()
-    defer ctx.Close()
-
-    // Create Point class
-    pointConstructor, _, err := quickjs.NewClassBuilder("Point").
-        Constructor(func(ctx *quickjs.Context, instance quickjs.Value, args []quickjs.Value) (interface{}, error) {
-            x, y := 0.0, 0.0
-            if len(args) > 0 { x = args[0].Float64() }
-            if len(args) > 1 { y = args[1].Float64() }
-            return &Point{X: x, Y: y}, nil
-        }).
-        Method("toString", func(ctx *quickjs.Context, this quickjs.Value, args []quickjs.Value) quickjs.Value {
-            point, _ := this.GetGoObject()
-            p := point.(*Point)
-            return ctx.String(fmt.Sprintf("Point(%g, %g)", p.X, p.Y))
-        }).
-        Build(ctx)
-
-    if err != nil {
-        panic(err)
-    }
-
-    // Direct constructor call from Go
-    instance := pointConstructor.CallConstructor(ctx.Float64(10), ctx.Float64(20))
-    defer instance.Free()
-
-    // Call method on the instance
-    result := instance.Call("toString")
-    defer result.Free()
-
-    fmt.Println("Direct call result:", result.String()) // Point(10, 20)
-
-    // Get Go object from JavaScript instance
-    goObj, err := instance.GetGoObject()
-    if err == nil {
-        point := goObj.(*Point)
-        fmt.Printf("Go object: {X: %g, Y: %g}\n", point.X, point.Y)
-    }
-}
-```
-
-#### Error Handling in Constructors
-
-Handle constructor errors gracefully:
-
-```go
-package main
-
-import (
-    "fmt"
-    "errors"
-    "strings"
-    "github.com/buke/quickjs-go"
-)
-
-type ValidatedUser struct {
-    Name  string
-    Email string
-}
-
-func main() {
-    rt := quickjs.NewRuntime()
-    defer rt.Close()
-    ctx := rt.NewContext()
-    defer ctx.Close()
-
-    // Create class with constructor validation
-    userConstructor, _, err := quickjs.NewClassBuilder("ValidatedUser").
-        Constructor(func(ctx *quickjs.Context, instance quickjs.Value, args []quickjs.Value) (interface{}, error) {
-            if len(args) < 2 {
-                return nil, errors.New("ValidatedUser requires name and email")
-            }
-            
-            name := args[0].String()
-            email := args[1].String()
-            
-            if name == "" {
-                return nil, errors.New("name cannot be empty")
-            }
-            
-            if email == "" || !strings.Contains(email, "@") {
-                return nil, errors.New("invalid email address")
-            }
-            
-            return &ValidatedUser{Name: name, Email: email}, nil
-        }).
-        Method("getInfo", func(ctx *quickjs.Context, this quickjs.Value, args []quickjs.Value) quickjs.Value {
-            user, _ := this.GetGoObject()
-            u := user.(*ValidatedUser)
-            return ctx.String(fmt.Sprintf("%s <%s>", u.Name, u.Email))
-        }).
-        Build(ctx)
-
-    if err != nil {
-        panic(err)
-    }
-
-    ctx.Globals().Set("ValidatedUser", userConstructor)
-
-    // Test constructor error handling
-    result, _ := ctx.Eval(`
-        try {
-            const user1 = new ValidatedUser("Alice", "alice@example.com");
-            const info1 = user1.getInfo();
-            
-            const user2 = new ValidatedUser("", "invalid-email");
-            const info2 = user2.getInfo();
-            
-            [info1, info2];
-        } catch (error) {
-            error.message;
-        }
-    `)
-    defer result.Free()
-    
-    fmt.Println("Constructor error handling:", result.String())
-}
-```
-
-#### Features
-
-**Manual Class Binding:**
-- Full control over class structure and behavior
-- Support for instance and static methods/properties
-- Data properties with automatic instance binding
-- Read-only, write-only, and read-write accessors
-- Constructor with error handling and instance pre-creation
-- Automatic memory management with finalizers
-
-**Automatic Reflection Binding:**
-- Zero-boilerplate class generation from Go structs
-- Smart constructor supporting both positional and named parameters
-- **Automatic field-to-accessor mapping**: Go struct fields become JavaScript accessors with getter/setter functionality
-- **Real-time synchronization**: Changes to JavaScript properties immediately update the underlying Go struct fields
-- **Bidirectional data binding**: Go method calls see JavaScript-side changes instantly
-- Automatic property mapping with `js` and `json` tag support
-- Method binding with proper parameter/return value conversion
-- TypedArray support for numeric slice fields
-- Configurable filtering for methods and fields
-
-**Key Synchronization Features:**
-- **Immediate updates**: `obj.field = value` immediately modifies the Go struct field
-- **Live data access**: Go methods always see the current JavaScript-side values
-- **No manual sync required**: Changes are automatically propagated between JavaScript and Go
-- **Type-safe conversion**: Values are properly converted between JavaScript and Go types
-- **Memory efficient**: Direct field access without intermediate serialization
-
-**Shared Features:**
-- Full JavaScript inheritance support
-- Seamless integration with Marshal/Unmarshal system
-- TypedArray support for binary data
-- Constructor error handling with JavaScript exceptions
-- Automatic memory management and cleanup
-- Thread-safe operation
-- Class instance validation and type checking
-- Direct constructor calls from Go code
 
 ### Bytecode Compiler
 

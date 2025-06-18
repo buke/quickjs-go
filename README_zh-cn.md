@@ -35,25 +35,27 @@ Go 语言的 QuickJS 绑定库：快速、小型、可嵌入的 ES2020 JavaScrip
 | v0.2.x     | v2023-12-09 |
 | v0.1.x     | v2021-03-27 |
 
-
 ## 功能
 
-- 执行 javascript 脚本
-- 编译 javascript 脚本到字节码并执行字节码
+- 执行 JavaScript 脚本
+- 编译脚本到字节码并执行字节码
 - 在 Go 中操作 JavaScript 值和对象
-- 绑定 Go 函数到 JavaScript 同步函数和异步函数
+- 绑定 Go 函数到 JavaScript 同步/异步函数
 - 简单的异常抛出和捕获
-- **Go 值与 JavaScript 值的序列化和反序列化**
+- **Go 值与 JavaScript 值的序列化/反序列化**
 - **完整的 TypedArray 支持 (Int8Array, Uint8Array, Float32Array 等)**
-- **手动和自动反射的类绑定功能**
+- **使用 ClassBuilder 从 Go 创建 JavaScript 类**
+- **使用 ModuleBuilder 从 Go 创建 JavaScript 模块**
 
 ## 指南
 
 1. 在使用完毕后，请记得关闭 `quickjs.Runtime` 和 `quickjs.Context`。
-2. 请记得关闭由 `Eval()` 和 `EvalFile()` 返回的 `quickjs.Value`。其他值不需要关闭，因为它们会被垃圾回收。
-3. 如果你使用了 promise 或 async function，请使用 `ctx.Loop()` 等待所有的 promise/job 结果。
-4. 如果`Eval()` 或 `EvalFile()`返回了错误，可强制转换为`*quickjs.Error`以读取错误的堆栈信息。
+2. 在不再需要时手动释放 `quickjs.Value` 以防止内存泄漏。QuickJS 使用引用计数，所以如果一个值被其他对象引用，你只需要确保引用对象被正确释放。
+3. 如果你使用了 promise/job，请使用 `ctx.Loop()` 等待 promise/job 结果
+4. 如果 `Eval()` 或 `EvalFile()` 返回了错误，可强制转换为 `*quickjs.Error` 以读取错误的堆栈信息。
 5. 如果你想在函数中返回参数，请在函数中复制参数。
+6. 创建模块时，通过延迟 `Free()` 调用来确保导出函数值的适当资源清理。
+7. 当评估包含 `import()` 语句的 JavaScript 代码时，使用 `EvalAwait(true)` 来处理异步模块加载。
 
 ## 用法
 
@@ -61,7 +63,7 @@ Go 语言的 QuickJS 绑定库：快速、小型、可嵌入的 ES2020 JavaScrip
 import "github.com/buke/quickjs-go"
 ```
 
-### 执行 javascript 脚本
+### 执行脚本
 
 ```go
 package main
@@ -73,11 +75,11 @@ import (
 )
 
 func main() {
-    // Create a new runtime
+    // 创建新的运行时
     rt := quickjs.NewRuntime()
     defer rt.Close()
 
-    // Create a new context
+    // 创建新的上下文
     ctx := rt.NewContext()
     defer ctx.Close()
 
@@ -89,7 +91,7 @@ func main() {
 }
 ```
 
-### 读取/设置 JavaScript 对象
+### 获取/设置 JavaScript 对象
 
 ```go
 package main
@@ -101,11 +103,11 @@ import (
 )
 
 func main() {
-    // Create a new runtime
+    // 创建新的运行时
     rt := quickjs.NewRuntime()
     defer rt.Close()
 
-    // Create a new context
+    // 创建新的上下文
     ctx := rt.NewContext()
     defer ctx.Close()
 
@@ -119,48 +121,47 @@ func main() {
     defer ret.Free()
     fmt.Println(ret.String())
 }
-
 ```
 
-### 函数绑定
+### 绑定 Go 函数到 JavaScript 同步/异步函数
 
 ```go
 package main
 import "github.com/buke/quickjs-go"
 
 func main() {
-    // Create a new runtime
+    // 创建新的运行时
     rt := quickjs.NewRuntime()
     defer rt.Close()
 
-    // Create a new context
+    // 创建新的上下文
     ctx := rt.NewContext()
     defer ctx.Close()
 
-    // Create a new object
+    // 创建新对象
     test := ctx.Object()
     defer test.Free()
-    // bind properties to the object
+    // 将属性绑定到对象
     test.Set("A", test.Context().String("String A"))
     test.Set("B", ctx.Int32(0))
     test.Set("C", ctx.Bool(false))
-    // bind go function to js object
+    // 将 go 函数绑定到 js 对象
     test.Set("hello", ctx.Function(func(ctx *quickjs.Context, this quickjs.Value, args []quickjs.Value) quickjs.Value {
         return ctx.String("Hello " + args[0].String())
     }))
 
-    // bind "test" object to global object
+    // 将 "test" 对象绑定到全局对象
     ctx.Globals().Set("test", test)
 
-    // call js function by js
+    // 通过 js 调用 js 函数
     js_ret, _ := ctx.Eval(`test.hello("Javascript!")`)
     fmt.Println(js_ret.String())
 
-    // call js function by go
+    // 通过 go 调用 js 函数
     go_ret := ctx.Globals().Get("test").Call("hello", ctx.String("Golang!"))
     fmt.Println(go_ret.String())
 
-    // 使用 Function + Promise 绑定 Go 函数为 JavaScript 异步函数
+    // 使用 Function + Promise 将 Go 函数绑定为 JavaScript 异步函数
     ctx.Globals().Set("testAsync", ctx.Function(func(ctx *quickjs.Context, this quickjs.Value, args []quickjs.Value) quickjs.Value {
         return ctx.Promise(func(resolve, reject func(quickjs.Value)) {
             resolve(ctx.String("Hello Async Function!"))
@@ -173,23 +174,23 @@ func main() {
         `)
     defer ret.Free()
 
-    // wait for promise resolve
+    // 等待 promise 解析
     ctx.Loop()
 
-    //get promise result
+    // 获取 promise 结果
     asyncRet, _ := ctx.Eval("ret")
     defer asyncRet.Free()
 
     fmt.Println(asyncRet.String())
 
-    // Output:
+    // 输出:
     // Hello Javascript!
     // Hello Golang!
     // Hello Async Function!
 }
 ```
 
-### 异常抛出和捕获
+### 错误处理
 
 ```go
 package main
@@ -201,16 +202,16 @@ import (
 )
 
 func main() {
-    // Create a new runtime
+    // 创建新的运行时
     rt := quickjs.NewRuntime()
     defer rt.Close()
 
-    // Create a new context
+    // 创建新的上下文
     ctx := rt.NewContext()
     defer ctx.Close()
 
     ctx.Globals().SetFunction("A", func(ctx *Context, this Value, args []Value) Value {
-        // raise error
+        // 抛出错误
         return ctx.ThrowError(expected)
     })
 
@@ -221,7 +222,7 @@ func main() {
 
 ### TypedArray 支持
 
-QuickJS-Go 提供对 JavaScript TypedArray 的完整支持，实现 Go 和 JavaScript 之间高效的二进制数据处理。
+QuickJS-Go 提供对 JavaScript TypedArray 的支持，实现 Go 和 JavaScript 之间的二进制数据处理。
 
 #### 从 Go 创建 TypedArray
 
@@ -459,7 +460,7 @@ func main() {
 
 ### Go 值序列化和反序列化
 
-QuickJS-Go 通过 `Marshal` 和 `Unmarshal` 方法提供 Go 和 JavaScript 值之间的无缝转换。
+QuickJS-Go 通过 `Marshal` 和 `Unmarshal` 方法提供 Go 和 JavaScript 值之间的转换。
 
 #### 基本类型
 
@@ -487,7 +488,7 @@ func main() {
             "city":    "北京",
             "country": "中国",
         },
-        // TypedArray 将为类型化切片自动创建
+        // 类型化切片将自动创建 TypedArray
         "floatData": []float32{1.1, 2.2, 3.3},
         "intData":   []int32{100, 200, 300},
         "byteData":  []byte{0x48, 0x65, 0x6C, 0x6C, 0x6F}, // "Hello" 的字节
@@ -735,11 +736,233 @@ func main() {
 - `*big.Int` 对应 BigInt
 - `[]byte` 对应 ArrayBuffer
 
-### 类绑定
+### 使用 ModuleBuilder 从 Go 创建 JavaScript 模块
 
-QuickJS-Go 提供强大的类绑定功能，允许您无缝地将 Go 结构体桥接到 JavaScript 类，具有自动内存管理和继承支持。
+ModuleBuilder API 允许您从 Go 代码创建 JavaScript 模块，使 Go 函数、值和对象可以通过标准 ES6 import 语法在 JavaScript 应用程序中使用。
 
-#### 手动类绑定
+#### 基本模块创建
+
+```go
+package main
+
+import (
+    "fmt"
+    "github.com/buke/quickjs-go"
+)
+
+func main() {
+    rt := quickjs.NewRuntime()
+    defer rt.Close()
+    ctx := rt.NewContext()
+    defer ctx.Close()
+
+    // 创建包含 Go 函数和值的数学模块
+    addFunc := ctx.Function(func(ctx *quickjs.Context, this quickjs.Value, args []quickjs.Value) quickjs.Value {
+        if len(args) >= 2 {
+            return ctx.Float64(args[0].Float64() + args[1].Float64())
+        }
+        return ctx.Float64(0)
+    })
+    defer addFunc.Free()
+
+    // 使用流畅 API 构建模块
+    module := quickjs.NewModuleBuilder("math").
+        Export("PI", ctx.Float64(3.14159)).
+        Export("add", addFunc).
+        Export("version", ctx.String("1.0.0")).
+        Export("default", ctx.String("数学模块"))
+
+    err := module.Build(ctx)
+    if err != nil {
+        panic(err)
+    }
+
+    // 在 JavaScript 中使用标准 ES6 import 使用模块
+    result, err := ctx.Eval(`
+        (async function() {
+            // 命名导入
+            const { PI, add, version } = await import('math');
+            
+            // 使用导入的函数和值
+            const sum = add(PI, 1.0);
+            return { sum, version };
+        })()
+    `, quickjs.EvalAwait(true))
+    defer result.Free()
+
+    if err != nil {
+        panic(err)
+    }
+
+    fmt.Println("模块结果:", result.JSONStringify())
+    // 输出: 模块结果: {"sum":4.14159,"version":"1.0.0"}
+}
+```
+
+#### 高级模块功能
+
+```go
+package main
+
+import (
+    "fmt"
+    "github.com/buke/quickjs-go"
+)
+
+func main() {
+    rt := quickjs.NewRuntime()
+    defer rt.Close()
+    ctx := rt.NewContext()
+    defer ctx.Close()
+
+    // 创建包含复杂对象的实用工具模块
+    config := ctx.Object()
+    config.Set("appName", ctx.String("我的应用"))
+    config.Set("version", ctx.String("2.0.0"))
+    config.Set("debug", ctx.Bool(true))
+    defer config.Free()
+
+    greetFunc := ctx.Function(func(ctx *quickjs.Context, this quickjs.Value, args []quickjs.Value) quickjs.Value {
+        name := "世界"
+        if len(args) > 0 {
+            name = args[0].String()
+        }
+        return ctx.String(fmt.Sprintf("你好, %s!", name))
+    })
+    defer greetFunc.Free()
+
+    // 创建包含各种导出类型的模块
+    module := quickjs.NewModuleBuilder("utils").
+        Export("config", config).                    // 对象导出
+        Export("greet", greetFunc).                  // 函数导出
+        Export("constants", ctx.ParseJSON(`{"MAX": 100, "MIN": 1}`)).  // JSON 导出
+        Export("default", ctx.String("实用工具库"))  // 默认导出
+
+    err := module.Build(ctx)
+    if err != nil {
+        panic(err)
+    }
+
+    // 在 JavaScript 中使用混合导入
+    result, err := ctx.Eval(`
+        (async function() {
+            // 混合导入：命名 + 默认
+            const utils = await import('utils');
+            const { config, greet, constants } = utils;
+            
+            // 使用导入的功能
+            const sum = greet(config.appName);
+            const range = constants.MAX - constants.MIN;
+            
+            return {
+                greeting: sum,
+                range: range,
+                defaultExport: utils.default,
+                debugMode: config.debug
+            };
+        })()
+    `, quickjs.EvalAwait(true))
+    defer result.Free()
+
+    if err != nil {
+        panic(err)
+    }
+
+    fmt.Println("高级模块结果:", result.JSONStringify())
+}
+```
+
+#### 多模块集成
+
+```go
+package main
+
+import (
+    "fmt"
+    "strings"
+    "github.com/buke/quickjs-go"
+)
+
+func main() {
+    rt := quickjs.NewRuntime()
+    defer rt.Close()
+    ctx := rt.NewContext()
+    defer ctx.Close()
+
+    // 创建数学模块
+    addFunc := ctx.Function(func(ctx *quickjs.Context, this quickjs.Value, args []quickjs.Value) quickjs.Value {
+        if len(args) >= 2 {
+            return ctx.Float64(args[0].Float64() + args[1].Float64())
+        }
+        return ctx.Float64(0)
+    })
+    defer addFunc.Free()
+
+    mathModule := quickjs.NewModuleBuilder("math").
+        Export("add", addFunc).
+        Export("PI", ctx.Float64(3.14159))
+
+    // 创建字符串实用工具模块
+    upperFunc := ctx.Function(func(ctx *quickjs.Context, this quickjs.Value, args []quickjs.Value) quickjs.Value {
+        if len(args) > 0 {
+            return ctx.String(strings.ToUpper(args[0].String()))
+        }
+        return ctx.String("")
+    })
+    defer upperFunc.Free()
+
+    stringModule := quickjs.NewModuleBuilder("strings").
+        Export("upper", upperFunc)
+
+    // 构建两个模块
+    err := mathModule.Build(ctx)
+    if err != nil {
+        panic(err)
+    }
+
+    err = stringModule.Build(ctx)
+    if err != nil {
+        panic(err)
+    }
+
+    // 一起使用多个模块
+    result, err := ctx.Eval(`
+        (async function() {
+            // 从多个模块导入
+            const { add, PI } = await import('math');
+            const { upper } = await import('strings');
+            
+            // 组合功能
+            const sum = add(PI, 1);
+            const message = "结果: " + sum.toFixed(2);
+            const finalMessage = upper(message);
+            
+            return finalMessage;
+        })()
+    `, quickjs.EvalAwait(true))
+    defer result.Free()
+
+    if err != nil {
+        panic(err)
+    }
+
+    fmt.Println("多模块结果:", result.String())
+    // 输出: 多模块结果: 结果: 4.14
+}
+```
+
+#### ModuleBuilder API 参考
+
+**核心方法:**
+- `NewModuleBuilder(name)` - 创建具有指定名称的新模块构建器
+- `Export(name, value)` - 向模块添加命名导出（可链式调用的方法）
+- `Build(ctx)` - 在 JavaScript 上下文中注册模块
+
+### 使用 ClassBuilder 从 Go 创建 JavaScript 类
+
+ClassBuilder API 允许您从 Go 代码创建 JavaScript 类。
+
+#### 手动类创建
 
 手动创建 JavaScript 类，完全控制方法、属性和访问器：
 
@@ -806,7 +1029,7 @@ func main() {
                 point.(*Point).Y = value.Float64()
                 return ctx.Undefined()
             }).
-        // 属性直接绑定到每个实例（对静态值来说更快）
+        // 属性直接绑定到每个实例
         Property("version", ctx.String("1.0.0")).
         Property("type", ctx.String("Point")).
         // 只读属性
@@ -874,29 +1097,12 @@ func main() {
     defer result.Free()
     
     fmt.Println("结果:", result.JSONStringify())
-    
-    // 演示访问器和属性的区别
-    propertyTest, _ := ctx.Eval(`
-        const p1 = new Point(1, 1);
-        const p2 = new Point(2, 2);
-        
-        // 属性是实例特定的值
-        const sameVersion = p1.version === p2.version; // true，相同的静态值
-        
-        // 访问器提供来自 Go 对象的动态值
-        const differentX = p1.x !== p2.x; // true，来自 Go 对象的不同值
-        
-        ({ sameVersion, differentX });
-    `)
-    defer propertyTest.Free()
-    
-    fmt.Println("属性与访问器:", propertyTest.JSONStringify())
 }
 ```
 
-#### 自动反射类绑定
+#### 使用反射自动创建类
 
-使用反射自动从 Go 结构体生成 JavaScript 类。Go 结构体字段会自动转换为 JavaScript 类访问器，提供 getter/setter 功能，直接映射到底层 Go 对象字段。
+使用反射从 Go 结构体自动生成 JavaScript 类。Go 结构体字段会自动转换为 JavaScript 类访问器，提供 getter/setter 功能，直接映射到底层 Go 对象字段。
 
 ```go
 package main
@@ -981,355 +1187,42 @@ func main() {
     defer result2.Free()
     fmt.Println("命名参数:", result2.JSONStringify())
 
-    // 演示字段访问器行为
+    // 演示字段访问器同步
     result3, _ := ctx.Eval(`
         const user3 = new User(3, "小刚", "xiaogang@example.com", 35, true, []);
         
         // 字段访问器提供对 Go 结构体字段的直接访问
         const originalName = user3.name;  // Getter: 读取 Go 结构体字段
+        
         user3.name = "小刚同学";           // Setter: 修改 Go 结构体字段
         const newName = user3.name;       // Getter: 读取修改后的字段
         
-        // 更改会反映在 Go 对象中
+        // 更改与 Go 对象同步
         const info = user3.GetFullInfo(); // 方法看到更改的名称
+        
+        // 通过更改多个字段验证同步
+        user3.age = 36;
+        user3.email_address = "xiaogang.updated@example.com";
+        const updatedInfo = user3.GetFullInfo();
         
         ({
             originalName: originalName,
             newName: newName,
-            infoWithNewName: info
+            infoAfterNameChange: info,
+            finalInfo: updatedInfo,
+            // 演示 Go 对象已同步
+            goObjectAge: user3.age,
+            goObjectEmail: user3.email_address
         });
     `)
     defer result3.Free()
-    fmt.Println("字段访问器:", result3.JSONStringify())
+    fmt.Println("同步演示:", result3.JSONStringify())
 }
 ```
 
-#### 高级反射选项
-
-使用过滤和配置选项自定义自动绑定：
+### 字节码编译器
 
 ```go
-package main
-
-import (
-    "fmt"
-    "github.com/buke/quickjs-go"
-)
-
-type APIClient struct {
-    BaseURL    string `js:"baseUrl"`      // 变成访问器: client.baseUrl
-    APIKey     string `js:"-"`            // 从 JavaScript 隐藏
-    Version    string `js:"version"`      // 变成访问器: client.version
-    UserAgent  string `js:"userAgent"`    // 变成访问器: client.userAgent
-}
-
-func (c *APIClient) Get(endpoint string) string {
-    return fmt.Sprintf("GET %s%s", c.BaseURL, endpoint)
-}
-
-func (c *APIClient) Post(endpoint string, data interface{}) string {
-    return fmt.Sprintf("POST %s%s with data", c.BaseURL, endpoint)
-}
-
-func (c *APIClient) InternalMethod() string {
-    return "这应该被隐藏"
-}
-
-func main() {
-    rt := quickjs.NewRuntime()
-    defer rt.Close()
-    ctx := rt.NewContext()
-    defer ctx.Close()
-
-    // 使用自定义选项创建类
-    clientConstructor, _, err := ctx.BindClass(&APIClient{},
-        quickjs.WithMethodPrefix("Get"), // 只包含 Get* 和 Post* 方法
-        quickjs.WithIgnoredMethods("InternalMethod"), // 明确忽略方法
-        quickjs.WithIgnoredFields("APIKey"), // 忽略标签之外的额外字段
-    )
-    if err != nil {
-        panic(err)
-    }
-
-    ctx.Globals().Set("APIClient", clientConstructor)
-
-    result, _ := ctx.Eval(`
-        const client = new APIClient({
-            baseUrl: "https://api.example.com/v1/",
-            version: "1.0",
-            userAgent: "MyApp/1.0"
-        });
-        
-        // 字段访问器对所有导出字段都有效
-        const originalUrl = client.baseUrl;  // Getter
-        client.baseUrl = "https://api.example.com/v2/"; // Setter: 更新 Go 结构体
-        const newUrl = client.baseUrl;       // Getter 显示更新的值
-        
-        ({
-            get: client.Get("/users"),
-            post: typeof client.Post !== 'undefined' ? client.Post("/users", {name: "test"}) : "undefined",
-            hasInternal: typeof client.InternalMethod !== 'undefined',
-            hasAPIKey: typeof client.APIKey !== 'undefined',
-            originalUrl: originalUrl,
-            newUrl: newUrl,
-            // 字段访问器更改会反映在方法调用中
-            getWithNewUrl: client.Get("/users")
-        });
-    `)
-    defer result.Free()
-    
-    fmt.Println("过滤绑定:", result.JSONStringify())
-}
-```
-
-#### 类继承支持
-
-JavaScript 类可以继承 Go 注册的类：
-
-```go
-package main
-
-import (
-    "fmt"
-    "github.com/buke/quickjs-go"
-)
-
-type Vehicle struct {
-    Brand string `js:"brand"`  // 访问器: vehicle.brand
-    Model string `js:"model"`  // 访问器: vehicle.model
-}
-
-func (v *Vehicle) Start() string {
-    return fmt.Sprintf("启动 %s %s", v.Brand, v.Model)
-}
-
-func main() {
-    rt := quickjs.NewRuntime()
-    defer rt.Close()
-    ctx := rt.NewContext()
-    defer ctx.Close()
-
-    // 注册基础 Vehicle 类
-    vehicleConstructor, _, _ := ctx.BindClass(&Vehicle{})
-    ctx.Globals().Set("Vehicle", vehicleConstructor)
-
-    // 在 JavaScript 中创建继承 Vehicle 的 Car 类
-    _, err := ctx.Eval(`
-        class Car extends Vehicle {
-            constructor(brand, model, doors) {
-                super({ brand, model });
-                this.doors = doors;
-            }
-            
-            getInfo() {
-                // 继承的字段访问器在 JavaScript 子类中工作
-                return this.Start() + " 有 " + this.doors + " 个门";
-            }
-            
-            setBrandAndModel(brand, model) {
-                // 字段访问器可以用来修改 Go 结构体字段
-                this.brand = brand;  // Setter 访问器
-                this.model = model;  // Setter 访问器
-            }
-        }
-        
-        // 测试字段访问器的继承
-        const car = new Car("丰田", "凯美瑞", 4);
-        const info1 = car.getInfo();
-        
-        // 通过继承的字段访问器修改
-        car.setBrandAndModel("本田", "雅阁");
-        const info2 = car.getInfo();
-        
-        globalThis.result = { 
-            original: info1, 
-            modified: info2,
-            brand: car.brand,  // Getter 访问器
-            model: car.model   // Getter 访问器
-        };
-    `)
-    if err != nil {
-        panic(err)
-    }
-
-    result := ctx.Globals().Get("result")
-    defer result.Free()
-    fmt.Println("继承与访问器:", result.JSONStringify())
-}
-```
-
-#### 直接构造函数调用
-
-使用 `CallConstructor` 从 Go 直接实例化类：
-
-```go
-package main
-
-import (
-    "fmt"
-    "github.com/buke/quickjs-go"
-)
-
-type Point struct {
-    X, Y float64
-}
-
-func main() {
-    rt := quickjs.NewRuntime()
-    defer rt.Close()
-    ctx := rt.NewContext()
-    defer ctx.Close()
-
-    // 创建 Point 类
-    pointConstructor, _, err := quickjs.NewClassBuilder("Point").
-        Constructor(func(ctx *quickjs.Context, instance quickjs.Value, args []quickjs.Value) (interface{}, error) {
-            x, y := 0.0, 0.0
-            if len(args) > 0 { x = args[0].Float64() }
-            if len(args) > 1 { y = args[1].Float64() }
-            return &Point{X: x, Y: y}, nil
-        }).
-        Method("toString", func(ctx *quickjs.Context, this quickjs.Value, args []quickjs.Value) quickjs.Value {
-            point, _ := this.GetGoObject()
-            p := point.(*Point)
-            return ctx.String(fmt.Sprintf("Point(%g, %g)", p.X, p.Y))
-        }).
-        Build(ctx)
-
-    if err != nil {
-        panic(err)
-    }
-
-    // 从 Go 直接调用构造函数
-    instance := pointConstructor.CallConstructor(ctx.Float64(10), ctx.Float64(20))
-    defer instance.Free()
-
-    // 调用实例方法
-    result := instance.Call("toString")
-    defer result.Free()
-
-    fmt.Println("直接调用结果:", result.String()) // Point(10, 20)
-
-    // 从 JavaScript 实例获取 Go 对象
-    goObj, err := instance.GetGoObject()
-    if err == nil {
-        point := goObj.(*Point)
-        fmt.Printf("Go 对象: {X: %g, Y: %g}\n", point.X, point.Y)
-    }
-}
-```
-
-#### 构造函数错误处理
-
-优雅地处理构造函数错误：
-
-```go
-package main
-
-import (
-    "fmt"
-    "errors"
-    "strings"
-    "github.com/buke/quickjs-go"
-)
-
-type ValidatedUser struct {
-    Name  string
-    Email string
-}
-
-func main() {
-    rt := quickjs.NewRuntime()
-    defer rt.Close()
-    ctx := rt.NewContext()
-    defer ctx.Close()
-
-    // 创建带有构造函数验证的类
-    userConstructor, _, err := quickjs.NewClassBuilder("ValidatedUser").
-        Constructor(func(ctx *quickjs.Context, instance quickjs.Value, args []quickjs.Value) (interface{}, error) {
-            if len(args) < 2 {
-                return nil, errors.New("ValidatedUser 需要姓名和邮箱")
-            }
-            
-            name := args[0].String()
-            email := args[1].String()
-            
-            if name == "" {
-                return nil, errors.New("姓名不能为空")
-            }
-            
-            if email == "" || !strings.Contains(email, "@") {
-                return nil, errors.New("无效的邮箱地址")
-            }
-            
-            return &ValidatedUser{Name: name, Email: email}, nil
-        }).
-        Method("getInfo", func(ctx *quickjs.Context, this quickjs.Value, args []quickjs.Value) quickjs.Value {
-            user, _ := this.GetGoObject()
-            u := user.(*ValidatedUser)
-            return ctx.String(fmt.Sprintf("%s <%s>", u.Name, u.Email))
-        }).
-        Build(ctx)
-
-    if err != nil {
-        panic(err)
-    }
-
-    ctx.Globals().Set("ValidatedUser", userConstructor)
-
-    // 测试构造函数错误处理
-    result, _ := ctx.Eval(`
-        try {
-            const user1 = new ValidatedUser("小明", "xiaoming@example.com");
-            const info1 = user1.getInfo();
-            
-            const user2 = new ValidatedUser("", "invalid-email");
-            const info2 = user2.getInfo();
-            
-            [info1, info2];
-        } catch (error) {
-            error.message;
-        }
-    `)
-    defer result.Free()
-    
-    fmt.Println("构造函数错误处理:", result.String())
-}
-```
-
-#### 功能特性
-
-**手动类绑定：**
-- 完全控制类结构和行为
-- 支持实例和静态方法/属性
-- 带有自动实例绑定的数据属性
-- 只读、只写和读写访问器
-- 带有错误处理和实例预创建的构造函数
-- 带有终结器的自动内存管理
-
-**自动反射绑定：**
-- 从 Go 结构体零样板代码生成类
-- 智能构造函数支持位置和命名参数
-- **自动字段到访问器映射**: Go 结构体字段变成 JavaScript 访问器，具有 getter/setter 功能
-- 直接字段访问: `obj.field = value` 修改底层 Go 结构体字段
-- 带有 `js` 和 `json` 标签支持的自动属性映射
-- 方法绑定和正确的参数/返回值转换
-- 数值切片字段的 TypedArray 支持
-- 方法和字段的可配置过滤
-
-**共享功能：**
-- 完整的 JavaScript 继承支持
-- 与 Marshal/Unmarshal 系统无缝集成
-- 二进制数据的 TypedArray 支持
-- 带有 JavaScript 异常的构造函数错误处理
-- 自动内存管理和清理
-- 线程安全操作
-- 类实例验证和类型检查
-- 从 Go 代码直接构造函数调用
-
-### Bytecode 编译和执行
-
-```go
-
 package main
 
 import (
@@ -1339,10 +1232,10 @@ import (
 )
 
 func main() {
-    // Create a new runtime
+    // 创建新的运行时
     rt := quickjs.NewRuntime()
     defer rt.Close()
-    // Create a new context
+    // 创建新的上下文
     ctx := rt.NewContext()
     defer ctx.Close()
 
@@ -1358,24 +1251,24 @@ func main() {
     }
     fib(10)
     `
-    // Compile the script to bytecode
+    // 将脚本编译为字节码
     buf, _ := ctx.Compile(jsStr)
 
-    // Create a new runtime
+    // 创建新的运行时
     rt2 := quickjs.NewRuntime()
     defer rt2.Close()
 
-    // Create a new context
+    // 创建新的上下文
     ctx2 := rt2.NewContext()
     defer ctx2.Close()
 
-    //Eval bytecode
+    // 执行字节码
     result, _ := ctx2.EvalBytecode(buf)
     fmt.Println(result.Int32())
 }
 ```
 
-### 设置内存、栈、GC 等等
+### 运行时选项：内存、栈、GC 等
 
 ```go
 package main
@@ -1387,18 +1280,18 @@ import (
 )
 
 func main() {
-    // Create a new runtime
+    // 创建新的运行时
     rt := quickjs.NewRuntime()
     defer rt.Close()
 
-    // set runtime options
-    rt.SetExecuteTimeout(30) // Set execute timeout to 30 seconds
-    rt.SetMemoryLimit(256 * 1024) // Set memory limit to 256KB
-    rt.SetMaxStackSize(65534) // Set max stack size to 65534
-    rt.SetGCThreshold(256 * 1024) // Set GC threshold to 256KB
-    rt.SetCanBlock(true) // Set can block to true
+    // 设置运行时选项
+    rt.SetExecuteTimeout(30) // 设置执行超时为 30 秒
+    rt.SetMemoryLimit(256 * 1024) // 设置内存限制为 256KB
+    rt.SetMaxStackSize(65534) // 设置最大栈大小为 65534
+    rt.SetGCThreshold(256 * 1024) // 设置 GC 阈值为 256KB
+    rt.SetCanBlock(true) // 设置可以阻塞为 true
 
-    // Create a new context
+    // 创建新的上下文
     ctx := rt.NewContext()
     defer ctx.Close()
 
@@ -1410,7 +1303,6 @@ func main() {
 ### ES6 模块支持
 
 ```go
-
 package main
 
 import (
@@ -1420,25 +1312,25 @@ import (
 )
 
 func main() {
-// enable module import
+// 启用模块导入
     rt := quickjs.NewRuntime(quickjs.WithModuleImport(true))
     defer rt.Close()
 
     ctx := rt.NewContext()
     defer ctx.Close()
 
-    // eval module
+    // 执行模块
     r1, err := ctx.EvalFile("./test/hello_module.js")
     defer r1.Free()
     require.NoError(t, err)
     require.EqualValues(t, 55, ctx.Globals().Get("result").Int32())
 
-    // load module
+    // 加载模块
     r2, err := ctx.LoadModuleFile("./test/fib_module.js", "fib_foo")
     defer r2.Free()
     require.NoError(t, err)
 
-    // call module
+    // 调用模块
     r3, err := ctx.Eval(`
     import {fib} from 'fib_foo';
     globalThis.result = fib(9);
@@ -1448,7 +1340,6 @@ func main() {
 
     require.EqualValues(t, 34, ctx.Globals().Get("result").Int32())
 }
-
 ```
 
 ## 文档
