@@ -592,3 +592,97 @@ JSValue LoadModuleBytecode(JSContext *ctx, const uint8_t *buf, size_t buf_len, i
         return val;
     }
 }
+
+// ============================================================================
+// MODULE-RELATED FUNCTIONS - NEW FOR MODULE BUILDER
+// ============================================================================
+
+
+// CreateModule - encapsulates QuickJS module creation logic
+// This function handles all the C API calls needed to create a JavaScript module:
+// 1. Create C module with initialization function (JS_NewCModule)
+// 2. Pre-declare all exports (JS_AddModuleExport)
+// 3. Set module private value for initialization access (JS_SetModulePrivateValue)
+// 
+// Parameters:
+// - ctx: JavaScript context
+// - module_name: Module name (C string)
+// - export_names: Array of export names (C strings)
+// - export_count: Number of exports
+// - builder_id: ModuleBuilder ID for initialization access
+//
+// Returns:
+// - 0 on success
+// - -1 on failure (JS exception will be set)
+int CreateModule(JSContext *ctx, const char *module_name,
+                const char **export_names, int export_count,
+                int32_t builder_id) {
+    JSModuleDef *module;
+    JSValue builder_value;
+    
+    // Input validation
+    if (!ctx || !module_name || !export_names) {
+        JS_ThrowInternalError(ctx, "CreateModule: invalid parameters");
+        return -1;
+    }
+    
+    if (strlen(module_name) == 0) {
+        JS_ThrowInternalError(ctx, "CreateModule: module name cannot be empty");
+        return -1;
+    }
+    
+    // Step 1: Create C module with initialization function
+    // Corresponds to JS_NewCModule(ctx, module_name, GoModuleInitProxy)
+    module = JS_NewCModule(ctx, module_name, GoModuleInitProxy);
+    if (!module) {
+        JS_ThrowInternalError(ctx, "CreateModule: failed to create C module: %s", module_name);
+        return -1;
+    }
+    
+    // Step 2: Pre-declare all exports (JS_AddModuleExport phase)
+    // This must be done before module instantiation
+    for (int i = 0; i < export_count; i++) {
+        const char *export_name = export_names[i];
+        
+        // Validate export name
+        if (!export_name || strlen(export_name) == 0) {
+            JS_ThrowInternalError(ctx, "CreateModule: export name cannot be empty at index %d", i);
+            return -1;
+        }
+        
+        // Add module export declaration
+        int result = JS_AddModuleExport(ctx, module, export_name);
+        if (result < 0) {
+            JS_ThrowInternalError(ctx, "CreateModule: failed to add module export: %s", export_name);
+            return -1;
+        }
+    }
+    
+    // Step 3: Set module private value for initialization access
+    // Create JSValue from builder_id for storage
+    builder_value = JS_NewInt32(ctx, builder_id);
+    if (JS_IsException(builder_value)) {
+        JS_ThrowInternalError(ctx, "CreateModule: failed to create builder value");
+        return -1;
+    }
+    
+    // Store builder_id as module private value
+    JS_SetModulePrivateValue(ctx, module, builder_value);
+    
+    // Success
+    return 0;
+}
+
+// Module initialization proxy function - C wrapper for Go export
+// This function serves as a bridge between QuickJS C API and Go ModuleBuilder functionality
+// Called by QuickJS when a module is being initialized
+// Corresponds to JSModuleInitFunc signature: int (*)(JSContext *ctx, JSModuleDef *m)
+int GoModuleInitProxy(JSContext *ctx, JSModuleDef *m) {
+    // Call the Go export function which handles the actual module initialization logic
+    // The Go function will:
+    // 1. Retrieve the ModuleBuilder from module private value
+    // 2. Set all export values using JS_SetModuleExport
+    // 3. Call user initialization function if provided
+    // 4. Handle error cases and resource cleanup
+    return goModuleInitProxy(ctx, m);
+}
