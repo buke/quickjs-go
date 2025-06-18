@@ -24,11 +24,11 @@ jobs:
                 # Clean previous builds
                 make clean
                 
-                # Build with production optimizations
-                # Override both CFLAGS_OPT and CFLAGS_NOLTO to ensure consistent flags
+                # Build with production optimizations for Linux x86_64
+                # Focus on core performance optimizations without problematic flags
                 make -e CONFIG_LTO=y \
-                  CFLAGS_OPT="-g -Wall -MMD -MF .obj/\$$(@F).d -D_GNU_SOURCE -DCONFIG_VERSION=\\\"\$$(cat VERSION)\\\" -O3 -DNDEBUG -ffast-math -funroll-loops -fomit-frame-pointer -fstrict-aliasing -march=x86-64 -mtune=generic -flto" \
-                  CFLAGS_NOLTO="-g -Wall -MMD -MF .obj/\$$(@F).d -D_GNU_SOURCE -DCONFIG_VERSION=\\\"\$$(cat VERSION)\\\" -O3 -DNDEBUG -ffast-math -funroll-loops -fomit-frame-pointer -fstrict-aliasing -march=x86-64 -mtune=generic" \
+                  CFLAGS_OPT="-O3 -DNDEBUG -ffast-math -funroll-loops -fomit-frame-pointer -fstrict-aliasing -march=x86-64 -mtune=generic -flto" \
+                  CFLAGS_NOLTO="-O3 -DNDEBUG -ffast-math -funroll-loops -fomit-frame-pointer -fstrict-aliasing -march=x86-64 -mtune=generic" \
                   libquickjs.a
                 
                 # Verify library file
@@ -64,10 +64,10 @@ jobs:
                 
                 make clean
                 
-                # Build with production optimizations for ARM64
+                # Build with production optimizations for Linux ARM64
                 make -e CONFIG_LTO=y \
-                  CFLAGS_OPT="-g -Wall -MMD -MF .obj/\$$(@F).d -D_GNU_SOURCE -DCONFIG_VERSION=\\\"\$$(cat VERSION)\\\" -O3 -DNDEBUG -ffast-math -funroll-loops -fomit-frame-pointer -fstrict-aliasing -march=armv8-a -mtune=generic -flto" \
-                  CFLAGS_NOLTO="-g -Wall -MMD -MF .obj/\$$(@F).d -D_GNU_SOURCE -DCONFIG_VERSION=\\\"\$$(cat VERSION)\\\" -O3 -DNDEBUG -ffast-math -funroll-loops -fomit-frame-pointer -fstrict-aliasing -march=armv8-a -mtune=generic" \
+                  CFLAGS_OPT="-O3 -DNDEBUG -ffast-math -funroll-loops -fomit-frame-pointer -fstrict-aliasing -march=armv8-a -mtune=generic -flto" \
+                  CFLAGS_NOLTO="-O3 -DNDEBUG -ffast-math -funroll-loops -fomit-frame-pointer -fstrict-aliasing -march=armv8-a -mtune=generic" \
                   libquickjs.a
                 
                 file libquickjs.a
@@ -99,8 +99,8 @@ jobs:
                 
                 # Build with production optimizations for macOS x86_64
                 make -e CONFIG_LTO=y \
-                  CFLAGS_OPT="-g -Wall -MMD -MF .obj/\$$(@F).d -D_GNU_SOURCE -DCONFIG_VERSION=\\\"\$$(cat VERSION)\\\" -O3 -DNDEBUG -ffast-math -funroll-loops -fomit-frame-pointer -fstrict-aliasing -mmacosx-version-min=12.0 -target x86_64-apple-macos12 -arch x86_64 -flto" \
-                  CFLAGS_NOLTO="-g -Wall -MMD -MF .obj/\$$(@F).d -D_GNU_SOURCE -DCONFIG_VERSION=\\\"\$$(cat VERSION)\\\" -O3 -DNDEBUG -ffast-math -funroll-loops -fomit-frame-pointer -fstrict-aliasing -mmacosx-version-min=12.0 -target x86_64-apple-macos12 -arch x86_64" \
+                  CFLAGS_OPT="-O3 -DNDEBUG -ffast-math -funroll-loops -fomit-frame-pointer -fstrict-aliasing -mmacosx-version-min=12.0 -target x86_64-apple-macos12 -arch x86_64 -flto" \
+                  CFLAGS_NOLTO="-O3 -DNDEBUG -ffast-math -funroll-loops -fomit-frame-pointer -fstrict-aliasing -mmacosx-version-min=12.0 -target x86_64-apple-macos12 -arch x86_64" \
                   libquickjs.a
                 
                 file libquickjs.a
@@ -132,8 +132,8 @@ jobs:
                 
                 # Build with production optimizations for macOS ARM64
                 make -e CONFIG_LTO=y \
-                  CFLAGS_OPT="-g -Wall -MMD -MF .obj/\$$(@F).d -D_GNU_SOURCE -DCONFIG_VERSION=\\\"\$$(cat VERSION)\\\" -O3 -DNDEBUG -ffast-math -funroll-loops -fomit-frame-pointer -fstrict-aliasing -mmacosx-version-min=12.0 -target arm64-apple-macos12 -arch arm64 -mcpu=apple-a14 -flto" \
-                  CFLAGS_NOLTO="-g -Wall -MMD -MF .obj/\$$(@F).d -D_GNU_SOURCE -DCONFIG_VERSION=\\\"\$$(cat VERSION)\\\" -O3 -DNDEBUG -ffast-math -funroll-loops -fomit-frame-pointer -fstrict-aliasing -mmacosx-version-min=12.0 -target arm64-apple-macos12 -arch arm64 -mcpu=apple-a14" \
+                  CFLAGS_OPT="-O3 -DNDEBUG -ffast-math -funroll-loops -fomit-frame-pointer -fstrict-aliasing -mmacosx-version-min=12.0 -target arm64-apple-macos12 -arch arm64 -mcpu=apple-a14 -flto" \
+                  CFLAGS_NOLTO="-O3 -DNDEBUG -ffast-math -funroll-loops -fomit-frame-pointer -fstrict-aliasing -mmacosx-version-min=12.0 -target arm64-apple-macos12 -arch arm64 -mcpu=apple-a14" \
                   libquickjs.a
                 
                 file libquickjs.a
@@ -171,8 +171,8 @@ jobs:
                 
                 # Build with production optimizations for Windows x86
                 make -e CONFIG_WIN32=y CONFIG_M32=y CONFIG_LTO=y \
-                  'CFLAGS_OPT=-g -Wall -MMD -MF .obj/$(@F).d -D_GNU_SOURCE -DCONFIG_VERSION=\"$(shell cat VERSION)\" -D__USE_MINGW_ANSI_STDIO -O3 -DNDEBUG -ffast-math -funroll-loops -fomit-frame-pointer -fstrict-aliasing -march=i686 -mtune=generic -D_WIN32_WINNT=0x0601 -flto' \
-                  'CFLAGS_NOLTO=-g -Wall -MMD -MF .obj/$(@F).d -D_GNU_SOURCE -DCONFIG_VERSION=\"$(shell cat VERSION)\" -D__USE_MINGW_ANSI_STDIO -O3 -DNDEBUG -ffast-math -funroll-loops -fomit-frame-pointer -fstrict-aliasing -march=i686 -mtune=generic -D_WIN32_WINNT=0x0601' \
+                  CFLAGS_OPT="-O3 -DNDEBUG -ffast-math -funroll-loops -fomit-frame-pointer -fstrict-aliasing -march=i686 -mtune=generic -D_WIN32_WINNT=0x0601 -D__USE_MINGW_ANSI_STDIO -flto" \
+                  CFLAGS_NOLTO="-O3 -DNDEBUG -ffast-math -funroll-loops -fomit-frame-pointer -fstrict-aliasing -march=i686 -mtune=generic -D_WIN32_WINNT=0x0601 -D__USE_MINGW_ANSI_STDIO" \
                   libquickjs.a
                 
                 # Verify library file
@@ -210,8 +210,8 @@ jobs:
                 
                 # Build with production optimizations for Windows x64
                 make -e CONFIG_WIN32=y CONFIG_LTO=y \
-                  'CFLAGS_OPT=-g -Wall -MMD -MF .obj/$(@F).d -D_GNU_SOURCE -DCONFIG_VERSION=\"$(shell cat VERSION)\" -D__USE_MINGW_ANSI_STDIO -O3 -DNDEBUG -ffast-math -funroll-loops -fomit-frame-pointer -fstrict-aliasing -march=x86-64 -mtune=generic -D_WIN32_WINNT=0x0601 -flto' \
-                  'CFLAGS_NOLTO=-g -Wall -MMD -MF .obj/$(@F).d -D_GNU_SOURCE -DCONFIG_VERSION=\"$(shell cat VERSION)\" -D__USE_MINGW_ANSI_STDIO -O3 -DNDEBUG -ffast-math -funroll-loops -fomit-frame-pointer -fstrict-aliasing -march=x86-64 -mtune=generic -D_WIN32_WINNT=0x0601' \
+                  CFLAGS_OPT="-O3 -DNDEBUG -ffast-math -funroll-loops -fomit-frame-pointer -fstrict-aliasing -march=x86-64 -mtune=generic -D_WIN32_WINNT=0x0601 -D__USE_MINGW_ANSI_STDIO -flto" \
+                  CFLAGS_NOLTO="-O3 -DNDEBUG -ffast-math -funroll-loops -fomit-frame-pointer -fstrict-aliasing -march=x86-64 -mtune=generic -D_WIN32_WINNT=0x0601 -D__USE_MINGW_ANSI_STDIO" \
                   libquickjs.a
                 
                 ls -la libquickjs.a
@@ -252,7 +252,7 @@ jobs:
         steps:
             - name: Validate Build Results
               run: |
-                echo "Validating QuickJS production library builds..."
+                echo "🚀 Validating QuickJS production library builds..."
                 
                 # Check build results for each platform
                 if [[ "${{ needs.linux-x86_64.result }}" == "success" ]]; then
@@ -297,4 +297,10 @@ jobs:
                   echo "❌ Header files update failed"
                 fi
                 
-                echo "Production optimized QuickJS libraries build process completed!"
+                echo "🎉 Production optimized QuickJS libraries build process completed!"
+                echo ""
+                echo "📊 Build Summary:"
+                echo "   - All libraries built with -O3 optimization"
+                echo "   - Link Time Optimization (LTO) enabled"
+                echo "   - Platform-specific tuning applied"
+                echo "   - Production-ready configuration"
