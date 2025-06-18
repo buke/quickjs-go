@@ -24,13 +24,12 @@ jobs:
                 # Clean previous builds
                 make clean
                 
-                # Production optimization flags for Linux x86_64
-                # Use CFLAGS_OPT instead of modifying CFLAGS to preserve CONFIG_VERSION
-                export CFLAGS_OPT="-O3 -DNDEBUG -ffast-math -funroll-loops -fomit-frame-pointer"
-                export CFLAGS_OPT="$CFLAGS_OPT -fstrict-aliasing -march=x86-64 -mtune=generic"
-                
-                # Build with Link Time Optimization
-                make -e CONFIG_LTO=y CFLAGS_OPT="$CFLAGS_OPT" libquickjs.a
+                # Build with production optimizations
+                # Override both CFLAGS_OPT and CFLAGS_NOLTO to ensure consistent flags
+                make -e CONFIG_LTO=y \
+                  CFLAGS_OPT="-g -Wall -MMD -MF .obj/\$$(@F).d -D_GNU_SOURCE -DCONFIG_VERSION=\\\"\$$(cat VERSION)\\\" -O3 -DNDEBUG -ffast-math -funroll-loops -fomit-frame-pointer -fstrict-aliasing -march=x86-64 -mtune=generic -flto" \
+                  CFLAGS_NOLTO="-g -Wall -MMD -MF .obj/\$$(@F).d -D_GNU_SOURCE -DCONFIG_VERSION=\\\"\$$(cat VERSION)\\\" -O3 -DNDEBUG -ffast-math -funroll-loops -fomit-frame-pointer -fstrict-aliasing -march=x86-64 -mtune=generic" \
+                  libquickjs.a
                 
                 # Verify library file
                 file libquickjs.a
@@ -65,11 +64,11 @@ jobs:
                 
                 make clean
                 
-                # Production optimization flags for Linux ARM64
-                export CFLAGS_OPT="-O3 -DNDEBUG -ffast-math -funroll-loops -fomit-frame-pointer"
-                export CFLAGS_OPT="$CFLAGS_OPT -fstrict-aliasing -march=armv8-a -mtune=generic"
-                
-                make -e CONFIG_LTO=y CFLAGS_OPT="$CFLAGS_OPT" libquickjs.a
+                # Build with production optimizations for ARM64
+                make -e CONFIG_LTO=y \
+                  CFLAGS_OPT="-g -Wall -MMD -MF .obj/\$$(@F).d -D_GNU_SOURCE -DCONFIG_VERSION=\\\"\$$(cat VERSION)\\\" -O3 -DNDEBUG -ffast-math -funroll-loops -fomit-frame-pointer -fstrict-aliasing -march=armv8-a -mtune=generic -flto" \
+                  CFLAGS_NOLTO="-g -Wall -MMD -MF .obj/\$$(@F).d -D_GNU_SOURCE -DCONFIG_VERSION=\\\"\$$(cat VERSION)\\\" -O3 -DNDEBUG -ffast-math -funroll-loops -fomit-frame-pointer -fstrict-aliasing -march=armv8-a -mtune=generic" \
+                  libquickjs.a
                 
                 file libquickjs.a
                 size libquickjs.a
@@ -98,13 +97,11 @@ jobs:
                 
                 make clean
                 
-                # Production optimization flags for macOS x86_64
-                # Preserve original CFLAGS and CONFIG_VERSION, only override CFLAGS_OPT
-                export CFLAGS_OPT="-O3 -DNDEBUG -ffast-math -funroll-loops -fomit-frame-pointer"
-                export CFLAGS_OPT="$CFLAGS_OPT -fstrict-aliasing -mmacosx-version-min=12.0"
-                export CFLAGS_OPT="$CFLAGS_OPT -target x86_64-apple-macos12 -arch x86_64"
-                
-                make -e CONFIG_LTO=y CFLAGS_OPT="$CFLAGS_OPT" libquickjs.a
+                # Build with production optimizations for macOS x86_64
+                make -e CONFIG_LTO=y \
+                  CFLAGS_OPT="-g -Wall -MMD -MF .obj/\$$(@F).d -D_GNU_SOURCE -DCONFIG_VERSION=\\\"\$$(cat VERSION)\\\" -O3 -DNDEBUG -ffast-math -funroll-loops -fomit-frame-pointer -fstrict-aliasing -mmacosx-version-min=12.0 -target x86_64-apple-macos12 -arch x86_64 -flto" \
+                  CFLAGS_NOLTO="-g -Wall -MMD -MF .obj/\$$(@F).d -D_GNU_SOURCE -DCONFIG_VERSION=\\\"\$$(cat VERSION)\\\" -O3 -DNDEBUG -ffast-math -funroll-loops -fomit-frame-pointer -fstrict-aliasing -mmacosx-version-min=12.0 -target x86_64-apple-macos12 -arch x86_64" \
+                  libquickjs.a
                 
                 file libquickjs.a
                 size libquickjs.a
@@ -133,12 +130,11 @@ jobs:
                 
                 make clean
                 
-                # Production optimization flags for macOS ARM64 (Apple Silicon)
-                export CFLAGS_OPT="-O3 -DNDEBUG -ffast-math -funroll-loops -fomit-frame-pointer"
-                export CFLAGS_OPT="$CFLAGS_OPT -fstrict-aliasing -mmacosx-version-min=12.0"
-                export CFLAGS_OPT="$CFLAGS_OPT -target arm64-apple-macos12 -arch arm64 -mcpu=apple-a14"
-                
-                make -e CONFIG_LTO=y CFLAGS_OPT="$CFLAGS_OPT" libquickjs.a
+                # Build with production optimizations for macOS ARM64
+                make -e CONFIG_LTO=y \
+                  CFLAGS_OPT="-g -Wall -MMD -MF .obj/\$$(@F).d -D_GNU_SOURCE -DCONFIG_VERSION=\\\"\$$(cat VERSION)\\\" -O3 -DNDEBUG -ffast-math -funroll-loops -fomit-frame-pointer -fstrict-aliasing -mmacosx-version-min=12.0 -target arm64-apple-macos12 -arch arm64 -mcpu=apple-a14 -flto" \
+                  CFLAGS_NOLTO="-g -Wall -MMD -MF .obj/\$$(@F).d -D_GNU_SOURCE -DCONFIG_VERSION=\\\"\$$(cat VERSION)\\\" -O3 -DNDEBUG -ffast-math -funroll-loops -fomit-frame-pointer -fstrict-aliasing -mmacosx-version-min=12.0 -target arm64-apple-macos12 -arch arm64 -mcpu=apple-a14" \
+                  libquickjs.a
                 
                 file libquickjs.a
                 size libquickjs.a
@@ -166,23 +162,23 @@ jobs:
                   platform: x86
                   version: 12.2.0 
             - name: Build Production Optimized Library
+              shell: bash
               run: |
-                mkdir deps/libs/windows_386 -force
+                mkdir -p deps/libs/windows_386
                 cd deps/quickjs
                 
                 make clean
                 
-                # Production optimization flags for Windows x86
-                $env:CFLAGS_OPT = "-O3 -DNDEBUG -ffast-math -funroll-loops -fomit-frame-pointer"
-                $env:CFLAGS_OPT += " -fstrict-aliasing -march=i686 -mtune=generic"
-                $env:CFLAGS_OPT += " -D_WIN32_WINNT=0x0601"
+                # Build with production optimizations for Windows x86
+                make -e CONFIG_WIN32=y CONFIG_M32=y CONFIG_LTO=y \
+                  'CFLAGS_OPT=-g -Wall -MMD -MF .obj/$(@F).d -D_GNU_SOURCE -DCONFIG_VERSION=\"$(shell cat VERSION)\" -D__USE_MINGW_ANSI_STDIO -O3 -DNDEBUG -ffast-math -funroll-loops -fomit-frame-pointer -fstrict-aliasing -march=i686 -mtune=generic -D_WIN32_WINNT=0x0601 -flto' \
+                  'CFLAGS_NOLTO=-g -Wall -MMD -MF .obj/$(@F).d -D_GNU_SOURCE -DCONFIG_VERSION=\"$(shell cat VERSION)\" -D__USE_MINGW_ANSI_STDIO -O3 -DNDEBUG -ffast-math -funroll-loops -fomit-frame-pointer -fstrict-aliasing -march=i686 -mtune=generic -D_WIN32_WINNT=0x0601' \
+                  libquickjs.a
                 
-                make -e CONFIG_WIN32=y CONFIG_M32=y CONFIG_LTO=y CFLAGS_OPT="$env:CFLAGS_OPT" libquickjs.a
+                # Verify library file
+                ls -la libquickjs.a
                 
-                # Verify library file (Windows equivalent)
-                Get-ChildItem libquickjs.a | Format-List Name, Length
-                
-                copy libquickjs.a ../libs/windows_386
+                cp libquickjs.a ../libs/windows_386/
             - name: Create PR
               uses: peter-evans/create-pull-request@v7
               with:
@@ -205,22 +201,22 @@ jobs:
                   platform: x64
                   version: 12.2.0 
             - name: Build Production Optimized Library
+              shell: bash
               run: |
-                mkdir deps/libs/windows_amd64 -force
+                mkdir -p deps/libs/windows_amd64
                 cd deps/quickjs
                 
                 make clean
                 
-                # Production optimization flags for Windows x64
-                $env:CFLAGS_OPT = "-O3 -DNDEBUG -ffast-math -funroll-loops -fomit-frame-pointer"
-                $env:CFLAGS_OPT += " -fstrict-aliasing -march=x86-64 -mtune=generic"
-                $env:CFLAGS_OPT += " -D_WIN32_WINNT=0x0601"
+                # Build with production optimizations for Windows x64
+                make -e CONFIG_WIN32=y CONFIG_LTO=y \
+                  'CFLAGS_OPT=-g -Wall -MMD -MF .obj/$(@F).d -D_GNU_SOURCE -DCONFIG_VERSION=\"$(shell cat VERSION)\" -D__USE_MINGW_ANSI_STDIO -O3 -DNDEBUG -ffast-math -funroll-loops -fomit-frame-pointer -fstrict-aliasing -march=x86-64 -mtune=generic -D_WIN32_WINNT=0x0601 -flto' \
+                  'CFLAGS_NOLTO=-g -Wall -MMD -MF .obj/$(@F).d -D_GNU_SOURCE -DCONFIG_VERSION=\"$(shell cat VERSION)\" -D__USE_MINGW_ANSI_STDIO -O3 -DNDEBUG -ffast-math -funroll-loops -fomit-frame-pointer -fstrict-aliasing -march=x86-64 -mtune=generic -D_WIN32_WINNT=0x0601' \
+                  libquickjs.a
                 
-                make -e CONFIG_WIN32=y CONFIG_LTO=y CFLAGS_OPT="$env:CFLAGS_OPT" libquickjs.a
+                ls -la libquickjs.a
                 
-                Get-ChildItem libquickjs.a | Format-List Name, Length
-                
-                copy libquickjs.a ../libs/windows_amd64
+                cp libquickjs.a ../libs/windows_amd64/
             - name: Create PR
               uses: peter-evans/create-pull-request@v7
               with:
