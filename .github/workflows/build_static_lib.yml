@@ -1,11 +1,10 @@
-name: Build static library for QuickJS
+name: Build QuickJS Static Libraries (Production Optimized)
 
 on:
     workflow_dispatch:
 
 jobs:
     linux-x86_64:
-        # if:  startsWith(github.head_ref, 'dependabot/submodules/deps/quickjs')
         runs-on: ubuntu-latest
         steps:
             - uses: actions/checkout@v4
@@ -16,107 +15,157 @@ jobs:
               with:
                   arch: x86_64
                   packages: "build-base make cmake"
-            - name: build
+            - name: Build Production Optimized Library
               shell: alpine.sh {0}
               run: |
                 mkdir -p deps/libs/linux_amd64
                 cd deps/quickjs
+                
+                # Clean previous builds
                 make clean
-                make -e CONFIG_LTO=y libquickjs.a
-                mv libquickjs.a ../libs/linux_amd64
+                
+                # Production optimization flags for Linux x86_64
+                export CFLAGS_OPT="-O3 -DNDEBUG -ffast-math -funroll-loops -fomit-frame-pointer"
+                export CFLAGS_OPT="$CFLAGS_OPT -fstrict-aliasing -march=x86-64 -mtune=generic"
+                export CFLAGS_OPT="$CFLAGS_OPT -DOPTIMIZE=1 -DSHORT_OPCODES=1 -DDIRECT_DISPATCH=1"
+                
+                # Build with Link Time Optimization
+                make -e CONFIG_LTO=y CFLAGS_OPT="$CFLAGS_OPT" libquickjs.a
+                
+                # Verify library file
+                file libquickjs.a
+                size libquickjs.a
+                
+                mv libquickjs.a ../libs/linux_amd64/
             - name: Create PR
               uses: peter-evans/create-pull-request@v7
               with:
-                  commit-message: Update QuickJS Static Library For Linux x86_64
+                  commit-message: "Update QuickJS Production Library - Linux x86_64"
                   branch-suffix: random
                   delete-branch: true
-                  title: Update QuickJS Static library For Linux x86_64
+                  title: "QuickJS Production Optimized Library - Linux x86_64"
                   base: ${{ github.head_ref }}
 
     linux-aarch64:
-        # if:  startsWith(github.head_ref, 'dependabot/submodules/deps/quickjs')
         runs-on: ubuntu-latest
         steps:
             - uses: actions/checkout@v4
               with:
-                submodules: true
-                fetch-depth: 1
+                  submodules: true
+                  fetch-depth: 1
             - uses: jirutka/setup-alpine@v1
               with:
-                arch: aarch64
-                packages: "build-base make cmake"
-            - name: build
+                  arch: aarch64
+                  packages: "build-base make cmake"
+            - name: Build Production Optimized Library
               shell: alpine.sh {0}
               run: |
                 mkdir -p deps/libs/linux_arm64
                 cd deps/quickjs
+                
                 make clean
-                make -e CONFIG_LTO=y libquickjs.a
-                mv libquickjs.a ../libs/linux_arm64
+                
+                # Production optimization flags for Linux ARM64
+                export CFLAGS_OPT="-O3 -DNDEBUG -ffast-math -funroll-loops -fomit-frame-pointer"
+                export CFLAGS_OPT="$CFLAGS_OPT -fstrict-aliasing -march=armv8-a -mtune=generic"
+                export CFLAGS_OPT="$CFLAGS_OPT -DOPTIMIZE=1 -DSHORT_OPCODES=1 -DDIRECT_DISPATCH=1"
+                
+                make -e CONFIG_LTO=y CFLAGS_OPT="$CFLAGS_OPT" libquickjs.a
+                
+                file libquickjs.a
+                size libquickjs.a
+                
+                mv libquickjs.a ../libs/linux_arm64/
             - name: Create PR
               uses: peter-evans/create-pull-request@v7
               with:
-                commit-message: Update QuickJS Static Library For Linux aarch64
-                branch-suffix: random
-                delete-branch: true
-                title: Update QuickJS Static library For Linux aarch64
-                base: ${{ github.head_ref }}
+                  commit-message: "Update QuickJS Production Library - Linux aarch64"
+                  branch-suffix: random
+                  delete-branch: true
+                  title: "QuickJS Production Optimized Library - Linux aarch64"
+                  base: ${{ github.head_ref }}
 
     darwin_amd64:
-        # if:  startsWith(github.head_ref, 'dependabot/submodules/deps/quickjs')
         runs-on: macos-latest
         steps:
             - uses: actions/checkout@v4
               with:
                   submodules: true
                   fetch-depth: 1
-            - name: build
+            - name: Build Production Optimized Library
               run: |
                 mkdir -p deps/libs/darwin_amd64
                 cd deps/quickjs
+                
                 make clean
-                sed -i '.bak' 's/CFLAGS += -Wextra/CFLAGS += -Wextra -target x86_64-apple-macos12/' Makefile
+                
+                # Production optimization flags for macOS x86_64
+                export CFLAGS_PROD="-O3 -DNDEBUG -ffast-math -funroll-loops -fomit-frame-pointer"
+                export CFLAGS_PROD="$CFLAGS_PROD -fstrict-aliasing -mmacosx-version-min=12.0"
+                export CFLAGS_PROD="$CFLAGS_PROD -target x86_64-apple-macos12 -arch x86_64"
+                export CFLAGS_PROD="$CFLAGS_PROD -DOPTIMIZE=1 -DSHORT_OPCODES=1 -DDIRECT_DISPATCH=1"
+                
+                # Temporarily modify Makefile for cross-compilation
+                sed -i '.bak' "s/CFLAGS += -Wextra/CFLAGS += -Wextra $CFLAGS_PROD/" Makefile
+                
                 make -e CONFIG_LTO=y libquickjs.a
+                
+                # Restore original Makefile
                 mv Makefile.bak Makefile
-                mv libquickjs.a ../libs/darwin_amd64 
+                
+                file libquickjs.a
+                size libquickjs.a
+                
+                mv libquickjs.a ../libs/darwin_amd64/
             - name: Create PR
               uses: peter-evans/create-pull-request@v7
               with:
-                  commit-message: Update QuickJS Static Library For darwin_amd64
+                  commit-message: "Update QuickJS Production Library - macOS x86_64"
                   branch-suffix: random
                   delete-branch: true
-                  title: Update QuickJS Static library For darwin_amd64
+                  title: "QuickJS Production Optimized Library - macOS x86_64"
                   base: ${{ github.head_ref }}
 
     darwin_arm64:
-        # if:  startsWith(github.head_ref, 'dependabot/submodules/deps/quickjs')
         runs-on: macos-latest
         steps:
             - uses: actions/checkout@v4
               with:
                   submodules: true
                   fetch-depth: 1
-            - name: build
+            - name: Build Production Optimized Library
               run: |
                 mkdir -p deps/libs/darwin_arm64
                 cd deps/quickjs
+                
                 make clean
-                sed -i '.bak' 's/CFLAGS += -Wextra/CFLAGS += -Wextra -target arm64-apple-macos12/' Makefile
+                
+                # Production optimization flags for macOS ARM64 (Apple Silicon)
+                export CFLAGS_PROD="-O3 -DNDEBUG -ffast-math -funroll-loops -fomit-frame-pointer"
+                export CFLAGS_PROD="$CFLAGS_PROD -fstrict-aliasing -mmacosx-version-min=12.0"
+                export CFLAGS_PROD="$CFLAGS_PROD -target arm64-apple-macos12 -arch arm64 -mcpu=apple-a14"
+                export CFLAGS_PROD="$CFLAGS_PROD -DOPTIMIZE=1 -DSHORT_OPCODES=1 -DDIRECT_DISPATCH=1"
+                
+                sed -i '.bak' "s/CFLAGS += -Wextra/CFLAGS += -Wextra $CFLAGS_PROD/" Makefile
+                
                 make -e CONFIG_LTO=y libquickjs.a
+                
                 mv Makefile.bak Makefile
-                mv libquickjs.a ../libs/darwin_arm64
-            - name: Create PR For darwin_arm64
+                
+                file libquickjs.a
+                size libquickjs.a
+                
+                mv libquickjs.a ../libs/darwin_arm64/
+            - name: Create PR
               uses: peter-evans/create-pull-request@v7
               with:
-                  commit-message: Update QuickJS Static Library For darwin_arm64
+                  commit-message: "Update QuickJS Production Library - macOS ARM64"
                   branch-suffix: random
                   delete-branch: true
-                  title: Update QuickJS Static library For darwin_arm64
+                  title: "QuickJS Production Optimized Library - macOS ARM64"
                   base: ${{ github.head_ref }}
-                  
-                        
+
     windows_386:
-        # if:  startsWith(github.head_ref, 'dependabot/submodules/deps/quickjs')
         runs-on: windows-2019
         steps:
             - uses: actions/checkout@v4
@@ -128,24 +177,34 @@ jobs:
               with:
                   platform: x86
                   version: 12.2.0 
-            - name: build
+            - name: Build Production Optimized Library
               run: |
                 mkdir deps/libs/windows_386 -force
                 cd deps/quickjs
+                
                 make clean
-                make -e CONFIG_WIN32=y CONFIG_M32=y CONFIG_LTO=y libquickjs.a
+                
+                # Production optimization flags for Windows x86
+                $env:CFLAGS_OPT = "-O3 -DNDEBUG -ffast-math -funroll-loops -fomit-frame-pointer"
+                $env:CFLAGS_OPT += " -fstrict-aliasing -march=i686 -mtune=generic"
+                $env:CFLAGS_OPT += " -D_WIN32_WINNT=0x0601 -DOPTIMIZE=1 -DSHORT_OPCODES=1 -DDIRECT_DISPATCH=1"
+                
+                make -e CONFIG_WIN32=y CONFIG_M32=y CONFIG_LTO=y CFLAGS_OPT="$env:CFLAGS_OPT" libquickjs.a
+                
+                # Verify library file (Windows equivalent)
+                Get-ChildItem libquickjs.a | Format-List Name, Length
+                
                 copy libquickjs.a ../libs/windows_386
             - name: Create PR
               uses: peter-evans/create-pull-request@v7
               with:
-                  commit-message: Update QuickJS Static Library For windows_386
+                  commit-message: "Update QuickJS Production Library - Windows x86"
                   branch-suffix: random
                   delete-branch: true
-                  title: Update QuickJS Static library For windows_386
+                  title: "QuickJS Production Optimized Library - Windows x86"
                   base: ${{ github.head_ref }}
 
     windows_amd64:
-        # if:  startsWith(github.head_ref, 'dependabot/submodules/deps/quickjs')
         runs-on: windows-2019
         steps:
             - uses: actions/checkout@v4
@@ -157,38 +216,101 @@ jobs:
               with:
                   platform: x64
                   version: 12.2.0 
-            - name: build
+            - name: Build Production Optimized Library
               run: |
                 mkdir deps/libs/windows_amd64 -force
                 cd deps/quickjs
+                
                 make clean
-                make -e CONFIG_WIN32=y CONFIG_LTO=y libquickjs.a
+                
+                # Production optimization flags for Windows x64
+                $env:CFLAGS_OPT = "-O3 -DNDEBUG -ffast-math -funroll-loops -fomit-frame-pointer"
+                $env:CFLAGS_OPT += " -fstrict-aliasing -march=x86-64 -mtune=generic"
+                $env:CFLAGS_OPT += " -D_WIN32_WINNT=0x0601 -DOPTIMIZE=1 -DSHORT_OPCODES=1 -DDIRECT_DISPATCH=1"
+                
+                make -e CONFIG_WIN32=y CONFIG_LTO=y CFLAGS_OPT="$env:CFLAGS_OPT" libquickjs.a
+                
+                Get-ChildItem libquickjs.a | Format-List Name, Length
+                
                 copy libquickjs.a ../libs/windows_amd64
             - name: Create PR
               uses: peter-evans/create-pull-request@v7
               with:
-                  commit-message: Update QuickJS Static Library For windows_amd64
+                  commit-message: "Update QuickJS Production Library - Windows x64"
                   branch-suffix: random
                   delete-branch: true
-                  title: Update QuickJS Static library For windows_amd64
+                  title: "QuickJS Production Optimized Library - Windows x64"
                   base: ${{ github.head_ref }}
 
     update_headers:
-        # if:  startsWith(github.head_ref, 'dependabot/submodules/deps/quickjs')
         runs-on: ubuntu-latest
         steps:
             - uses: actions/checkout@v4
               with:
                   submodules: true
                   fetch-depth: 1
-            - name: Copy headers
+            - name: Copy Headers
               run: 
                 cp -a deps/quickjs/*.h deps/include/
             - name: Create PR
               uses: peter-evans/create-pull-request@v7
               with:
-                  commit-message: Update QuickJS Header Files
+                  commit-message: "Update QuickJS Header Files"
                   branch-suffix: random
                   delete-branch: true
-                  title: Update QuickJS Header Files
+                  title: "Update QuickJS Header Files"
                   base: ${{ github.head_ref }}
+
+    validate_build:
+        runs-on: ubuntu-latest
+        needs: [linux-x86_64, linux-aarch64, darwin_amd64, darwin_arm64, windows_386, windows_amd64, update_headers]
+        if: always()
+        steps:
+            - name: Validate Build Results
+              run: |
+                echo "Validating QuickJS production library builds..."
+                
+                # Check build results for each platform
+                if [[ "${{ needs.linux-x86_64.result }}" == "success" ]]; then
+                  echo "✅ Linux x86_64 build successful"
+                else
+                  echo "❌ Linux x86_64 build failed"
+                fi
+                
+                if [[ "${{ needs.linux-aarch64.result }}" == "success" ]]; then
+                  echo "✅ Linux aarch64 build successful"
+                else
+                  echo "❌ Linux aarch64 build failed"
+                fi
+                
+                if [[ "${{ needs.darwin_amd64.result }}" == "success" ]]; then
+                  echo "✅ macOS x86_64 build successful"
+                else
+                  echo "❌ macOS x86_64 build failed"
+                fi
+                
+                if [[ "${{ needs.darwin_arm64.result }}" == "success" ]]; then
+                  echo "✅ macOS ARM64 build successful"
+                else
+                  echo "❌ macOS ARM64 build failed"
+                fi
+                
+                if [[ "${{ needs.windows_386.result }}" == "success" ]]; then
+                  echo "✅ Windows x86 build successful"
+                else
+                  echo "❌ Windows x86 build failed"
+                fi
+                
+                if [[ "${{ needs.windows_amd64.result }}" == "success" ]]; then
+                  echo "✅ Windows x64 build successful"
+                else
+                  echo "❌ Windows x64 build failed"
+                fi
+                
+                if [[ "${{ needs.update_headers.result }}" == "success" ]]; then
+                  echo "✅ Header files updated successfully"
+                else
+                  echo "❌ Header files update failed"
+                fi
+                
+                echo "Production optimized QuickJS libraries build process completed!"
