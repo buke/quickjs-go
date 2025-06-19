@@ -71,7 +71,7 @@ func TestAtomSpecialCases(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			var atom Atom
+			var atom *Atom
 
 			switch v := tc.input.(type) {
 			case string:
@@ -112,7 +112,7 @@ func TestAtomMemoryManagement(t *testing.T) {
 	}
 
 	// Test creating atoms with different names
-	atoms := make([]Atom, 50)
+	atoms := make([]*Atom, 50)
 	for i := 0; i < 50; i++ {
 		atoms[i] = ctx.Atom("property" + string(rune('A'+i%26)))
 	}
@@ -195,7 +195,7 @@ func TestAtomDeduplication(t *testing.T) {
 
 	// Test creating many atoms with the same name
 	sameName := "duplicateName"
-	atoms := make([]Atom, 50)
+	atoms := make([]*Atom, 50)
 
 	for i := 0; i < 50; i++ {
 		atoms[i] = ctx.Atom(sameName)

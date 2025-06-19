@@ -334,15 +334,15 @@ func (ctx *Context) SetInterruptHandler(handler InterruptHandler) {
 }
 
 // Atom returns a new Atom value with given string.
-func (ctx *Context) Atom(v string) Atom {
+func (ctx *Context) Atom(v string) *Atom {
 	ptr := C.CString(v)
 	defer C.free(unsafe.Pointer(ptr))
-	return Atom{ctx: ctx, ref: C.JS_NewAtom(ctx.ref, ptr)}
+	return &Atom{ctx: ctx, ref: C.JS_NewAtom(ctx.ref, ptr)}
 }
 
-// Atom returns a new Atom value with given idx.
-func (ctx *Context) AtomIdx(idx uint32) Atom {
-	return Atom{ctx: ctx, ref: C.JS_NewAtomUInt32(ctx.ref, C.uint32_t(idx))}
+// AtomIdx returns a new Atom value with given idx.
+func (ctx *Context) AtomIdx(idx uint32) *Atom {
+	return &Atom{ctx: ctx, ref: C.JS_NewAtomUInt32(ctx.ref, C.uint32_t(idx))}
 }
 
 // Invoke invokes a function with given this value and arguments.

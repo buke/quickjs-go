@@ -291,7 +291,7 @@ func (v *Value) ToError() error {
 }
 
 // propertyEnum is a wrapper around JSValue.
-func (v *Value) propertyEnum() ([]propertyEnum, error) {
+func (v *Value) propertyEnum() ([]*propertyEnum, error) {
 	var ptr *C.JSPropertyEnum
 	var size C.uint32_t
 
@@ -302,10 +302,12 @@ func (v *Value) propertyEnum() ([]propertyEnum, error) {
 	defer C.js_free(v.ctx.ref, unsafe.Pointer(ptr))
 
 	entries := unsafe.Slice(ptr, size) // Go 1.17 and later
-	names := make([]propertyEnum, len(entries))
+	names := make([]*propertyEnum, len(entries))
 	for i := 0; i < len(names); i++ {
-		names[i].IsEnumerable = entries[i].is_enumerable == 1
-		names[i].atom = &Atom{ctx: v.ctx, ref: entries[i].atom}
+		names[i] = &propertyEnum{
+			IsEnumerable: entries[i].is_enumerable == 1,
+			atom:         &Atom{ctx: v.ctx, ref: entries[i].atom},
+		}
 		names[i].atom.Free()
 	}
 
