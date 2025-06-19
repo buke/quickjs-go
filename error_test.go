@@ -10,7 +10,7 @@ import (
 // TestErrorBasics tests basic Error functionality and Error() method
 func TestErrorBasics(t *testing.T) {
 	// Test Error with all fields
-	err := Error{
+	err := &Error{
 		Name:       "TestError",
 		Message:    "test message",
 		Cause:      "test cause",
@@ -29,14 +29,14 @@ func TestErrorBasics(t *testing.T) {
 	require.EqualValues(t, `{"name":"TestError","message":"test message"}`, err.JSONString)
 
 	// Test empty Error
-	emptyErr := Error{}
+	emptyErr := &Error{}
 	require.EqualValues(t, ": ", emptyErr.Error())
 
 	// Test partial fields
-	nameOnlyErr := Error{Name: "OnlyName"}
+	nameOnlyErr := &Error{Name: "OnlyName"}
 	require.EqualValues(t, "OnlyName: ", nameOnlyErr.Error())
 
-	messageOnlyErr := Error{Message: "only message"}
+	messageOnlyErr := &Error{Message: "only message"}
 	require.EqualValues(t, ": only message", messageOnlyErr.Error())
 }
 
@@ -58,7 +58,7 @@ func TestErrorStandardTypes(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			err := Error{
+			err := &Error{
 				Name:    tc.errorName,
 				Message: tc.message,
 			}
@@ -121,7 +121,7 @@ func TestErrorSpecialCharacters(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			err := Error{
+			err := &Error{
 				Name:    tc.errorName,
 				Message: tc.message,
 			}
@@ -133,7 +133,7 @@ func TestErrorSpecialCharacters(t *testing.T) {
 	longName := strings.Repeat("A", 100)
 	longMessage := strings.Repeat("a", 500)
 
-	longErr := Error{
+	longErr := &Error{
 		Name:    longName,
 		Message: longMessage,
 	}
@@ -144,7 +144,7 @@ func TestErrorSpecialCharacters(t *testing.T) {
 
 // TestErrorAsGoInterface tests Error implementing Go's error interface
 func TestErrorAsGoInterface(t *testing.T) {
-	quickjsErr := Error{
+	quickjsErr := &Error{
 		Name:    "TestError",
 		Message: "test error message",
 	}
@@ -162,20 +162,21 @@ func TestErrorAsGoInterface(t *testing.T) {
 	require.Error(t, err)
 	require.EqualValues(t, "TestError: test error message", err.Error())
 
-	// Test struct equality
-	err1 := Error{Name: "TestError", Message: "test message"}
-	err2 := Error{Name: "TestError", Message: "test message"}
-	err3 := Error{Name: "DifferentError", Message: "test message"}
+	// Test struct equality (comparing values, not pointers)
+	err1 := &Error{Name: "TestError", Message: "test message"}
+	err2 := &Error{Name: "TestError", Message: "test message"}
+	err3 := &Error{Name: "DifferentError", Message: "test message"}
 
-	require.Equal(t, err1, err2)
-	require.NotEqual(t, err1, err3)
+	// Compare values, not pointer addresses
+	require.Equal(t, *err1, *err2)
+	require.NotEqual(t, *err1, *err3)
 	require.EqualValues(t, err1.Error(), err2.Error())
 	require.NotEqual(t, err1.Error(), err3.Error())
 }
 
 // TestErrorFieldManipulation tests field access and modification
 func TestErrorFieldManipulation(t *testing.T) {
-	err := Error{
+	err := &Error{
 		Name:    "InitialError",
 		Message: "initial message",
 	}
@@ -199,7 +200,7 @@ func TestErrorFieldManipulation(t *testing.T) {
 	require.EqualValues(t, `{"modified": true}`, err.JSONString)
 
 	// Test zero value behavior
-	var zeroErr Error
+	var zeroErr *Error = &Error{}
 	require.EqualValues(t, "", zeroErr.Name)
 	require.EqualValues(t, "", zeroErr.Message)
 	require.EqualValues(t, "", zeroErr.Cause)

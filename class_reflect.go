@@ -57,10 +57,10 @@ func WithIgnoredFields(fields ...string) ReflectOption {
 //	constructor, classID, err := ctx.BindClass(&MyStruct{})
 //	if err != nil { return err }
 //	ctx.Globals().Set("MyStruct", constructor)
-func (ctx *Context) BindClass(structType interface{}, options ...ReflectOption) (Value, uint32, error) {
+func (ctx *Context) BindClass(structType interface{}, options ...ReflectOption) (*Value, uint32, error) {
 	builder, err := ctx.BindClassBuilder(structType, options...)
 	if err != nil {
-		return Value{}, 0, err
+		return nil, 0, err
 	}
 
 	return builder.Build(ctx)
@@ -147,7 +147,7 @@ func buildClassFromReflection(ctx *Context, className string, typ reflect.Type, 
 
 	// SCHEME C: Modified constructor with new signature
 	// Constructor now receives pre-created instance and returns Go object to associate
-	builder.Constructor(func(ctx *Context, instance Value, args []Value) (interface{}, error) {
+	builder.Constructor(func(ctx *Context, instance *Value, args []*Value) (interface{}, error) {
 		// Create new Go object instance
 		goObject := reflect.New(typ).Interface()
 
@@ -173,7 +173,7 @@ func buildClassFromReflection(ctx *Context, className string, typ reflect.Type, 
 }
 
 // initializeFromArgs implements mixed parameter constructor strategy
-func initializeFromArgs(instance interface{}, args []Value, typ reflect.Type, ctx *Context) error {
+func initializeFromArgs(instance interface{}, args []*Value, typ reflect.Type, ctx *Context) error {
 	// Smart strategy: single object argument uses named parameters
 	if len(args) == 1 && args[0].IsObject() && !args[0].IsArray() {
 		return initializeFromObjectArgs(instance, args[0], typ, ctx)
@@ -184,7 +184,7 @@ func initializeFromArgs(instance interface{}, args []Value, typ reflect.Type, ct
 }
 
 // initializeFromPositionalArgs initializes struct fields from positional arguments
-func initializeFromPositionalArgs(instance interface{}, args []Value, typ reflect.Type, ctx *Context) error {
+func initializeFromPositionalArgs(instance interface{}, args []*Value, typ reflect.Type, ctx *Context) error {
 	val := reflect.ValueOf(instance).Elem() // Dereference pointer to get struct value
 
 	argIndex := 0
@@ -214,7 +214,7 @@ func initializeFromPositionalArgs(instance interface{}, args []Value, typ reflec
 }
 
 // initializeFromObjectArgs initializes struct fields from object properties (named parameters)
-func initializeFromObjectArgs(instance interface{}, obj Value, typ reflect.Type, ctx *Context) error {
+func initializeFromObjectArgs(instance interface{}, obj *Value, typ reflect.Type, ctx *Context) error {
 	val := reflect.ValueOf(instance).Elem()
 
 	for i := 0; i < typ.NumField(); i++ {
@@ -297,7 +297,7 @@ func addReflectionAccessors(builder *ClassBuilder, typ reflect.Type, opts *Refle
 // =============================================================================
 
 // getValidObjectValue extracts and validates object value from JavaScript instance
-func getValidObjectValue(ctx *Context, this Value) (reflect.Value, error) {
+func getValidObjectValue(ctx *Context, this *Value) (reflect.Value, error) {
 	obj, err := this.GetGoObject()
 	if err != nil {
 		return reflect.Value{}, fmt.Errorf("failed to get instance data: %w", err)
@@ -340,7 +340,7 @@ func shouldSkipField(field reflect.StructField, opts *ReflectOptions) bool {
 
 // createMethodWrapper creates a ClassMethodFunc wrapper around a reflect.Method
 func createMethodWrapper(method reflect.Method) ClassMethodFunc {
-	return func(ctx *Context, this Value, args []Value) Value {
+	return func(ctx *Context, this *Value, args []*Value) *Value {
 		objValue, err := getValidObjectValue(ctx, this)
 		if err != nil {
 			return ctx.ThrowError(err)
@@ -372,7 +372,7 @@ func createMethodWrapper(method reflect.Method) ClassMethodFunc {
 
 // createFieldGetter creates a getter function for a struct field
 func createFieldGetter(field reflect.StructField, fieldIndex int) ClassGetterFunc {
-	return func(ctx *Context, this Value) Value {
+	return func(ctx *Context, this *Value) *Value {
 		objValue, err := getValidObjectValue(ctx, this)
 		if err != nil {
 			return ctx.ThrowError(err)
@@ -393,7 +393,7 @@ func createFieldGetter(field reflect.StructField, fieldIndex int) ClassGetterFun
 
 // createFieldSetter creates a setter function for a struct field
 func createFieldSetter(field reflect.StructField, fieldIndex int) ClassSetterFunc {
-	return func(ctx *Context, this Value, value Value) Value {
+	return func(ctx *Context, this *Value, value *Value) *Value {
 		objValue, err := getValidObjectValue(ctx, this)
 		if err != nil {
 			return ctx.ThrowError(err)
@@ -422,7 +422,7 @@ func createFieldSetter(field reflect.StructField, fieldIndex int) ClassSetterFun
 }
 
 // convertJSArgsToMethodArgs converts JavaScript arguments to Go reflect.Values for method calls
-func convertJSArgsToMethodArgs(method *reflect.Method, args []Value, ctx *Context) ([]reflect.Value, error) {
+func convertJSArgsToMethodArgs(method *reflect.Method, args []*Value, ctx *Context) ([]reflect.Value, error) {
 	methodType := method.Type
 	numIn := methodType.NumIn()
 
@@ -456,7 +456,7 @@ func convertJSArgsToMethodArgs(method *reflect.Method, args []Value, ctx *Contex
 }
 
 // convertMethodResults converts method return values to JavaScript value
-func convertMethodResults(results []reflect.Value, ctx *Context) Value {
+func convertMethodResults(results []reflect.Value, ctx *Context) *Value {
 	switch len(results) {
 	case 0:
 		return ctx.Undefined()

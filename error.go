@@ -12,6 +12,6 @@ type Error struct {
 }
 
 // Error implements the error interface.
-func (err Error) Error() string {
+func (err *Error) Error() string {
 	return fmt.Sprintf("%s: %s", err.Name, err.Message)
 }

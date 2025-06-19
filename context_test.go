@@ -22,21 +22,21 @@ func TestContextBasics(t *testing.T) {
 	t.Run("ValueCreation", func(t *testing.T) {
 		values := []struct {
 			name      string
-			createVal func() Value
-			checkFunc func(Value) bool
+			createVal func() *Value     // Changed to return pointer
+			checkFunc func(*Value) bool // Changed parameter to pointer
 		}{
-			{"Null", func() Value { return ctx.Null() }, func(v Value) bool { return v.IsNull() }},
-			{"Undefined", func() Value { return ctx.Undefined() }, func(v Value) bool { return v.IsUndefined() }},
-			{"Uninitialized", func() Value { return ctx.Uninitialized() }, func(v Value) bool { return v.IsUninitialized() }},
-			{"Bool", func() Value { return ctx.Bool(true) }, func(v Value) bool { return v.IsBool() }},
-			{"Int32", func() Value { return ctx.Int32(-42) }, func(v Value) bool { return v.IsNumber() }},
-			{"Int64", func() Value { return ctx.Int64(1234567890) }, func(v Value) bool { return v.IsNumber() }},
-			{"Uint32", func() Value { return ctx.Uint32(42) }, func(v Value) bool { return v.IsNumber() }},
-			{"BigInt64", func() Value { return ctx.BigInt64(9223372036854775807) }, func(v Value) bool { return v.IsBigInt() }},
-			{"BigUint64", func() Value { return ctx.BigUint64(18446744073709551615) }, func(v Value) bool { return v.IsBigInt() }},
-			{"Float64", func() Value { return ctx.Float64(3.14159) }, func(v Value) bool { return v.IsNumber() }},
-			{"String", func() Value { return ctx.String("test") }, func(v Value) bool { return v.IsString() }},
-			{"Object", func() Value { return ctx.Object() }, func(v Value) bool { return v.IsObject() }},
+			{"Null", func() *Value { return ctx.Null() }, func(v *Value) bool { return v.IsNull() }},
+			{"Undefined", func() *Value { return ctx.Undefined() }, func(v *Value) bool { return v.IsUndefined() }},
+			{"Uninitialized", func() *Value { return ctx.Uninitialized() }, func(v *Value) bool { return v.IsUninitialized() }},
+			{"Bool", func() *Value { return ctx.Bool(true) }, func(v *Value) bool { return v.IsBool() }},
+			{"Int32", func() *Value { return ctx.Int32(-42) }, func(v *Value) bool { return v.IsNumber() }},
+			{"Int64", func() *Value { return ctx.Int64(1234567890) }, func(v *Value) bool { return v.IsNumber() }},
+			{"Uint32", func() *Value { return ctx.Uint32(42) }, func(v *Value) bool { return v.IsNumber() }},
+			{"BigInt64", func() *Value { return ctx.BigInt64(9223372036854775807) }, func(v *Value) bool { return v.IsBigInt() }},
+			{"BigUint64", func() *Value { return ctx.BigUint64(18446744073709551615) }, func(v *Value) bool { return v.IsBigInt() }},
+			{"Float64", func() *Value { return ctx.Float64(3.14159) }, func(v *Value) bool { return v.IsNumber() }},
+			{"String", func() *Value { return ctx.String("test") }, func(v *Value) bool { return v.IsString() }},
+			{"Object", func() *Value { return ctx.Object() }, func(v *Value) bool { return v.IsObject() }},
 		}
 
 		for _, tc := range values {
@@ -297,7 +297,7 @@ func TestContextFunctions(t *testing.T) {
 	defer ctx.Close()
 
 	t.Run("RegularFunctions", func(t *testing.T) {
-		fn := ctx.Function(func(ctx *Context, this Value, args []Value) Value {
+		fn := ctx.Function(func(ctx *Context, this *Value, args []*Value) *Value {
 			if len(args) == 0 {
 				return ctx.String("no args")
 			}
@@ -327,8 +327,8 @@ func TestContextFunctions(t *testing.T) {
 	// Updated: Use Function + Promise instead of AsyncFunction
 	t.Run("AsyncFunctions", func(t *testing.T) {
 		// New approach using Function + Promise
-		asyncFn := ctx.Function(func(ctx *Context, this Value, args []Value) Value {
-			return ctx.Promise(func(resolve, reject func(Value)) {
+		asyncFn := ctx.Function(func(ctx *Context, this *Value, args []*Value) *Value {
+			return ctx.Promise(func(resolve, reject func(*Value)) {
 				resolve(ctx.String("async result"))
 			})
 		})
@@ -357,20 +357,20 @@ func TestContextErrorHandling(t *testing.T) {
 	t.Run("ThrowMethods", func(t *testing.T) {
 		throwTests := []struct {
 			name     string
-			throwFn  func() Value
+			throwFn  func() *Value // Changed to return pointer
 			errorStr string
 		}{
-			{"ThrowError", func() Value { return ctx.ThrowError(errors.New("custom error")) }, "custom error"},
-			{"ThrowSyntax", func() Value { return ctx.ThrowSyntaxError("syntax: %s", "invalid") }, "SyntaxError"},
-			{"ThrowType", func() Value { return ctx.ThrowTypeError("type error") }, "TypeError"},
-			{"ThrowReference", func() Value { return ctx.ThrowReferenceError("ref error") }, "ReferenceError"},
-			{"ThrowRange", func() Value { return ctx.ThrowRangeError("range error") }, "RangeError"},
-			{"ThrowInternal", func() Value { return ctx.ThrowInternalError("internal error") }, "InternalError"},
+			{"ThrowError", func() *Value { return ctx.ThrowError(errors.New("custom error")) }, "custom error"},
+			{"ThrowSyntax", func() *Value { return ctx.ThrowSyntaxError("syntax: %s", "invalid") }, "SyntaxError"},
+			{"ThrowType", func() *Value { return ctx.ThrowTypeError("type error") }, "TypeError"},
+			{"ThrowReference", func() *Value { return ctx.ThrowReferenceError("ref error") }, "ReferenceError"},
+			{"ThrowRange", func() *Value { return ctx.ThrowRangeError("range error") }, "RangeError"},
+			{"ThrowInternal", func() *Value { return ctx.ThrowInternalError("internal error") }, "InternalError"},
 		}
 
 		for _, tt := range throwTests {
 			t.Run(tt.name, func(t *testing.T) {
-				throwingFunc := ctx.Function(func(ctx *Context, this Value, args []Value) Value {
+				throwingFunc := ctx.Function(func(ctx *Context, this *Value, args []*Value) *Value {
 					return tt.throwFn()
 				})
 				defer throwingFunc.Free()
@@ -471,8 +471,8 @@ func TestContextAsync(t *testing.T) {
 	// Updated: Use Function + Promise instead of AsyncFunction
 	t.Run("AwaitPromises", func(t *testing.T) {
 		// Test successful promise using new Promise API
-		asyncTestFn := ctx.Function(func(ctx *Context, this Value, args []Value) Value {
-			return ctx.Promise(func(resolve, reject func(Value)) {
+		asyncTestFn := ctx.Function(func(ctx *Context, this *Value, args []*Value) *Value {
+			return ctx.Promise(func(resolve, reject func(*Value)) {
 				resolve(ctx.String("awaited result"))
 			})
 		})
@@ -488,8 +488,8 @@ func TestContextAsync(t *testing.T) {
 		require.EqualValues(t, "awaited result", awaitedResult.String())
 
 		// Test rejected promise using new Promise API
-		asyncRejectFn := ctx.Function(func(ctx *Context, this Value, args []Value) Value {
-			return ctx.Promise(func(resolve, reject func(Value)) {
+		asyncRejectFn := ctx.Function(func(ctx *Context, this *Value, args []*Value) *Value {
+			return ctx.Promise(func(resolve, reject func(*Value)) {
 				errorObj := ctx.Error(errors.New("rejection reason"))
 				defer errorObj.Free()
 				reject(errorObj)
@@ -513,7 +513,7 @@ func TestContextPromise(t *testing.T) {
 
 	t.Run("BasicPromise", func(t *testing.T) {
 		// Test immediate resolve
-		promise := ctx.Promise(func(resolve, reject func(Value)) {
+		promise := ctx.Promise(func(resolve, reject func(*Value)) {
 			resolve(ctx.String("success"))
 		})
 
@@ -527,7 +527,7 @@ func TestContextPromise(t *testing.T) {
 	})
 
 	t.Run("RejectedPromise", func(t *testing.T) {
-		promise := ctx.Promise(func(resolve, reject func(Value)) {
+		promise := ctx.Promise(func(resolve, reject func(*Value)) {
 			errorObj := ctx.Error(errors.New("error"))
 			defer errorObj.Free()
 			reject(errorObj)
@@ -545,8 +545,8 @@ func TestContextPromise(t *testing.T) {
 
 	t.Run("PromiseFunction", func(t *testing.T) {
 		// Create function that returns Promise
-		asyncFn := ctx.Function(func(ctx *Context, this Value, args []Value) Value {
-			return ctx.Promise(func(resolve, reject func(Value)) {
+		asyncFn := ctx.Function(func(ctx *Context, this *Value, args []*Value) *Value {
+			return ctx.Promise(func(resolve, reject func(*Value)) {
 				if len(args) == 0 {
 					errObj := ctx.Error(errors.New("no arguments provided"))
 					defer errObj.Free()
@@ -579,8 +579,8 @@ func TestContextPromise(t *testing.T) {
 
 	t.Run("PromiseChaining", func(t *testing.T) {
 		// Create async function for chaining
-		asyncDouble := ctx.Function(func(ctx *Context, this Value, args []Value) Value {
-			return ctx.Promise(func(resolve, reject func(Value)) {
+		asyncDouble := ctx.Function(func(ctx *Context, this *Value, args []*Value) *Value {
+			return ctx.Promise(func(resolve, reject func(*Value)) {
 				if len(args) == 0 {
 					errObj := ctx.Error(errors.New("no number provided"))
 					defer errObj.Free()
@@ -634,7 +634,7 @@ func TestContextPromise(t *testing.T) {
 
 	t.Run("ValueAwait", func(t *testing.T) {
 		// Test Value.Await() method
-		promise := ctx.Promise(func(resolve, reject func(Value)) {
+		promise := ctx.Promise(func(resolve, reject func(*Value)) {
 			resolve(ctx.String("awaited via Value.Await"))
 		})
 
@@ -659,8 +659,8 @@ func TestContextPromise(t *testing.T) {
 
 	t.Run("ComplexAsync", func(t *testing.T) {
 		// Test more complex async scenario
-		asyncProcessor := ctx.Function(func(ctx *Context, this Value, args []Value) Value {
-			return ctx.Promise(func(resolve, reject func(Value)) {
+		asyncProcessor := ctx.Function(func(ctx *Context, this *Value, args []*Value) *Value {
+			return ctx.Promise(func(resolve, reject func(*Value)) {
 				if len(args) == 0 {
 					errObj := ctx.Error(errors.New("no data to process"))
 					defer errObj.Free()
@@ -715,93 +715,93 @@ func TestContextTypedArrays(t *testing.T) {
 		// Test all TypedArray creation methods
 		typedArrayTests := []struct {
 			name       string
-			createFunc func() Value
-			checkFunc  func(Value) bool
-			testEmpty  func() Value
-			testNil    func() Value
+			createFunc func() *Value     // Changed to return pointer
+			checkFunc  func(*Value) bool // Changed parameter to pointer
+			testEmpty  func() *Value     // Changed to return pointer
+			testNil    func() *Value     // Changed to return pointer
 		}{
 			{
 				"Int8Array",
-				func() Value { return ctx.Int8Array([]int8{-128, -1, 0, 1, 127}) },
-				func(v Value) bool { return v.IsInt8Array() },
-				func() Value { return ctx.Int8Array([]int8{}) },
-				func() Value { return ctx.Int8Array(nil) },
+				func() *Value { return ctx.Int8Array([]int8{-128, -1, 0, 1, 127}) },
+				func(v *Value) bool { return v.IsInt8Array() },
+				func() *Value { return ctx.Int8Array([]int8{}) },
+				func() *Value { return ctx.Int8Array(nil) },
 			},
 			{
 				"Uint8Array",
-				func() Value { return ctx.Uint8Array([]uint8{0, 1, 128, 255}) },
-				func(v Value) bool { return v.IsUint8Array() },
-				func() Value { return ctx.Uint8Array([]uint8{}) },
-				func() Value { return ctx.Uint8Array(nil) },
+				func() *Value { return ctx.Uint8Array([]uint8{0, 1, 128, 255}) },
+				func(v *Value) bool { return v.IsUint8Array() },
+				func() *Value { return ctx.Uint8Array([]uint8{}) },
+				func() *Value { return ctx.Uint8Array(nil) },
 			},
 			{
 				"Uint8ClampedArray",
-				func() Value { return ctx.Uint8ClampedArray([]uint8{0, 127, 255}) },
-				func(v Value) bool { return v.IsUint8ClampedArray() },
-				func() Value { return ctx.Uint8ClampedArray([]uint8{}) },
-				func() Value { return ctx.Uint8ClampedArray(nil) },
+				func() *Value { return ctx.Uint8ClampedArray([]uint8{0, 127, 255}) },
+				func(v *Value) bool { return v.IsUint8ClampedArray() },
+				func() *Value { return ctx.Uint8ClampedArray([]uint8{}) },
+				func() *Value { return ctx.Uint8ClampedArray(nil) },
 			},
 			{
 				"Int16Array",
-				func() Value { return ctx.Int16Array([]int16{-32768, -1, 0, 1, 32767}) },
-				func(v Value) bool { return v.IsInt16Array() },
-				func() Value { return ctx.Int16Array([]int16{}) },
-				func() Value { return ctx.Int16Array(nil) },
+				func() *Value { return ctx.Int16Array([]int16{-32768, -1, 0, 1, 32767}) },
+				func(v *Value) bool { return v.IsInt16Array() },
+				func() *Value { return ctx.Int16Array([]int16{}) },
+				func() *Value { return ctx.Int16Array(nil) },
 			},
 			{
 				"Uint16Array",
-				func() Value { return ctx.Uint16Array([]uint16{0, 1, 32768, 65535}) },
-				func(v Value) bool { return v.IsUint16Array() },
-				func() Value { return ctx.Uint16Array([]uint16{}) },
-				func() Value { return ctx.Uint16Array(nil) },
+				func() *Value { return ctx.Uint16Array([]uint16{0, 1, 32768, 65535}) },
+				func(v *Value) bool { return v.IsUint16Array() },
+				func() *Value { return ctx.Uint16Array([]uint16{}) },
+				func() *Value { return ctx.Uint16Array(nil) },
 			},
 			{
 				"Int32Array",
-				func() Value { return ctx.Int32Array([]int32{-2147483648, -1, 0, 1, 2147483647}) },
-				func(v Value) bool { return v.IsInt32Array() },
-				func() Value { return ctx.Int32Array([]int32{}) },
-				func() Value { return ctx.Int32Array(nil) },
+				func() *Value { return ctx.Int32Array([]int32{-2147483648, -1, 0, 1, 2147483647}) },
+				func(v *Value) bool { return v.IsInt32Array() },
+				func() *Value { return ctx.Int32Array([]int32{}) },
+				func() *Value { return ctx.Int32Array(nil) },
 			},
 			{
 				"Uint32Array",
-				func() Value { return ctx.Uint32Array([]uint32{0, 1, 2147483648, 4294967295}) },
-				func(v Value) bool { return v.IsUint32Array() },
-				func() Value { return ctx.Uint32Array([]uint32{}) },
-				func() Value { return ctx.Uint32Array(nil) },
+				func() *Value { return ctx.Uint32Array([]uint32{0, 1, 2147483648, 4294967295}) },
+				func(v *Value) bool { return v.IsUint32Array() },
+				func() *Value { return ctx.Uint32Array([]uint32{}) },
+				func() *Value { return ctx.Uint32Array(nil) },
 			},
 			{
 				"Float32Array",
-				func() Value { return ctx.Float32Array([]float32{-3.14, 0.0, 1.5, 3.14159}) },
-				func(v Value) bool { return v.IsFloat32Array() },
-				func() Value { return ctx.Float32Array([]float32{}) },
-				func() Value { return ctx.Float32Array(nil) },
+				func() *Value { return ctx.Float32Array([]float32{-3.14, 0.0, 1.5, 3.14159}) },
+				func(v *Value) bool { return v.IsFloat32Array() },
+				func() *Value { return ctx.Float32Array([]float32{}) },
+				func() *Value { return ctx.Float32Array(nil) },
 			},
 			{
 				"Float64Array",
-				func() Value {
+				func() *Value {
 					return ctx.Float64Array([]float64{-3.141592653589793, 0.0, 1.5, 3.141592653589793})
 				},
-				func(v Value) bool { return v.IsFloat64Array() },
-				func() Value { return ctx.Float64Array([]float64{}) },
-				func() Value { return ctx.Float64Array(nil) },
+				func(v *Value) bool { return v.IsFloat64Array() },
+				func() *Value { return ctx.Float64Array([]float64{}) },
+				func() *Value { return ctx.Float64Array(nil) },
 			},
 			{
 				"BigInt64Array",
-				func() Value {
+				func() *Value {
 					return ctx.BigInt64Array([]int64{-9223372036854775808, -1, 0, 1, 9223372036854775807})
 				},
-				func(v Value) bool { return v.IsBigInt64Array() },
-				func() Value { return ctx.BigInt64Array([]int64{}) },
-				func() Value { return ctx.BigInt64Array(nil) },
+				func(v *Value) bool { return v.IsBigInt64Array() },
+				func() *Value { return ctx.BigInt64Array([]int64{}) },
+				func() *Value { return ctx.BigInt64Array(nil) },
 			},
 			{
 				"BigUint64Array",
-				func() Value {
+				func() *Value {
 					return ctx.BigUint64Array([]uint64{0, 1, 9223372036854775808, 18446744073709551615})
 				},
-				func(v Value) bool { return v.IsBigUint64Array() },
-				func() Value { return ctx.BigUint64Array([]uint64{}) },
-				func() Value { return ctx.BigUint64Array(nil) },
+				func(v *Value) bool { return v.IsBigUint64Array() },
+				func() *Value { return ctx.BigUint64Array([]uint64{}) },
+				func() *Value { return ctx.BigUint64Array(nil) },
 			},
 		}
 
@@ -1009,7 +1009,7 @@ func TestContextAsyncFunction(t *testing.T) {
 
 	t.Run("AsyncFunctionResolveNoArgs", func(t *testing.T) {
 		// Test the resolve(ctx.Undefined()) branch when no arguments are passed
-		asyncFn := ctx.AsyncFunction(func(ctx *Context, this Value, promise Value, args []Value) Value {
+		asyncFn := ctx.AsyncFunction(func(ctx *Context, this *Value, promise *Value, args []*Value) *Value {
 			resolve := promise.Get("resolve")
 			defer resolve.Free()
 
@@ -1027,7 +1027,7 @@ func TestContextAsyncFunction(t *testing.T) {
 
 	t.Run("AsyncFunctionRejectWithArgs", func(t *testing.T) {
 		// Test the reject(args[0]) branch when arguments are passed to reject
-		asyncFn := ctx.AsyncFunction(func(ctx *Context, this Value, promise Value, args []Value) Value {
+		asyncFn := ctx.AsyncFunction(func(ctx *Context, this *Value, promise *Value, args []*Value) *Value {
 			reject := promise.Get("reject")
 			defer reject.Free()
 
@@ -1046,7 +1046,7 @@ func TestContextAsyncFunction(t *testing.T) {
 
 	t.Run("AsyncFunctionRejectNoArgs", func(t *testing.T) {
 		// Test the reject without arguments branch (else clause in reject function)
-		asyncFn := ctx.AsyncFunction(func(ctx *Context, this Value, promise Value, args []Value) Value {
+		asyncFn := ctx.AsyncFunction(func(ctx *Context, this *Value, promise *Value, args []*Value) *Value {
 			reject := promise.Get("reject")
 			defer reject.Free()
 
@@ -1064,7 +1064,7 @@ func TestContextAsyncFunction(t *testing.T) {
 
 	t.Run("AsyncFunctionDirectReturnValue", func(t *testing.T) {
 		// Test the resolve(result) branch when function returns a non-undefined value
-		asyncFn := ctx.AsyncFunction(func(ctx *Context, this Value, promise Value, args []Value) Value {
+		asyncFn := ctx.AsyncFunction(func(ctx *Context, this *Value, promise *Value, args []*Value) *Value {
 			// Don't call promise.resolve or promise.reject, return a value directly
 			// This covers the resolve(result) and result.Free() branches
 			return ctx.String("direct return value")
@@ -1081,7 +1081,7 @@ func TestContextAsyncFunction(t *testing.T) {
 		// Test that returning undefined doesn't trigger the resolve(result) branch
 		resolvedByPromise := false
 
-		asyncFn := ctx.AsyncFunction(func(ctx *Context, this Value, promise Value, args []Value) Value {
+		asyncFn := ctx.AsyncFunction(func(ctx *Context, this *Value, promise *Value, args []*Value) *Value {
 			resolve := promise.Get("resolve")
 			defer resolve.Free()
 
@@ -1103,7 +1103,7 @@ func TestContextAsyncFunction(t *testing.T) {
 
 	t.Run("AsyncFunctionComplexScenario", func(t *testing.T) {
 		// Test complex async function scenario to ensure complete coverage
-		asyncFn := ctx.AsyncFunction(func(ctx *Context, this Value, promise Value, args []Value) Value {
+		asyncFn := ctx.AsyncFunction(func(ctx *Context, this *Value, promise *Value, args []*Value) *Value {
 			resolve := promise.Get("resolve")
 			reject := promise.Get("reject")
 			defer resolve.Free()

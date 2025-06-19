@@ -39,9 +39,9 @@ func getFinalizeCount() int64 {
 }
 
 // createPointClass creates a Point class for testing with SCHEME C constructor
-func createPointClass(ctx *Context) (Value, uint32, error) {
+func createPointClass(ctx *Context) (*Value, uint32, error) {
 	return NewClassBuilder("Point").
-		Constructor(func(ctx *Context, instance Value, args []Value) (interface{}, error) {
+		Constructor(func(ctx *Context, instance *Value, args []*Value) (interface{}, error) {
 			x, y := 0.0, 0.0
 			if len(args) > 0 {
 				x = args[0].Float64()
@@ -54,7 +54,7 @@ func createPointClass(ctx *Context) (Value, uint32, error) {
 			point := &Point{X: x, Y: y}
 			return point, nil
 		}).
-		Method("norm", func(ctx *Context, this Value, args []Value) Value {
+		Method("norm", func(ctx *Context, this *Value, args []*Value) *Value {
 			obj, err := this.GetGoObject()
 			if err != nil {
 				return ctx.ThrowError(err)
@@ -63,7 +63,7 @@ func createPointClass(ctx *Context) (Value, uint32, error) {
 			norm := math.Sqrt(point.X*point.X + point.Y*point.Y)
 			return ctx.Float64(norm)
 		}).
-		Method("toString", func(ctx *Context, this Value, args []Value) Value {
+		Method("toString", func(ctx *Context, this *Value, args []*Value) *Value {
 			obj, err := this.GetGoObject()
 			if err != nil {
 				return ctx.ThrowError(err)
@@ -72,7 +72,7 @@ func createPointClass(ctx *Context) (Value, uint32, error) {
 			return ctx.String(point.String())
 		}).
 		Accessor("x",
-			func(ctx *Context, this Value) Value { // getter
+			func(ctx *Context, this *Value) *Value { // getter
 				obj, err := this.GetGoObject()
 				if err != nil {
 					return ctx.ThrowError(err)
@@ -80,7 +80,7 @@ func createPointClass(ctx *Context) (Value, uint32, error) {
 				point := obj.(*Point)
 				return ctx.Float64(point.X)
 			},
-			func(ctx *Context, this Value, value Value) Value { // setter
+			func(ctx *Context, this *Value, value *Value) *Value { // setter
 				obj, err := this.GetGoObject()
 				if err != nil {
 					return ctx.ThrowError(err)
@@ -90,7 +90,7 @@ func createPointClass(ctx *Context) (Value, uint32, error) {
 				return ctx.Undefined()
 			}).
 		Accessor("y",
-			func(ctx *Context, this Value) Value { // getter
+			func(ctx *Context, this *Value) *Value { // getter
 				obj, err := this.GetGoObject()
 				if err != nil {
 					return ctx.ThrowError(err)
@@ -98,7 +98,7 @@ func createPointClass(ctx *Context) (Value, uint32, error) {
 				point := obj.(*Point)
 				return ctx.Float64(point.Y)
 			},
-			func(ctx *Context, this Value, value Value) Value { // setter
+			func(ctx *Context, this *Value, value *Value) *Value { // setter
 				obj, err := this.GetGoObject()
 				if err != nil {
 					return ctx.ThrowError(err)
@@ -107,12 +107,12 @@ func createPointClass(ctx *Context) (Value, uint32, error) {
 				point.Y = value.Float64()
 				return ctx.Undefined()
 			}).
-		StaticMethod("zero", func(ctx *Context, this Value, args []Value) Value {
+		StaticMethod("zero", func(ctx *Context, this *Value, args []*Value) *Value {
 			// SCHEME C: Use CallConstructor for static method
 			return this.CallConstructor()
 		}).
 		StaticAccessor("PI",
-			func(ctx *Context, this Value) Value { // static getter
+			func(ctx *Context, this *Value) *Value { // static getter
 				return ctx.Float64(math.Pi)
 			},
 			nil). // no setter, read-only
@@ -893,14 +893,14 @@ func TestErrorHandling(t *testing.T) {
 
 	// Test creating class with empty name
 	ctor, _, err := NewClassBuilder("").
-		Constructor(func(ctx *Context, instance Value, args []Value) (interface{}, error) {
+		Constructor(func(ctx *Context, instance *Value, args []*Value) (interface{}, error) {
 			return nil, nil
 		}).
-		Method("getValue", func(ctx *Context, this Value, args []Value) Value {
+		Method("getValue", func(ctx *Context, this *Value, args []*Value) *Value {
 			return ctx.Float64(0)
 		}).
 		Accessor("y",
-			func(ctx *Context, this Value) Value { // getter
+			func(ctx *Context, this *Value) *Value { // getter
 				obj, err := this.GetGoObject()
 				if err != nil {
 					return ctx.ThrowError(err)
@@ -908,7 +908,7 @@ func TestErrorHandling(t *testing.T) {
 				point := obj.(*Point)
 				return ctx.Float64(point.Y)
 			},
-			func(ctx *Context, this Value, value Value) Value { // setter
+			func(ctx *Context, this *Value, value *Value) *Value { // setter
 				obj, err := this.GetGoObject()
 				if err != nil {
 					return ctx.ThrowError(err)
@@ -971,12 +971,12 @@ func TestMemoryManagement(t *testing.T) {
 	for i := 0; i < 5; i++ {
 		className := fmt.Sprintf("TestClass%d", i)
 		constructor, _, err := NewClassBuilder(className).
-			Constructor(func(ctx *Context, instance Value, args []Value) (interface{}, error) {
+			Constructor(func(ctx *Context, instance *Value, args []*Value) (interface{}, error) {
 				point := &Point{X: float64(i), Y: float64(i * 2)}
 				// SCHEME C: Return Go object for automatic association
 				return point, nil
 			}).
-			Method("getValue", func(ctx *Context, this Value, args []Value) Value {
+			Method("getValue", func(ctx *Context, this *Value, args []*Value) *Value {
 				return ctx.Float64(float64(i))
 			}).
 			Build(context)
@@ -1203,10 +1203,10 @@ func TestReadOnlyAndWriteOnlyAccessors(t *testing.T) {
 
 	// Test ReadOnlyAccessor
 	constructor1, _, err := NewClassBuilder("ReadOnlyTest").
-		Constructor(func(ctx *Context, instance Value, args []Value) (interface{}, error) {
+		Constructor(func(ctx *Context, instance *Value, args []*Value) (interface{}, error) {
 			return &Point{X: 10, Y: 20}, nil
 		}).
-		Accessor("readOnlyX", func(ctx *Context, this Value) Value {
+		Accessor("readOnlyX", func(ctx *Context, this *Value) *Value {
 			obj, _ := this.GetGoObject()
 			point := obj.(*Point)
 			return ctx.Float64(point.X)
@@ -1238,16 +1238,16 @@ func TestReadOnlyAndWriteOnlyAccessors(t *testing.T) {
 
 	// Test WriteOnlyAccessor
 	constructor2, _, err := NewClassBuilder("WriteOnlyTest").
-		Constructor(func(ctx *Context, instance Value, args []Value) (interface{}, error) {
+		Constructor(func(ctx *Context, instance *Value, args []*Value) (interface{}, error) {
 			return &Point{X: 0, Y: 0}, nil
 		}).
-		Accessor("writeOnlyX", nil, func(ctx *Context, this Value, value Value) Value {
+		Accessor("writeOnlyX", nil, func(ctx *Context, this *Value, value *Value) *Value {
 			obj, _ := this.GetGoObject()
 			point := obj.(*Point)
 			point.X = value.Float64()
 			return ctx.Undefined()
 		}).
-		Accessor("getX", func(ctx *Context, this Value) Value {
+		Accessor("getX", func(ctx *Context, this *Value) *Value {
 			obj, _ := this.GetGoObject()
 			point := obj.(*Point)
 			return ctx.Float64(point.X)
@@ -1278,10 +1278,10 @@ func TestReadOnlyAndWriteOnlyAccessors(t *testing.T) {
 
 	// Test StaticReadOnlyAccessor
 	constructor3, _, err := NewClassBuilder("StaticReadOnlyTest").
-		Constructor(func(ctx *Context, instance Value, args []Value) (interface{}, error) {
+		Constructor(func(ctx *Context, instance *Value, args []*Value) (interface{}, error) {
 			return &Point{X: 0, Y: 0}, nil
 		}).
-		StaticAccessor("VERSION", func(ctx *Context, this Value) Value {
+		StaticAccessor("VERSION", func(ctx *Context, this *Value) *Value {
 			return ctx.String("1.0.0")
 		}, nil).
 		Build(ctx)

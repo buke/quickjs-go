@@ -17,7 +17,7 @@ type CustomMarshalType struct {
 	Value string
 }
 
-func (c CustomMarshalType) MarshalJS(ctx *Context) (Value, error) {
+func (c CustomMarshalType) MarshalJS(ctx *Context) (*Value, error) {
 	return ctx.String("custom:" + c.Value), nil
 }
 
@@ -25,7 +25,7 @@ type CustomUnmarshalType struct {
 	Value string
 }
 
-func (c *CustomUnmarshalType) UnmarshalJS(ctx *Context, val Value) error {
+func (c *CustomUnmarshalType) UnmarshalJS(ctx *Context, val *Value) error {
 	if val.IsString() {
 		str := val.ToString()
 		if len(str) > 7 && str[:7] == "custom:" {
@@ -39,13 +39,13 @@ func (c *CustomUnmarshalType) UnmarshalJS(ctx *Context, val Value) error {
 
 type ErrorMarshalType struct{}
 
-func (e ErrorMarshalType) MarshalJS(ctx *Context) (Value, error) {
+func (e ErrorMarshalType) MarshalJS(ctx *Context) (*Value, error) {
 	return ctx.Null(), errors.New("marshal error")
 }
 
 type ErrorUnmarshalType struct{}
 
-func (e *ErrorUnmarshalType) UnmarshalJS(ctx *Context, val Value) error {
+func (e *ErrorUnmarshalType) UnmarshalJS(ctx *Context, val *Value) error {
 	return errors.New("unmarshal error")
 }
 
@@ -105,11 +105,11 @@ type TimeWrapper struct {
 	time.Time
 }
 
-func (t TimeWrapper) MarshalJS(ctx *Context) (Value, error) {
+func (t TimeWrapper) MarshalJS(ctx *Context) (*Value, error) {
 	return ctx.String(t.Format(time.RFC3339)), nil
 }
 
-func (t *TimeWrapper) UnmarshalJS(ctx *Context, val Value) error {
+func (t *TimeWrapper) UnmarshalJS(ctx *Context, val *Value) error {
 	if val.IsString() {
 		parsed, err := time.Parse(time.RFC3339, val.ToString())
 		if err != nil {
@@ -537,7 +537,7 @@ func TestTypedArrays(t *testing.T) {
 	defer ctx.Close()
 
 	// Helper function for TypedArray round-trip tests
-	testTypedArrayRoundTrip := func(t *testing.T, name string, data interface{}, checkFunc func(Value) bool) {
+	testTypedArrayRoundTrip := func(t *testing.T, name string, data interface{}, checkFunc func(*Value) bool) {
 		t.Run(name, func(t *testing.T) {
 			jsVal, err := ctx.Marshal(data)
 			require.NoError(t, err)
@@ -572,15 +572,15 @@ func TestTypedArrays(t *testing.T) {
 	}
 
 	// Test all TypedArray types
-	testTypedArrayRoundTrip(t, "Int8Array", []int8{-128, -1, 0, 1, 127}, func(v Value) bool { return v.IsInt8Array() })
-	testTypedArrayRoundTrip(t, "Int16Array", []int16{-32768, -1, 0, 1, 32767}, func(v Value) bool { return v.IsInt16Array() })
-	testTypedArrayRoundTrip(t, "Uint16Array", []uint16{0, 1, 32768, 65535}, func(v Value) bool { return v.IsUint16Array() })
-	testTypedArrayRoundTrip(t, "Int32Array", []int32{-2147483648, -1, 0, 1, 2147483647}, func(v Value) bool { return v.IsInt32Array() })
-	testTypedArrayRoundTrip(t, "Uint32Array", []uint32{0, 1, 2147483648, 4294967295}, func(v Value) bool { return v.IsUint32Array() })
-	testTypedArrayRoundTrip(t, "Float32Array", []float32{-3.14, 0.0, 2.718, float32(1 << 20)}, func(v Value) bool { return v.IsFloat32Array() })
-	testTypedArrayRoundTrip(t, "Float64Array", []float64{-3.141592653589793, 0.0, 2.718281828459045, 1e10}, func(v Value) bool { return v.IsFloat64Array() })
-	testTypedArrayRoundTrip(t, "BigInt64Array", []int64{-9223372036854775808, -1, 0, 1, 9223372036854775807}, func(v Value) bool { return v.IsBigInt64Array() })
-	testTypedArrayRoundTrip(t, "BigUint64Array", []uint64{0, 1, 9223372036854775808, 18446744073709551615}, func(v Value) bool { return v.IsBigUint64Array() })
+	testTypedArrayRoundTrip(t, "Int8Array", []int8{-128, -1, 0, 1, 127}, func(v *Value) bool { return v.IsInt8Array() })
+	testTypedArrayRoundTrip(t, "Int16Array", []int16{-32768, -1, 0, 1, 32767}, func(v *Value) bool { return v.IsInt16Array() })
+	testTypedArrayRoundTrip(t, "Uint16Array", []uint16{0, 1, 32768, 65535}, func(v *Value) bool { return v.IsUint16Array() })
+	testTypedArrayRoundTrip(t, "Int32Array", []int32{-2147483648, -1, 0, 1, 2147483647}, func(v *Value) bool { return v.IsInt32Array() })
+	testTypedArrayRoundTrip(t, "Uint32Array", []uint32{0, 1, 2147483648, 4294967295}, func(v *Value) bool { return v.IsUint32Array() })
+	testTypedArrayRoundTrip(t, "Float32Array", []float32{-3.14, 0.0, 2.718, float32(1 << 20)}, func(v *Value) bool { return v.IsFloat32Array() })
+	testTypedArrayRoundTrip(t, "Float64Array", []float64{-3.141592653589793, 0.0, 2.718281828459045, 1e10}, func(v *Value) bool { return v.IsFloat64Array() })
+	testTypedArrayRoundTrip(t, "BigInt64Array", []int64{-9223372036854775808, -1, 0, 1, 9223372036854775807}, func(v *Value) bool { return v.IsBigInt64Array() })
+	testTypedArrayRoundTrip(t, "BigUint64Array", []uint64{0, 1, 9223372036854775808, 18446744073709551615}, func(v *Value) bool { return v.IsBigUint64Array() })
 
 	// Test []byte -> ArrayBuffer (special case)
 	t.Run("ByteSliceToArrayBuffer", func(t *testing.T) {
@@ -603,17 +603,17 @@ func TestTypedArrays(t *testing.T) {
 		emptyTests := []struct {
 			name  string
 			data  interface{}
-			check func(Value) bool
+			check func(*Value) bool
 		}{
-			{"EmptyInt8Array", []int8{}, func(v Value) bool { return v.IsInt8Array() }},
-			{"EmptyInt16Array", []int16{}, func(v Value) bool { return v.IsInt16Array() }},
-			{"EmptyUint16Array", []uint16{}, func(v Value) bool { return v.IsUint16Array() }},
-			{"EmptyInt32Array", []int32{}, func(v Value) bool { return v.IsInt32Array() }},
-			{"EmptyUint32Array", []uint32{}, func(v Value) bool { return v.IsUint32Array() }},
-			{"EmptyFloat32Array", []float32{}, func(v Value) bool { return v.IsFloat32Array() }},
-			{"EmptyFloat64Array", []float64{}, func(v Value) bool { return v.IsFloat64Array() }},
-			{"EmptyBigInt64Array", []int64{}, func(v Value) bool { return v.IsBigInt64Array() }},
-			{"EmptyBigUint64Array", []uint64{}, func(v Value) bool { return v.IsBigUint64Array() }},
+			{"EmptyInt8Array", []int8{}, func(v *Value) bool { return v.IsInt8Array() }},
+			{"EmptyInt16Array", []int16{}, func(v *Value) bool { return v.IsInt16Array() }},
+			{"EmptyUint16Array", []uint16{}, func(v *Value) bool { return v.IsUint16Array() }},
+			{"EmptyInt32Array", []int32{}, func(v *Value) bool { return v.IsInt32Array() }},
+			{"EmptyUint32Array", []uint32{}, func(v *Value) bool { return v.IsUint32Array() }},
+			{"EmptyFloat32Array", []float32{}, func(v *Value) bool { return v.IsFloat32Array() }},
+			{"EmptyFloat64Array", []float64{}, func(v *Value) bool { return v.IsFloat64Array() }},
+			{"EmptyBigInt64Array", []int64{}, func(v *Value) bool { return v.IsBigInt64Array() }},
+			{"EmptyBigUint64Array", []uint64{}, func(v *Value) bool { return v.IsBigUint64Array() }},
 		}
 
 		for _, tt := range emptyTests {
@@ -672,7 +672,7 @@ func TestTypedArrayErrors(t *testing.T) {
 	defer ctx.Close()
 
 	// Helper function to create fake TypedArray objects
-	createFakeTypedArray := func(typeName string) Value {
+	createFakeTypedArray := func(typeName string) *Value {
 		jsCode := fmt.Sprintf(`
             var corrupted = Object.create(%s.prototype);
             Object.defineProperty(corrupted, 'constructor', {
@@ -1003,7 +1003,7 @@ func TestUnmarshalInterface(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var jsVal Value
+			var jsVal *Value
 			var err error
 
 			if tt.jsCode == "undefined" {

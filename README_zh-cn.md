@@ -10,6 +10,8 @@
 
 Go 语言的 QuickJS 绑定库：快速、小型、可嵌入的 ES2020 JavaScript 解释器。
 
+**⚠️ 此项目尚未准备好用于生产环境。请自行承担使用风险。API 可能会随时更改。**
+
 ## 平台支持
 
 使用预编译的 quickjs 静态库，支持以下平台：
@@ -23,7 +25,7 @@ Go 语言的 QuickJS 绑定库：快速、小型、可嵌入的 ES2020 JavaScrip
 | MacOS   | x64   | [libquickjs.a](deps/libs/darwin_amd64/libquickjs.a)  |
 | MacOS   | arm64 | [libquickjs.a](deps/libs/darwin_arm64/libquickjs.a)  |
 
-\* windows 构建步骤请参考：https://github.com/buke/quickjs-go/issues/151#issuecomment-2134307728
+\* Windows 构建步骤请参考：https://github.com/buke/quickjs-go/issues/151#issuecomment-2134307728
 
 ## 版本说明
 
@@ -35,7 +37,7 @@ Go 语言的 QuickJS 绑定库：快速、小型、可嵌入的 ES2020 JavaScrip
 | v0.2.x     | v2023-12-09 |
 | v0.1.x     | v2021-03-27 |
 
-## 功能
+## 功能特性
 
 - 执行 JavaScript 脚本
 - 编译脚本到字节码并执行字节码
@@ -47,15 +49,38 @@ Go 语言的 QuickJS 绑定库：快速、小型、可嵌入的 ES2020 JavaScrip
 - **使用 ClassBuilder 从 Go 创建 JavaScript 类**
 - **使用 ModuleBuilder 从 Go 创建 JavaScript 模块**
 
-## 指南
+## 重大变更
+
+### 自 v0.5.10 版本开始
+
+**值类型系统从 Value 改为 *Value**
+
+所有 `Value` 参数和返回值都已从值类型更改为指针类型 (`*Value`)。
+
+#### 受影响的 API
+
+**Context 方法:**
+- `Context.Function(fn func(*Context, Value, []Value) Value)` → `Context.Function(fn func(*Context, *Value, []*Value) *Value`
+- 所有值创建方法现在返回 `*Value` 而不是 `Value`
+
+**类系统:**
+- `ClassConstructorFunc: func(*Context, Value, []Value) (interface{}, error)` → `func(*Context, *Value, []*Value) (interface{}, error)`
+- `ClassMethodFunc: func(*Context, Value, []Value) Value` → `func(*Context, *Value, []*Value) *Value`
+- `ClassGetterFunc: func(*Context, Value) Value` → `func(*Context, *Value) *Value`
+- `ClassSetterFunc: func(*Context, Value, Value) Value` → `func(*Context, *Value, *Value) *Value`
+
+**Value 方法:**
+- `Value.Call()`, `Value.Execute()`, `Value.New()` 等现在接受 `[]*Value` 而不是 `[]Value`
+- `Value.Set()`, `Value.Get()` 等现在使用 `*Value` 参数
+
+## 使用指南
 
 1. 在使用完毕后，请记得关闭 `quickjs.Runtime` 和 `quickjs.Context`。
 2. 在不再需要时手动释放 `quickjs.Value` 以防止内存泄漏。QuickJS 使用引用计数，所以如果一个值被其他对象引用，你只需要确保引用对象被正确释放。
 3. 如果你使用了 promise/job，请使用 `ctx.Loop()` 等待 promise/job 结果
 4. 如果 `Eval()` 或 `EvalFile()` 返回了错误，可强制转换为 `*quickjs.Error` 以读取错误的堆栈信息。
 5. 如果你想在函数中返回参数，请在函数中复制参数。
-6. 创建模块时，通过延迟 `Free()` 调用来确保导出函数值的适当资源清理。
-7. 当评估包含 `import()` 语句的 JavaScript 代码时，使用 `EvalAwait(true)` 来处理异步模块加载。
+
 
 ## 用法
 
@@ -87,6 +112,7 @@ func main() {
     if err != nil {
         println(err.Error())
     }
+    defer ret.Free()
     fmt.Println(ret.String())
 }
 ```
@@ -127,7 +153,11 @@ func main() {
 
 ```go
 package main
-import "github.com/buke/quickjs-go"
+
+import (
+    "fmt"
+    "github.com/buke/quickjs-go"
+)
 
 func main() {
     // 创建新的运行时
@@ -140,13 +170,12 @@ func main() {
 
     // 创建新对象
     test := ctx.Object()
-    defer test.Free()
     // 将属性绑定到对象
-    test.Set("A", test.Context().String("String A"))
+    test.Set("A", ctx.String("String A"))
     test.Set("B", ctx.Int32(0))
     test.Set("C", ctx.Bool(false))
     // 将 go 函数绑定到 js 对象
-    test.Set("hello", ctx.Function(func(ctx *quickjs.Context, this quickjs.Value, args []quickjs.Value) quickjs.Value {
+    test.Set("hello", ctx.Function(func(ctx *quickjs.Context, this *quickjs.Value, args []*quickjs.Value) *quickjs.Value {
         return ctx.String("Hello " + args[0].String())
     }))
 
@@ -155,15 +184,17 @@ func main() {
 
     // 通过 js 调用 js 函数
     js_ret, _ := ctx.Eval(`test.hello("Javascript!")`)
+    defer js_ret.Free()
     fmt.Println(js_ret.String())
 
     // 通过 go 调用 js 函数
-    go_ret := ctx.Globals().Get("test").Call("hello", ctx.String("Golang!"))
+    go_ret := test.Call("hello", ctx.String("Golang!"))
+    defer go_ret.Free()
     fmt.Println(go_ret.String())
 
     // 使用 Function + Promise 将 Go 函数绑定为 JavaScript 异步函数
-    ctx.Globals().Set("testAsync", ctx.Function(func(ctx *quickjs.Context, this quickjs.Value, args []quickjs.Value) quickjs.Value {
-        return ctx.Promise(func(resolve, reject func(quickjs.Value)) {
+    ctx.Globals().Set("testAsync", ctx.Function(func(ctx *quickjs.Context, this *quickjs.Value, args []*quickjs.Value) *quickjs.Value {
+        return ctx.Promise(func(resolve, reject func(*quickjs.Value)) {
             resolve(ctx.String("Hello Async Function!"))
         })
     }))
@@ -197,6 +228,7 @@ package main
 
 import (
     "fmt"
+    "errors"
 
     "github.com/buke/quickjs-go"
 )
@@ -210,9 +242,9 @@ func main() {
     ctx := rt.NewContext()
     defer ctx.Close()
 
-    ctx.Globals().SetFunction("A", func(ctx *Context, this Value, args []Value) Value {
+    ctx.Globals().SetFunction("A", func(ctx *quickjs.Context, this *quickjs.Value, args []*quickjs.Value) *quickjs.Value {
         // 抛出错误
-        return ctx.ThrowError(expected)
+        return ctx.ThrowError(errors.New("expected error"))
     })
 
     _, actual := ctx.Eval("A()")
@@ -243,19 +275,15 @@ func main() {
     // 从 Go 切片创建各种 TypedArray
     int8Data := []int8{-128, -1, 0, 1, 127}
     int8Array := ctx.Int8Array(int8Data)
-    defer int8Array.Free()
 
     uint8Data := []uint8{0, 128, 255}
     uint8Array := ctx.Uint8Array(uint8Data)
-    defer uint8Array.Free()
 
     float32Data := []float32{-3.14, 0.0, 2.718, 100.5}
     float32Array := ctx.Float32Array(float32Data)
-    defer float32Array.Free()
 
     int64Data := []int64{-9223372036854775808, 0, 9223372036854775807}
     bigInt64Array := ctx.BigInt64Array(int64Data)
-    defer bigInt64Array.Free()
 
     // 将 TypedArray 设置为全局变量
     ctx.Globals().Set("int8Array", int8Array)
@@ -386,10 +414,11 @@ func main() {
     defer regularArray.Free()
 
     int32Array := ctx.Int32Array([]int32{1, 2, 3})
-    defer int32Array.Free()
-
     float64Array := ctx.Float64Array([]float64{1.1, 2.2, 3.3})
-    defer float64Array.Free()
+
+    // 将数组设置为全局变量以便被全局对象引用
+    ctx.Globals().Set("int32Array", int32Array)
+    ctx.Globals().Set("float64Array", float64Array)
 
     // 检测数组类型
     fmt.Printf("普通数组 IsArray: %v\n", regularArray.IsArray())
@@ -636,12 +665,12 @@ type CustomType struct {
 }
 
 // 实现 Marshaler 接口
-func (c CustomType) MarshalJS(ctx *quickjs.Context) (quickjs.Value, error) {
+func (c CustomType) MarshalJS(ctx *quickjs.Context) (*quickjs.Value, error) {
     return ctx.String("custom:" + c.Value), nil
 }
 
 // 实现 Unmarshaler 接口
-func (c *CustomType) UnmarshalJS(ctx *quickjs.Context, val quickjs.Value) error {
+func (c *CustomType) UnmarshalJS(ctx *quickjs.Context, val *quickjs.Value) error {
     if val.IsString() {
         str := val.ToString()
         if strings.HasPrefix(str, "custom:") {
@@ -757,7 +786,7 @@ func main() {
     defer ctx.Close()
 
     // 创建包含 Go 函数和值的数学模块
-    addFunc := ctx.Function(func(ctx *quickjs.Context, this quickjs.Value, args []quickjs.Value) quickjs.Value {
+    addFunc := ctx.Function(func(ctx *quickjs.Context, this *quickjs.Value, args []*quickjs.Value) *quickjs.Value {
         if len(args) >= 2 {
             return ctx.Float64(args[0].Float64() + args[1].Float64())
         }
@@ -820,9 +849,8 @@ func main() {
     config.Set("appName", ctx.String("我的应用"))
     config.Set("version", ctx.String("2.0.0"))
     config.Set("debug", ctx.Bool(true))
-    defer config.Free()
 
-    greetFunc := ctx.Function(func(ctx *quickjs.Context, this quickjs.Value, args []quickjs.Value) quickjs.Value {
+    greetFunc := ctx.Function(func(ctx *quickjs.Context, this *quickjs.Value, args []*quickjs.Value) *quickjs.Value {
         name := "世界"
         if len(args) > 0 {
             name = args[0].String()
@@ -831,11 +859,14 @@ func main() {
     })
     defer greetFunc.Free()
 
+    jsonVal := ctx.ParseJSON(`{"MAX": 100, "MIN": 1}`)
+    defer jsonVal.Free()
+
     // 创建包含各种导出类型的模块
     module := quickjs.NewModuleBuilder("utils").
         Export("config", config).                    // 对象导出
         Export("greet", greetFunc).                  // 函数导出
-        Export("constants", ctx.ParseJSON(`{"MAX": 100, "MIN": 1}`)).  // JSON 导出
+        Export("constants", jsonVal).                // JSON 导出
         Export("default", ctx.String("实用工具库"))  // 默认导出
 
     err := module.Build(ctx)
@@ -846,20 +877,15 @@ func main() {
     // 在 JavaScript 中使用混合导入
     result, err := ctx.Eval(`
         (async function() {
-            // 混合导入：命名 + 默认
-            const utils = await import('utils');
-            const { config, greet, constants } = utils;
+            // 从 utils 模块导入
+            const { greet, config, constants } = await import('utils');
             
-            // 使用导入的功能
-            const sum = greet(config.appName);
-            const range = constants.MAX - constants.MIN;
+            // 组合功能
+            const message = greet("JavaScript");
+            const info = config.appName + " v" + config.version;
+            const limits = "Max: " + constants.MAX + ", Min: " + constants.MIN;
             
-            return {
-                greeting: sum,
-                range: range,
-                defaultExport: utils.default,
-                debugMode: config.debug
-            };
+            return { message, info, limits };
         })()
     `, quickjs.EvalAwait(true))
     defer result.Free()
@@ -890,7 +916,7 @@ func main() {
     defer ctx.Close()
 
     // 创建数学模块
-    addFunc := ctx.Function(func(ctx *quickjs.Context, this quickjs.Value, args []quickjs.Value) quickjs.Value {
+    addFunc := ctx.Function(func(ctx *quickjs.Context, this *quickjs.Value, args []*quickjs.Value) *quickjs.Value {
         if len(args) >= 2 {
             return ctx.Float64(args[0].Float64() + args[1].Float64())
         }
@@ -903,7 +929,7 @@ func main() {
         Export("PI", ctx.Float64(3.14159))
 
     // 创建字符串实用工具模块
-    upperFunc := ctx.Function(func(ctx *quickjs.Context, this quickjs.Value, args []quickjs.Value) quickjs.Value {
+    upperFunc := ctx.Function(func(ctx *quickjs.Context, this *quickjs.Value, args []*quickjs.Value) *quickjs.Value {
         if len(args) > 0 {
             return ctx.String(strings.ToUpper(args[0].String()))
         }
@@ -997,7 +1023,7 @@ func main() {
 
     // 使用 ClassBuilder 创建 Point 类
     pointConstructor, _, err := quickjs.NewClassBuilder("Point").
-        Constructor(func(ctx *quickjs.Context, instance quickjs.Value, args []quickjs.Value) (interface{}, error) {
+        Constructor(func(ctx *quickjs.Context, instance *quickjs.Value, args []*quickjs.Value) (interface{}, error) {
             x, y := 0.0, 0.0
             name := "未命名点"
             
@@ -1010,21 +1036,21 @@ func main() {
         }).
         // 访问器提供带有自定义逻辑的 getter/setter 功能
         Accessor("x", 
-            func(ctx *quickjs.Context, this quickjs.Value) quickjs.Value {
+            func(ctx *quickjs.Context, this *quickjs.Value) *quickjs.Value {
                 point, _ := this.GetGoObject()
                 return ctx.Float64(point.(*Point).X)
             },
-            func(ctx *quickjs.Context, this quickjs.Value, value quickjs.Value) quickjs.Value {
+            func(ctx *quickjs.Context, this *quickjs.Value, value *quickjs.Value) *quickjs.Value {
                 point, _ := this.GetGoObject()
                 point.(*Point).X = value.Float64()
                 return ctx.Undefined()
             }).
         Accessor("y",
-            func(ctx *quickjs.Context, this quickjs.Value) quickjs.Value {
+            func(ctx *quickjs.Context, this *quickjs.Value) *quickjs.Value {
                 point, _ := this.GetGoObject()
                 return ctx.Float64(point.(*Point).Y)
             },
-            func(ctx *quickjs.Context, this quickjs.Value, value quickjs.Value) quickjs.Value {
+            func(ctx *quickjs.Context, this *quickjs.Value, value *quickjs.Value) *quickjs.Value {
                 point, _ := this.GetGoObject()
                 point.(*Point).Y = value.Float64()
                 return ctx.Undefined()
@@ -1035,11 +1061,11 @@ func main() {
         // 只读属性
         Property("readOnly", ctx.Bool(true), quickjs.PropertyConfigurable).
         // 实例方法
-        Method("distance", func(ctx *quickjs.Context, this quickjs.Value, args []quickjs.Value) quickjs.Value {
+        Method("distance", func(ctx *quickjs.Context, this *quickjs.Value, args []*quickjs.Value) *quickjs.Value {
             point, _ := this.GetGoObject()
             return ctx.Float64(point.(*Point).Distance())
         }).
-        Method("move", func(ctx *quickjs.Context, this quickjs.Value, args []quickjs.Value) quickjs.Value {
+        Method("move", func(ctx *quickjs.Context, this *quickjs.Value, args []*quickjs.Value) *quickjs.Value {
             point, _ := this.GetGoObject()
             dx, dy := 0.0, 0.0
             if len(args) > 0 { dx = args[0].Float64() }
@@ -1047,12 +1073,12 @@ func main() {
             point.(*Point).Move(dx, dy)
             return ctx.Undefined()
         }).
-        Method("getName", func(ctx *quickjs.Context, this quickjs.Value, args []quickjs.Value) quickjs.Value {
+        Method("getName", func(ctx *quickjs.Context, this *quickjs.Value, args []*quickjs.Value) *quickjs.Value {
             point, _ := this.GetGoObject()
             return ctx.String(point.(*Point).Name)
         }).
         // 静态方法
-        StaticMethod("origin", func(ctx *quickjs.Context, this quickjs.Value, args []quickjs.Value) quickjs.Value {
+        StaticMethod("origin", func(ctx *quickjs.Context, this *quickjs.Value, args []*quickjs.Value) *quickjs.Value {
             // 在原点创建新的 Point
             origin := &Point{X: 0, Y: 0, Name: "原点"}
             jsVal, _ := ctx.Marshal(origin)
@@ -1097,6 +1123,23 @@ func main() {
     defer result.Free()
     
     fmt.Println("结果:", result.JSONStringify())
+    
+    // 演示访问器和属性之间的区别
+    propertyTest, _ := ctx.Eval(`
+        const p1 = new Point(1, 1);
+        const p2 = new Point(2, 2);
+        
+        // 属性是实例特定的值
+        const sameVersion = p1.version === p2.version; // true, 相同的静态值
+        
+        // 访问器提供来自 Go 对象的动态值
+        const differentX = p1.x !== p2.x; // true, 来自 Go 对象的不同值
+        
+        ({ sameVersion, differentX });
+    `)
+    defer propertyTest.Free()
+    
+    fmt.Println("属性 vs 访问器:", propertyTest.JSONStringify())
 }
 ```
 
@@ -1264,6 +1307,7 @@ func main() {
 
     // 执行字节码
     result, _ := ctx2.EvalBytecode(buf)
+    defer result.Free()
     fmt.Println(result.Int32())
 }
 ```
@@ -1312,7 +1356,7 @@ import (
 )
 
 func main() {
-// 启用模块导入
+    // 启用模块导入
     rt := quickjs.NewRuntime(quickjs.WithModuleImport(true))
     defer rt.Close()
 
@@ -1322,13 +1366,16 @@ func main() {
     // 执行模块
     r1, err := ctx.EvalFile("./test/hello_module.js")
     defer r1.Free()
-    require.NoError(t, err)
-    require.EqualValues(t, 55, ctx.Globals().Get("result").Int32())
+    if err != nil {
+        panic(err)
+    }
 
     // 加载模块
     r2, err := ctx.LoadModuleFile("./test/fib_module.js", "fib_foo")
     defer r2.Free()
-    require.NoError(t, err)
+    if err != nil {
+        panic(err)
+    }
 
     // 调用模块
     r3, err := ctx.Eval(`
@@ -1336,9 +1383,13 @@ func main() {
     globalThis.result = fib(9);
     `)
     defer r3.Free()
-    require.NoError(t, err)
+    if err != nil {
+        panic(err)
+    }
 
-    require.EqualValues(t, 34, ctx.Globals().Get("result").Int32())
+    result := ctx.Globals().Get("result")
+    defer result.Free()
+    fmt.Println("斐波那契结果:", result.Int32())
 }
 ```
 

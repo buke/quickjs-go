@@ -21,7 +21,7 @@ func TestAtomBasics(t *testing.T) {
 
 	require.EqualValues(t, "testProperty", atom.String())
 
-	// Test Value method
+	// Test Value method - now returns *Value
 	atomValue := atom.Value()
 	defer atomValue.Free()
 	require.True(t, atomValue.IsString())
@@ -71,7 +71,7 @@ func TestAtomSpecialCases(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			var atom Atom
+			var atom *Atom
 
 			switch v := tc.input.(type) {
 			case string:
@@ -83,7 +83,7 @@ func TestAtomSpecialCases(t *testing.T) {
 			defer atom.Free()
 			require.EqualValues(t, tc.expected, atom.String())
 
-			// Test Value conversion
+			// Test Value conversion - now returns *Value
 			atomValue := atom.Value()
 			defer atomValue.Free()
 			require.EqualValues(t, tc.expected, atomValue.String())
@@ -112,7 +112,7 @@ func TestAtomMemoryManagement(t *testing.T) {
 	}
 
 	// Test creating atoms with different names
-	atoms := make([]Atom, 50)
+	atoms := make([]*Atom, 50)
 	for i := 0; i < 50; i++ {
 		atoms[i] = ctx.Atom("property" + string(rune('A'+i%26)))
 	}
@@ -146,7 +146,7 @@ func TestAtomWithObjects(t *testing.T) {
 
 	// Test setting and getting properties using atoms
 	propNames := []string{"name", "value", "flag", "data"}
-	propValues := []Value{
+	propValues := []*Value{ // MODIFIED: now uses *Value slice
 		ctx.String("test"),
 		ctx.Int32(42),
 		ctx.Bool(true),
@@ -195,7 +195,7 @@ func TestAtomDeduplication(t *testing.T) {
 
 	// Test creating many atoms with the same name
 	sameName := "duplicateName"
-	atoms := make([]Atom, 50)
+	atoms := make([]*Atom, 50)
 
 	for i := 0; i < 50; i++ {
 		atoms[i] = ctx.Atom(sameName)

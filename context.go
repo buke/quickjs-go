@@ -43,84 +43,84 @@ func (ctx *Context) Close() {
 }
 
 // Null return a null value.
-func (ctx *Context) Null() Value {
-	return Value{ctx: ctx, ref: C.JS_NewNull()}
+func (ctx *Context) Null() *Value {
+	return &Value{ctx: ctx, ref: C.JS_NewNull()}
 }
 
 // Undefined return a undefined value.
-func (ctx *Context) Undefined() Value {
-	return Value{ctx: ctx, ref: C.JS_NewUndefined()}
+func (ctx *Context) Undefined() *Value {
+	return &Value{ctx: ctx, ref: C.JS_NewUndefined()}
 }
 
 // Uninitialized returns a uninitialized value.
-func (ctx *Context) Uninitialized() Value {
-	return Value{ctx: ctx, ref: C.JS_NewUninitialized()}
+func (ctx *Context) Uninitialized() *Value {
+	return &Value{ctx: ctx, ref: C.JS_NewUninitialized()}
 }
 
 // Error returns a new exception value with given message.
-func (ctx *Context) Error(err error) Value {
-	val := Value{ctx: ctx, ref: C.JS_NewError(ctx.ref)}
+func (ctx *Context) Error(err error) *Value {
+	val := &Value{ctx: ctx, ref: C.JS_NewError(ctx.ref)}
 	val.Set("message", ctx.String(err.Error()))
 	return val
 }
 
 // Bool returns a bool value with given bool.
-func (ctx *Context) Bool(b bool) Value {
+func (ctx *Context) Bool(b bool) *Value {
 	bv := 0
 	if b {
 		bv = 1
 	}
-	return Value{ctx: ctx, ref: C.JS_NewBool(ctx.ref, C.int(bv))}
+	return &Value{ctx: ctx, ref: C.JS_NewBool(ctx.ref, C.int(bv))}
 }
 
 // Int32 returns a int32 value with given int32.
-func (ctx *Context) Int32(v int32) Value {
-	return Value{ctx: ctx, ref: C.JS_NewInt32(ctx.ref, C.int32_t(v))}
+func (ctx *Context) Int32(v int32) *Value {
+	return &Value{ctx: ctx, ref: C.JS_NewInt32(ctx.ref, C.int32_t(v))}
 }
 
 // Int64 returns a int64 value with given int64.
-func (ctx *Context) Int64(v int64) Value {
-	return Value{ctx: ctx, ref: C.JS_NewInt64(ctx.ref, C.int64_t(v))}
+func (ctx *Context) Int64(v int64) *Value {
+	return &Value{ctx: ctx, ref: C.JS_NewInt64(ctx.ref, C.int64_t(v))}
 }
 
 // Uint32 returns a uint32 value with given uint32.
-func (ctx *Context) Uint32(v uint32) Value {
-	return Value{ctx: ctx, ref: C.JS_NewUint32(ctx.ref, C.uint32_t(v))}
+func (ctx *Context) Uint32(v uint32) *Value {
+	return &Value{ctx: ctx, ref: C.JS_NewUint32(ctx.ref, C.uint32_t(v))}
 }
 
 // BigInt64 returns a int64 value with given uint64.
-func (ctx *Context) BigInt64(v int64) Value {
-	return Value{ctx: ctx, ref: C.JS_NewBigInt64(ctx.ref, C.int64_t(v))}
+func (ctx *Context) BigInt64(v int64) *Value {
+	return &Value{ctx: ctx, ref: C.JS_NewBigInt64(ctx.ref, C.int64_t(v))}
 }
 
 // BigUint64 returns a uint64 value with given uint64.
-func (ctx *Context) BigUint64(v uint64) Value {
-	return Value{ctx: ctx, ref: C.JS_NewBigUint64(ctx.ref, C.uint64_t(v))}
+func (ctx *Context) BigUint64(v uint64) *Value {
+	return &Value{ctx: ctx, ref: C.JS_NewBigUint64(ctx.ref, C.uint64_t(v))}
 }
 
 // Float64 returns a float64 value with given float64.
-func (ctx *Context) Float64(v float64) Value {
-	return Value{ctx: ctx, ref: C.JS_NewFloat64(ctx.ref, C.double(v))}
+func (ctx *Context) Float64(v float64) *Value {
+	return &Value{ctx: ctx, ref: C.JS_NewFloat64(ctx.ref, C.double(v))}
 }
 
 // String returns a string value with given string.
-func (ctx *Context) String(v string) Value {
+func (ctx *Context) String(v string) *Value {
 	ptr := C.CString(v)
 	defer C.free(unsafe.Pointer(ptr))
-	return Value{ctx: ctx, ref: C.JS_NewString(ctx.ref, ptr)}
+	return &Value{ctx: ctx, ref: C.JS_NewString(ctx.ref, ptr)}
 }
 
 // ArrayBuffer returns a ArrayBuffer value with given binary data.
-func (ctx *Context) ArrayBuffer(binaryData []byte) Value {
+func (ctx *Context) ArrayBuffer(binaryData []byte) *Value {
 	if len(binaryData) == 0 {
-		return Value{ctx: ctx, ref: C.JS_NewArrayBufferCopy(ctx.ref, nil, 0)}
+		return &Value{ctx: ctx, ref: C.JS_NewArrayBufferCopy(ctx.ref, nil, 0)}
 	}
-	return Value{ctx: ctx, ref: C.JS_NewArrayBufferCopy(ctx.ref, (*C.uchar)(&binaryData[0]), C.size_t(len(binaryData)))}
+	return &Value{ctx: ctx, ref: C.JS_NewArrayBufferCopy(ctx.ref, (*C.uchar)(&binaryData[0]), C.size_t(len(binaryData)))}
 }
 
 // createTypedArray is a helper function to create TypedArray with given data and type.
 // It creates an ArrayBuffer first, then constructs a TypedArray from it.
-func (ctx *Context) createTypedArray(data unsafe.Pointer, elementCount int, elementSize int, arrayType C.JSTypedArrayEnum) Value {
+func (ctx *Context) createTypedArray(data unsafe.Pointer, elementCount int, elementSize int, arrayType C.JSTypedArrayEnum) *Value {
 	// Calculate total bytes needed for the data
 	totalBytes := elementCount * elementSize
 
@@ -140,14 +140,14 @@ func (ctx *Context) createTypedArray(data unsafe.Pointer, elementCount int, elem
 
 	// Pack arguments for JS_NewTypedArray call
 	args := []C.JSValue{buffer.ref, offset, length}
-	return Value{
+	return &Value{
 		ctx: ctx,
 		ref: C.JS_NewTypedArray(ctx.ref, C.int(len(args)), &args[0], arrayType),
 	}
 }
 
 // Int8Array returns a Int8Array value with given int8 slice.
-func (ctx *Context) Int8Array(data []int8) Value {
+func (ctx *Context) Int8Array(data []int8) *Value {
 	if len(data) == 0 {
 		return ctx.createTypedArray(nil, 0, 1, C.JSTypedArrayEnum(C.GetTypedArrayInt8()))
 	}
@@ -155,7 +155,7 @@ func (ctx *Context) Int8Array(data []int8) Value {
 }
 
 // Uint8Array returns a Uint8Array value with given uint8 slice.
-func (ctx *Context) Uint8Array(data []uint8) Value {
+func (ctx *Context) Uint8Array(data []uint8) *Value {
 	if len(data) == 0 {
 		return ctx.createTypedArray(nil, 0, 1, C.JSTypedArrayEnum(C.GetTypedArrayUint8()))
 	}
@@ -163,7 +163,7 @@ func (ctx *Context) Uint8Array(data []uint8) Value {
 }
 
 // Uint8ClampedArray returns a Uint8ClampedArray value with given uint8 slice.
-func (ctx *Context) Uint8ClampedArray(data []uint8) Value {
+func (ctx *Context) Uint8ClampedArray(data []uint8) *Value {
 	if len(data) == 0 {
 		return ctx.createTypedArray(nil, 0, 1, C.JSTypedArrayEnum(C.GetTypedArrayUint8C()))
 	}
@@ -171,7 +171,7 @@ func (ctx *Context) Uint8ClampedArray(data []uint8) Value {
 }
 
 // Int16Array returns a Int16Array value with given int16 slice.
-func (ctx *Context) Int16Array(data []int16) Value {
+func (ctx *Context) Int16Array(data []int16) *Value {
 	if len(data) == 0 {
 		return ctx.createTypedArray(nil, 0, 2, C.JSTypedArrayEnum(C.GetTypedArrayInt16()))
 	}
@@ -179,7 +179,7 @@ func (ctx *Context) Int16Array(data []int16) Value {
 }
 
 // Uint16Array returns a Uint16Array value with given uint16 slice.
-func (ctx *Context) Uint16Array(data []uint16) Value {
+func (ctx *Context) Uint16Array(data []uint16) *Value {
 	if len(data) == 0 {
 		return ctx.createTypedArray(nil, 0, 2, C.JSTypedArrayEnum(C.GetTypedArrayUint16()))
 	}
@@ -187,7 +187,7 @@ func (ctx *Context) Uint16Array(data []uint16) Value {
 }
 
 // Int32Array returns a Int32Array value with given int32 slice.
-func (ctx *Context) Int32Array(data []int32) Value {
+func (ctx *Context) Int32Array(data []int32) *Value {
 	if len(data) == 0 {
 		return ctx.createTypedArray(nil, 0, 4, C.JSTypedArrayEnum(C.GetTypedArrayInt32()))
 	}
@@ -195,7 +195,7 @@ func (ctx *Context) Int32Array(data []int32) Value {
 }
 
 // Uint32Array returns a Uint32Array value with given uint32 slice.
-func (ctx *Context) Uint32Array(data []uint32) Value {
+func (ctx *Context) Uint32Array(data []uint32) *Value {
 	if len(data) == 0 {
 		return ctx.createTypedArray(nil, 0, 4, C.JSTypedArrayEnum(C.GetTypedArrayUint32()))
 	}
@@ -203,7 +203,7 @@ func (ctx *Context) Uint32Array(data []uint32) Value {
 }
 
 // Float32Array returns a Float32Array value with given float32 slice.
-func (ctx *Context) Float32Array(data []float32) Value {
+func (ctx *Context) Float32Array(data []float32) *Value {
 	if len(data) == 0 {
 		return ctx.createTypedArray(nil, 0, 4, C.JSTypedArrayEnum(C.GetTypedArrayFloat32()))
 	}
@@ -211,7 +211,7 @@ func (ctx *Context) Float32Array(data []float32) Value {
 }
 
 // Float64Array returns a Float64Array value with given float64 slice.
-func (ctx *Context) Float64Array(data []float64) Value {
+func (ctx *Context) Float64Array(data []float64) *Value {
 	if len(data) == 0 {
 		return ctx.createTypedArray(nil, 0, 8, C.JSTypedArrayEnum(C.GetTypedArrayFloat64()))
 	}
@@ -219,7 +219,7 @@ func (ctx *Context) Float64Array(data []float64) Value {
 }
 
 // BigInt64Array returns a BigInt64Array value with given int64 slice.
-func (ctx *Context) BigInt64Array(data []int64) Value {
+func (ctx *Context) BigInt64Array(data []int64) *Value {
 	if len(data) == 0 {
 		return ctx.createTypedArray(nil, 0, 8, C.JSTypedArrayEnum(C.GetTypedArrayBigInt64()))
 	}
@@ -227,7 +227,7 @@ func (ctx *Context) BigInt64Array(data []int64) Value {
 }
 
 // BigUint64Array returns a BigUint64Array value with given uint64 slice.
-func (ctx *Context) BigUint64Array(data []uint64) Value {
+func (ctx *Context) BigUint64Array(data []uint64) *Value {
 	if len(data) == 0 {
 		return ctx.createTypedArray(nil, 0, 8, C.JSTypedArrayEnum(C.GetTypedArrayBigUint64()))
 	}
@@ -235,28 +235,28 @@ func (ctx *Context) BigUint64Array(data []uint64) Value {
 }
 
 // Object returns a new object value.
-func (ctx *Context) Object() Value {
-	return Value{ctx: ctx, ref: C.JS_NewObject(ctx.ref)}
+func (ctx *Context) Object() *Value {
+	return &Value{ctx: ctx, ref: C.JS_NewObject(ctx.ref)}
 }
 
 // ParseJson parses given json string and returns a object value.
-func (ctx *Context) ParseJSON(v string) Value {
+func (ctx *Context) ParseJSON(v string) *Value {
 	ptr := C.CString(v)
 	defer C.free(unsafe.Pointer(ptr))
 
 	filenamePtr := C.CString("")
 	defer C.free(unsafe.Pointer(filenamePtr))
 
-	return Value{ctx: ctx, ref: C.JS_ParseJSON(ctx.ref, ptr, C.size_t(len(v)), filenamePtr)}
+	return &Value{ctx: ctx, ref: C.JS_ParseJSON(ctx.ref, ptr, C.size_t(len(v)), filenamePtr)}
 }
 
 // Function returns a js function value with given function template
 // New implementation using HandleStore and JS_NewCFunction2 with magic parameter
-func (ctx *Context) Function(fn func(*Context, Value, []Value) Value) Value {
+func (ctx *Context) Function(fn func(*Context, *Value, []*Value) *Value) *Value {
 	// Store function in HandleStore and get int32 ID
 	fnID := ctx.handleStore.Store(fn)
 
-	return Value{
+	return &Value{
 		ctx: ctx,
 		ref: C.JS_NewCFunction2(
 			ctx.ref,
@@ -274,19 +274,19 @@ func (ctx *Context) Function(fn func(*Context, Value, []Value) Value) Value {
 // Deprecated: Use Context.Function + Context.Promise instead for better memory management and thread safety.
 // Example:
 //
-//	asyncFn := ctx.Function(func(ctx *quickjs.Context, this quickjs.Value, args []quickjs.Value) quickjs.Value {
-//	    return ctx.Promise(func(resolve, reject func(quickjs.Value)) {
+//	asyncFn := ctx.Function(func(ctx *quickjs.Context, this *quickjs.Value, args []*quickjs.Value) *quickjs.Value {
+//	    return ctx.Promise(func(resolve, reject func(*quickjs.Value)) {
 //	        // async work here
 //	        resolve(ctx.String("result"))
 //	    })
 //	})
-func (ctx *Context) AsyncFunction(asyncFn func(ctx *Context, this Value, promise Value, args []Value) Value) Value {
+func (ctx *Context) AsyncFunction(asyncFn func(ctx *Context, this *Value, promise *Value, args []*Value) *Value) *Value {
 	// New implementation using Function + Promise
-	return ctx.Function(func(ctx *Context, this Value, args []Value) Value {
-		return ctx.Promise(func(resolve, reject func(Value)) {
+	return ctx.Function(func(ctx *Context, this *Value, args []*Value) *Value {
+		return ctx.Promise(func(resolve, reject func(*Value)) {
 			// Create a promise object that has resolve/reject methods
 			promiseObj := ctx.Object()
-			promiseObj.Set("resolve", ctx.Function(func(ctx *Context, this Value, args []Value) Value {
+			promiseObj.Set("resolve", ctx.Function(func(ctx *Context, this *Value, args []*Value) *Value {
 				if len(args) > 0 {
 					resolve(args[0])
 				} else {
@@ -294,7 +294,7 @@ func (ctx *Context) AsyncFunction(asyncFn func(ctx *Context, this Value, promise
 				}
 				return ctx.Undefined()
 			}))
-			promiseObj.Set("reject", ctx.Function(func(ctx *Context, this Value, args []Value) Value {
+			promiseObj.Set("reject", ctx.Function(func(ctx *Context, this *Value, args []*Value) *Value {
 				if len(args) > 0 {
 					reject(args[0])
 				} else {
@@ -334,29 +334,29 @@ func (ctx *Context) SetInterruptHandler(handler InterruptHandler) {
 }
 
 // Atom returns a new Atom value with given string.
-func (ctx *Context) Atom(v string) Atom {
+func (ctx *Context) Atom(v string) *Atom {
 	ptr := C.CString(v)
 	defer C.free(unsafe.Pointer(ptr))
-	return Atom{ctx: ctx, ref: C.JS_NewAtom(ctx.ref, ptr)}
+	return &Atom{ctx: ctx, ref: C.JS_NewAtom(ctx.ref, ptr)}
 }
 
-// Atom returns a new Atom value with given idx.
-func (ctx *Context) AtomIdx(idx uint32) Atom {
-	return Atom{ctx: ctx, ref: C.JS_NewAtomUInt32(ctx.ref, C.uint32_t(idx))}
+// AtomIdx returns a new Atom value with given idx.
+func (ctx *Context) AtomIdx(idx uint32) *Atom {
+	return &Atom{ctx: ctx, ref: C.JS_NewAtomUInt32(ctx.ref, C.uint32_t(idx))}
 }
 
 // Invoke invokes a function with given this value and arguments.
 // Deprecated: Use Value.Execute() instead for better API consistency.
-func (ctx *Context) Invoke(fn Value, this Value, args ...Value) Value {
+func (ctx *Context) Invoke(fn *Value, this *Value, args ...*Value) *Value {
 	cargs := []C.JSValue{}
 	for _, x := range args {
 		cargs = append(cargs, x.ref)
 	}
-	var val Value
+	var val *Value
 	if len(cargs) == 0 {
-		val = Value{ctx: ctx, ref: C.JS_Call(ctx.ref, fn.ref, this.ref, 0, nil)}
+		val = &Value{ctx: ctx, ref: C.JS_Call(ctx.ref, fn.ref, this.ref, 0, nil)}
 	} else {
-		val = Value{ctx: ctx, ref: C.JS_Call(ctx.ref, fn.ref, this.ref, C.int(len(cargs)), &cargs[0])}
+		val = &Value{ctx: ctx, ref: C.JS_Call(ctx.ref, fn.ref, this.ref, C.int(len(cargs)), &cargs[0])}
 	}
 	return val
 }
@@ -417,8 +417,8 @@ func EvalLoadOnly(loadOnly bool) EvalOption {
 
 // Eval returns a js value with given code.
 // Need call Free() `quickjs.Value`'s returned by `Eval()` and `EvalFile()` and `EvalBytecode()`.
-// func (ctx *Context) Eval(code string) (Value, error) { return ctx.EvalFile(code, "code") }
-func (ctx *Context) Eval(code string, opts ...EvalOption) (Value, error) {
+// func (ctx *Context) Eval(code string) (*Value, error) { return ctx.EvalFile(code, "code") }
+func (ctx *Context) Eval(code string, opts ...EvalOption) (*Value, error) {
 	options := EvalOptions{
 		js_eval_type_global: true,
 		filename:            "<input>",
@@ -452,11 +452,11 @@ func (ctx *Context) Eval(code string, opts ...EvalOption) (Value, error) {
 		cFlag |= C.int(C.GetEvalTypeModule())
 	}
 
-	var val Value
+	var val *Value
 	if options.await {
-		val = Value{ctx: ctx, ref: C.js_std_await(ctx.ref, C.JS_Eval(ctx.ref, codePtr, C.size_t(len(code)), filenamePtr, cFlag))}
+		val = &Value{ctx: ctx, ref: C.js_std_await(ctx.ref, C.JS_Eval(ctx.ref, codePtr, C.size_t(len(code)), filenamePtr, cFlag))}
 	} else {
-		val = Value{ctx: ctx, ref: C.JS_Eval(ctx.ref, codePtr, C.size_t(len(code)), filenamePtr, cFlag)}
+		val = &Value{ctx: ctx, ref: C.JS_Eval(ctx.ref, codePtr, C.size_t(len(code)), filenamePtr, cFlag)}
 	}
 	if val.IsException() {
 		return val, ctx.Exception()
@@ -467,7 +467,7 @@ func (ctx *Context) Eval(code string, opts ...EvalOption) (Value, error) {
 
 // EvalFile returns a js value with given code and filename.
 // Need call Free() `quickjs.Value`'s returned by `Eval()` and `EvalFile()` and `EvalBytecode()`.
-func (ctx *Context) EvalFile(filePath string, opts ...EvalOption) (Value, error) {
+func (ctx *Context) EvalFile(filePath string, opts ...EvalOption) (*Value, error) {
 	b, err := os.ReadFile(filePath)
 	if err != nil {
 		return ctx.Null(), err
@@ -477,7 +477,7 @@ func (ctx *Context) EvalFile(filePath string, opts ...EvalOption) (Value, error)
 }
 
 // LoadModule returns a js value with given code and module name.
-func (ctx *Context) LoadModule(code string, moduleName string, opts ...EvalOption) (Value, error) {
+func (ctx *Context) LoadModule(code string, moduleName string, opts ...EvalOption) (*Value, error) {
 	options := EvalOptions{
 		load_only: false,
 	}
@@ -502,7 +502,7 @@ func (ctx *Context) LoadModule(code string, moduleName string, opts ...EvalOptio
 }
 
 // LoadModuleFile returns a js value with given file path and module name.
-func (ctx *Context) LoadModuleFile(filePath string, moduleName string) (Value, error) {
+func (ctx *Context) LoadModuleFile(filePath string, moduleName string) (*Value, error) {
 	b, err := os.ReadFile(filePath)
 	if err != nil {
 		return ctx.Null(), err
@@ -517,7 +517,7 @@ func (ctx *Context) CompileModule(filePath string, moduleName string, opts ...Ev
 }
 
 // LoadModuleByteCode returns a js value with given bytecode and module name.
-func (ctx *Context) LoadModuleBytecode(buf []byte, opts ...EvalOption) (Value, error) {
+func (ctx *Context) LoadModuleBytecode(buf []byte, opts ...EvalOption) (*Value, error) {
 	if len(buf) == 0 {
 		return ctx.Null(), fmt.Errorf("empty bytecode")
 	}
@@ -539,20 +539,20 @@ func (ctx *Context) LoadModuleBytecode(buf []byte, opts ...EvalOption) (Value, e
 		return ctx.Null(), ctx.Exception()
 	}
 
-	return Value{ctx: ctx, ref: cVal}, nil
+	return &Value{ctx: ctx, ref: cVal}, nil
 }
 
 // EvalBytecode returns a js value with given bytecode.
 // Need call Free() `quickjs.Value`'s returned by `Eval()` and `EvalFile()` and `EvalBytecode()`.
-func (ctx *Context) EvalBytecode(buf []byte) (Value, error) {
+func (ctx *Context) EvalBytecode(buf []byte) (*Value, error) {
 	cbuf := C.CBytes(buf)
-	obj := Value{ctx: ctx, ref: C.JS_ReadObject(ctx.ref, (*C.uint8_t)(cbuf), C.size_t(len(buf)), C.int(C.GetReadObjBytecode()))}
+	obj := &Value{ctx: ctx, ref: C.JS_ReadObject(ctx.ref, (*C.uint8_t)(cbuf), C.size_t(len(buf)), C.int(C.GetReadObjBytecode()))}
 	defer C.js_free(ctx.ref, unsafe.Pointer(cbuf))
 	if obj.IsException() {
 		return obj, ctx.Exception()
 	}
 
-	val := Value{ctx: ctx, ref: C.JS_EvalFunction(ctx.ref, obj.ref)}
+	val := &Value{ctx: ctx, ref: C.JS_EvalFunction(ctx.ref, obj.ref)}
 	if val.IsException() {
 		return val, ctx.Exception()
 	}
@@ -605,64 +605,64 @@ func (ctx *Context) CompileFile(filePath string, opts ...EvalOption) ([]byte, er
 }
 
 // Global returns a context's global object.
-func (ctx *Context) Globals() Value {
+func (ctx *Context) Globals() *Value {
 	if ctx.globals == nil {
 		ctx.globals = &Value{
 			ctx: ctx,
 			ref: C.JS_GetGlobalObject(ctx.ref),
 		}
 	}
-	return *ctx.globals
+	return ctx.globals
 }
 
 // Throw returns a context's exception value.
-func (ctx *Context) Throw(v Value) Value {
-	return Value{ctx: ctx, ref: C.JS_Throw(ctx.ref, v.ref)}
+func (ctx *Context) Throw(v *Value) *Value {
+	return &Value{ctx: ctx, ref: C.JS_Throw(ctx.ref, v.ref)}
 }
 
 // ThrowError returns a context's exception value with given error message.
-func (ctx *Context) ThrowError(err error) Value {
+func (ctx *Context) ThrowError(err error) *Value {
 	return ctx.Throw(ctx.Error(err))
 }
 
 // ThrowSyntaxError returns a context's exception value with given error message.
-func (ctx *Context) ThrowSyntaxError(format string, args ...interface{}) Value {
+func (ctx *Context) ThrowSyntaxError(format string, args ...interface{}) *Value {
 	cause := fmt.Sprintf(format, args...)
 	causePtr := C.CString(cause)
 	defer C.free(unsafe.Pointer(causePtr))
-	return Value{ctx: ctx, ref: C.ThrowSyntaxError(ctx.ref, causePtr)}
+	return &Value{ctx: ctx, ref: C.ThrowSyntaxError(ctx.ref, causePtr)}
 }
 
 // ThrowTypeError returns a context's exception value with given error message.
-func (ctx *Context) ThrowTypeError(format string, args ...interface{}) Value {
+func (ctx *Context) ThrowTypeError(format string, args ...interface{}) *Value {
 	cause := fmt.Sprintf(format, args...)
 	causePtr := C.CString(cause)
 	defer C.free(unsafe.Pointer(causePtr))
-	return Value{ctx: ctx, ref: C.ThrowTypeError(ctx.ref, causePtr)}
+	return &Value{ctx: ctx, ref: C.ThrowTypeError(ctx.ref, causePtr)}
 }
 
 // ThrowReferenceError returns a context's exception value with given error message.
-func (ctx *Context) ThrowReferenceError(format string, args ...interface{}) Value {
+func (ctx *Context) ThrowReferenceError(format string, args ...interface{}) *Value {
 	cause := fmt.Sprintf(format, args...)
 	causePtr := C.CString(cause)
 	defer C.free(unsafe.Pointer(causePtr))
-	return Value{ctx: ctx, ref: C.ThrowReferenceError(ctx.ref, causePtr)}
+	return &Value{ctx: ctx, ref: C.ThrowReferenceError(ctx.ref, causePtr)}
 }
 
 // ThrowRangeError returns a context's exception value with given error message.
-func (ctx *Context) ThrowRangeError(format string, args ...interface{}) Value {
+func (ctx *Context) ThrowRangeError(format string, args ...interface{}) *Value {
 	cause := fmt.Sprintf(format, args...)
 	causePtr := C.CString(cause)
 	defer C.free(unsafe.Pointer(causePtr))
-	return Value{ctx: ctx, ref: C.ThrowRangeError(ctx.ref, causePtr)}
+	return &Value{ctx: ctx, ref: C.ThrowRangeError(ctx.ref, causePtr)}
 }
 
 // ThrowInternalError returns a context's exception value with given error message.
-func (ctx *Context) ThrowInternalError(format string, args ...interface{}) Value {
+func (ctx *Context) ThrowInternalError(format string, args ...interface{}) *Value {
 	cause := fmt.Sprintf(format, args...)
 	causePtr := C.CString(cause)
 	defer C.free(unsafe.Pointer(causePtr))
-	return Value{ctx: ctx, ref: C.ThrowInternalError(ctx.ref, causePtr)}
+	return &Value{ctx: ctx, ref: C.ThrowInternalError(ctx.ref, causePtr)}
 }
 
 // HasException checks if the context has an exception set.
@@ -673,7 +673,7 @@ func (ctx *Context) HasException() bool {
 
 // Exception returns a context's exception value.
 func (ctx *Context) Exception() error {
-	val := Value{ctx: ctx, ref: C.JS_GetException(ctx.ref)}
+	val := &Value{ctx: ctx, ref: C.JS_GetException(ctx.ref)}
 	defer val.Free()
 	return val.Error()
 }
@@ -684,8 +684,8 @@ func (ctx *Context) Loop() {
 }
 
 // Wait for a promise and execute pending jobs while waiting for it. Return the promise result or JS_EXCEPTION in case of promise rejection.
-func (ctx *Context) Await(v Value) (Value, error) {
-	val := Value{ctx: ctx, ref: C.js_std_await(ctx.ref, v.ref)}
+func (ctx *Context) Await(v *Value) (*Value, error) {
+	val := &Value{ctx: ctx, ref: C.js_std_await(ctx.ref, v.ref)}
 	if val.IsException() {
 		return val, ctx.Exception()
 	}
@@ -694,7 +694,7 @@ func (ctx *Context) Await(v Value) (Value, error) {
 
 // Promise creates a new Promise with executor function
 // Executor runs synchronously in current thread for thread safety
-func (ctx *Context) Promise(executor func(resolve, reject func(Value))) Value {
+func (ctx *Context) Promise(executor func(resolve, reject func(*Value))) *Value {
 	// Create Promise using JavaScript code to avoid complex C API reference management
 	promiseSetup, _ := ctx.Eval(`
         (() => {
@@ -716,11 +716,11 @@ func (ctx *Context) Promise(executor func(resolve, reject func(Value))) Value {
 	defer rejectFunc.Free()
 
 	// Create wrapper functions that call JavaScript resolve/reject
-	resolve := func(result Value) {
+	resolve := func(result *Value) {
 		resolveFunc.Execute(ctx.Undefined(), result)
 	}
 
-	reject := func(reason Value) {
+	reject := func(reason *Value) {
 		rejectFunc.Execute(ctx.Undefined(), reason)
 	}
 
