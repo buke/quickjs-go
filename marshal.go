@@ -11,12 +11,12 @@ import (
 
 // Marshaler is the interface implemented by types that can marshal themselves into a JavaScript value.
 type Marshaler interface {
-	MarshalJS(ctx *Context) (Value, error)
+	MarshalJS(ctx *Context) (*Value, error)
 }
 
 // Unmarshaler is the interface implemented by types that can unmarshal a JavaScript value into themselves.
 type Unmarshaler interface {
-	UnmarshalJS(ctx *Context, val Value) error
+	UnmarshalJS(ctx *Context, val *Value) error
 }
 
 // FieldTagInfo contains parsed field tag information
@@ -137,7 +137,7 @@ func isEmptyValue(v reflect.Value) bool {
 // The "js" and "json" tags are supported. Fields with tag "-" are ignored.
 //
 // Types implementing the Marshaler interface are marshaled using their MarshalJS method.
-func (ctx *Context) Marshal(v interface{}) (Value, error) {
+func (ctx *Context) Marshal(v interface{}) (*Value, error) {
 	if v == nil {
 		return ctx.Null(), nil
 	}
@@ -174,7 +174,7 @@ func (ctx *Context) Marshal(v interface{}) (Value, error) {
 //   - map[string]interface{} for JavaScript Object
 //
 // Types implementing the Unmarshaler interface are unmarshaled using their UnmarshalJS method.
-func (ctx *Context) Unmarshal(jsVal Value, v interface{}) error {
+func (ctx *Context) Unmarshal(jsVal *Value, v interface{}) error {
 	rv := reflect.ValueOf(v)
 	if rv.Kind() != reflect.Ptr || rv.IsNil() {
 		return fmt.Errorf("unmarshal target must be a non-nil pointer")
@@ -183,7 +183,7 @@ func (ctx *Context) Unmarshal(jsVal Value, v interface{}) error {
 }
 
 // marshal recursively marshals a Go value to JavaScript
-func (ctx *Context) marshal(rv reflect.Value) (Value, error) {
+func (ctx *Context) marshal(rv reflect.Value) (*Value, error) {
 	// Handle interface{} by getting the concrete value
 	if rv.Kind() == reflect.Interface && !rv.IsNil() {
 		rv = rv.Elem()
@@ -244,7 +244,7 @@ func (ctx *Context) marshal(rv reflect.Value) (Value, error) {
 }
 
 // marshalSlice marshals Go slice to JavaScript Array or TypedArray
-func (ctx *Context) marshalSlice(rv reflect.Value) (Value, error) {
+func (ctx *Context) marshalSlice(rv reflect.Value) (*Value, error) {
 	elemKind := rv.Type().Elem().Kind()
 
 	switch elemKind {
@@ -296,7 +296,7 @@ func (ctx *Context) marshalSlice(rv reflect.Value) (Value, error) {
 }
 
 // marshalInt8Array converts []int8 to Int8Array
-func (ctx *Context) marshalInt8Array(rv reflect.Value) (Value, error) {
+func (ctx *Context) marshalInt8Array(rv reflect.Value) (*Value, error) {
 	slice := rv.Interface().([]int8)
 	bytes := make([]byte, len(slice))
 	for i, v := range slice {
@@ -314,7 +314,7 @@ func (ctx *Context) marshalInt8Array(rv reflect.Value) (Value, error) {
 }
 
 // marshalInt16Array converts []int16 to Int16Array
-func (ctx *Context) marshalInt16Array(rv reflect.Value) (Value, error) {
+func (ctx *Context) marshalInt16Array(rv reflect.Value) (*Value, error) {
 	slice := rv.Interface().([]int16)
 	bytes := int16SliceToBytes(slice)
 
@@ -329,7 +329,7 @@ func (ctx *Context) marshalInt16Array(rv reflect.Value) (Value, error) {
 }
 
 // marshalUint16Array converts []uint16 to Uint16Array
-func (ctx *Context) marshalUint16Array(rv reflect.Value) (Value, error) {
+func (ctx *Context) marshalUint16Array(rv reflect.Value) (*Value, error) {
 	slice := rv.Interface().([]uint16)
 	bytes := uint16SliceToBytes(slice)
 
@@ -344,7 +344,7 @@ func (ctx *Context) marshalUint16Array(rv reflect.Value) (Value, error) {
 }
 
 // marshalInt32Array converts []int32 to Int32Array
-func (ctx *Context) marshalInt32Array(rv reflect.Value) (Value, error) {
+func (ctx *Context) marshalInt32Array(rv reflect.Value) (*Value, error) {
 	slice := rv.Interface().([]int32)
 	bytes := int32SliceToBytes(slice)
 
@@ -359,7 +359,7 @@ func (ctx *Context) marshalInt32Array(rv reflect.Value) (Value, error) {
 }
 
 // marshalUint32Array converts []uint32 to Uint32Array
-func (ctx *Context) marshalUint32Array(rv reflect.Value) (Value, error) {
+func (ctx *Context) marshalUint32Array(rv reflect.Value) (*Value, error) {
 	slice := rv.Interface().([]uint32)
 	bytes := uint32SliceToBytes(slice)
 
@@ -374,7 +374,7 @@ func (ctx *Context) marshalUint32Array(rv reflect.Value) (Value, error) {
 }
 
 // marshalFloat32Array converts []float32 to Float32Array
-func (ctx *Context) marshalFloat32Array(rv reflect.Value) (Value, error) {
+func (ctx *Context) marshalFloat32Array(rv reflect.Value) (*Value, error) {
 	slice := rv.Interface().([]float32)
 	bytes := float32SliceToBytes(slice)
 
@@ -389,7 +389,7 @@ func (ctx *Context) marshalFloat32Array(rv reflect.Value) (Value, error) {
 }
 
 // marshalFloat64Array converts []float64 to Float64Array
-func (ctx *Context) marshalFloat64Array(rv reflect.Value) (Value, error) {
+func (ctx *Context) marshalFloat64Array(rv reflect.Value) (*Value, error) {
 	slice := rv.Interface().([]float64)
 	bytes := float64SliceToBytes(slice)
 
@@ -404,7 +404,7 @@ func (ctx *Context) marshalFloat64Array(rv reflect.Value) (Value, error) {
 }
 
 // marshalBigInt64Array converts []int64 to BigInt64Array
-func (ctx *Context) marshalBigInt64Array(rv reflect.Value) (Value, error) {
+func (ctx *Context) marshalBigInt64Array(rv reflect.Value) (*Value, error) {
 	slice := rv.Interface().([]int64)
 	bytes := int64SliceToBytes(slice)
 
@@ -419,7 +419,7 @@ func (ctx *Context) marshalBigInt64Array(rv reflect.Value) (Value, error) {
 }
 
 // marshalBigUint64Array converts []uint64 to BigUint64Array
-func (ctx *Context) marshalBigUint64Array(rv reflect.Value) (Value, error) {
+func (ctx *Context) marshalBigUint64Array(rv reflect.Value) (*Value, error) {
 	slice := rv.Interface().([]uint64)
 	bytes := uint64SliceToBytes(slice)
 
@@ -434,7 +434,7 @@ func (ctx *Context) marshalBigUint64Array(rv reflect.Value) (Value, error) {
 }
 
 // marshalGenericArray marshals Go slice to JavaScript Array (fallback)
-func (ctx *Context) marshalGenericArray(rv reflect.Value) (Value, error) {
+func (ctx *Context) marshalGenericArray(rv reflect.Value) (*Value, error) {
 	globals := ctx.Globals()
 	arrayClass := globals.Get("Array")
 	defer arrayClass.Free()
@@ -559,7 +559,7 @@ func uint64SliceToBytes(slice []uint64) []byte {
 }
 
 // marshalArray marshals Go array to JavaScript Array
-func (ctx *Context) marshalArray(rv reflect.Value) (Value, error) {
+func (ctx *Context) marshalArray(rv reflect.Value) (*Value, error) {
 	globals := ctx.Globals()
 	arrayClass := globals.Get("Array")
 	defer arrayClass.Free()
@@ -578,7 +578,7 @@ func (ctx *Context) marshalArray(rv reflect.Value) (Value, error) {
 }
 
 // marshalMap marshals Go map to JavaScript Object
-func (ctx *Context) marshalMap(rv reflect.Value) (Value, error) {
+func (ctx *Context) marshalMap(rv reflect.Value) (*Value, error) {
 	obj := ctx.Object()
 	for _, key := range rv.MapKeys() {
 		keyStr := fmt.Sprintf("%v", key.Interface())
@@ -594,7 +594,7 @@ func (ctx *Context) marshalMap(rv reflect.Value) (Value, error) {
 }
 
 // marshalStruct marshals Go struct to JavaScript Object
-func (ctx *Context) marshalStruct(rv reflect.Value) (Value, error) {
+func (ctx *Context) marshalStruct(rv reflect.Value) (*Value, error) {
 	rt := rv.Type()
 	obj := ctx.Object()
 
@@ -631,7 +631,7 @@ func (ctx *Context) marshalStruct(rv reflect.Value) (Value, error) {
 }
 
 // unmarshal recursively unmarshals a JavaScript value to Go
-func (ctx *Context) unmarshal(jsVal Value, rv reflect.Value) error {
+func (ctx *Context) unmarshal(jsVal *Value, rv reflect.Value) error {
 	// Check if type implements Unmarshaler interface
 	if rv.CanAddr() {
 		if unmarshaler, ok := rv.Addr().Interface().(Unmarshaler); ok {
@@ -751,7 +751,7 @@ func (ctx *Context) unmarshal(jsVal Value, rv reflect.Value) error {
 }
 
 // unmarshalSlice unmarshals JavaScript Array/TypedArray to Go slice
-func (ctx *Context) unmarshalSlice(jsVal Value, rv reflect.Value) error {
+func (ctx *Context) unmarshalSlice(jsVal *Value, rv reflect.Value) error {
 	elemKind := rv.Type().Elem().Kind()
 
 	// Check for corresponding TypedArray types first
@@ -889,7 +889,7 @@ func (ctx *Context) unmarshalSlice(jsVal Value, rv reflect.Value) error {
 }
 
 // unmarshalArray unmarshals JavaScript Array to Go array
-func (ctx *Context) unmarshalArray(jsVal Value, rv reflect.Value) error {
+func (ctx *Context) unmarshalArray(jsVal *Value, rv reflect.Value) error {
 	if !jsVal.IsArray() {
 		return fmt.Errorf("expected array, got JavaScript %s", jsVal.String())
 	}
@@ -916,7 +916,7 @@ func (ctx *Context) unmarshalArray(jsVal Value, rv reflect.Value) error {
 }
 
 // unmarshalMap unmarshals JavaScript Object to Go map
-func (ctx *Context) unmarshalMap(jsVal Value, rv reflect.Value) error {
+func (ctx *Context) unmarshalMap(jsVal *Value, rv reflect.Value) error {
 	if !jsVal.IsObject() {
 		return fmt.Errorf("expected object, got JavaScript %s", jsVal.String())
 	}
@@ -965,7 +965,7 @@ func (ctx *Context) unmarshalMap(jsVal Value, rv reflect.Value) error {
 }
 
 // unmarshalStruct unmarshals JavaScript Object to Go struct
-func (ctx *Context) unmarshalStruct(jsVal Value, rv reflect.Value) error {
+func (ctx *Context) unmarshalStruct(jsVal *Value, rv reflect.Value) error {
 	if !jsVal.IsObject() {
 		return fmt.Errorf("expected object, got JavaScript %s", jsVal.String())
 	}
@@ -999,7 +999,7 @@ func (ctx *Context) unmarshalStruct(jsVal Value, rv reflect.Value) error {
 }
 
 // unmarshalInterface unmarshals JavaScript value to interface{}
-func (ctx *Context) unmarshalInterface(jsVal Value) (interface{}, error) {
+func (ctx *Context) unmarshalInterface(jsVal *Value) (interface{}, error) {
 	if jsVal.IsFunction() || jsVal.IsSymbol() || jsVal.IsException() || jsVal.IsUninitialized() || jsVal.IsPromise() || jsVal.IsConstructor() {
 		return nil, fmt.Errorf("unsupported JavaScript type")
 	} else if jsVal.IsNull() || jsVal.IsUndefined() {

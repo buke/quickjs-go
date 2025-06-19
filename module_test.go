@@ -18,7 +18,7 @@ func TestModuleBuilder_Basic(t *testing.T) {
 	defer ctx.Close()
 
 	t.Run("ModuleWithExports", func(t *testing.T) {
-		addFunc := ctx.Function(func(ctx *Context, this Value, args []Value) Value {
+		addFunc := ctx.Function(func(ctx *Context, this *Value, args []*Value) *Value {
 			if len(args) >= 2 {
 				return ctx.Float64(args[0].Float64() + args[1].Float64())
 			}
@@ -78,7 +78,7 @@ func TestModuleBuilder_Import(t *testing.T) {
 	defer ctx.Close()
 
 	t.Run("NamedImports", func(t *testing.T) {
-		greetFunc := ctx.Function(func(ctx *Context, this Value, args []Value) Value {
+		greetFunc := ctx.Function(func(ctx *Context, this *Value, args []*Value) *Value {
 			name := "World"
 			if len(args) > 0 {
 				name = args[0].String()
@@ -106,7 +106,7 @@ func TestModuleBuilder_Import(t *testing.T) {
 	})
 
 	t.Run("FunctionImports", func(t *testing.T) {
-		calculateFunc := ctx.Function(func(ctx *Context, this Value, args []Value) Value {
+		calculateFunc := ctx.Function(func(ctx *Context, this *Value, args []*Value) *Value {
 			if len(args) >= 2 {
 				a, b := args[0].Float64(), args[1].Float64()
 				return ctx.Float64(a * b)
@@ -209,7 +209,7 @@ func TestModuleBuilder_Integration(t *testing.T) {
 
 	t.Run("MultipleModules", func(t *testing.T) {
 		// Create math module
-		addFunc := ctx.Function(func(ctx *Context, this Value, args []Value) Value {
+		addFunc := ctx.Function(func(ctx *Context, this *Value, args []*Value) *Value {
 			if len(args) >= 2 {
 				return ctx.Float64(args[0].Float64() + args[1].Float64())
 			}

@@ -16,8 +16,8 @@ func TestBridgeGetContextFromJSReturnNil(t *testing.T) {
 		defer rt.Close()
 		ctx := rt.NewContext()
 
-		// Create function and store it globally
-		fn := ctx.Function(func(ctx *Context, this Value, args []Value) Value {
+		// Create function and store it globally - MODIFIED: now uses pointer signature
+		fn := ctx.Function(func(ctx *Context, this *Value, args []*Value) *Value {
 			return ctx.String("test")
 		})
 		ctx.Globals().Set("testFn", fn)
@@ -109,8 +109,8 @@ func TestBridgeContextNotFound(t *testing.T) {
 		ctx := rt.NewContext()
 		defer ctx.Close()
 
-		// Create function and store it in JavaScript
-		fn := ctx.Function(func(ctx *Context, this Value, args []Value) Value {
+		// Create function and store it in JavaScript - MODIFIED: now uses pointer signature
+		fn := ctx.Function(func(ctx *Context, this *Value, args []*Value) *Value {
 			return ctx.String("test")
 		})
 		ctx.Globals().Set("testFunc", fn)
@@ -158,8 +158,8 @@ func TestBridgeFunctionNotFoundInHandleStore(t *testing.T) {
 		ctx := rt.NewContext()
 		defer ctx.Close()
 
-		// Create function and store it in JavaScript
-		fn := ctx.Function(func(ctx *Context, this Value, args []Value) Value {
+		// Create function and store it in JavaScript - MODIFIED: now uses pointer signature
+		fn := ctx.Function(func(ctx *Context, this *Value, args []*Value) *Value {
 			return ctx.String("test")
 		})
 		ctx.Globals().Set("testFunc", fn)
@@ -204,8 +204,8 @@ func TestBridgeInvalidFunctionType(t *testing.T) {
 		ctx := rt.NewContext()
 		defer ctx.Close()
 
-		// Create function and store it in JavaScript
-		fn := ctx.Function(func(ctx *Context, this Value, args []Value) Value {
+		// Create function and store it in JavaScript - MODIFIED: now uses pointer signature
+		fn := ctx.Function(func(ctx *Context, this *Value, args []*Value) *Value {
 			return ctx.String("test")
 		})
 		ctx.Globals().Set("testFunc", fn)
@@ -268,7 +268,7 @@ func TestBridgeClassConstructorErrors(t *testing.T) {
 
 		// MODIFIED FOR SCHEME C: Create class with new constructor signature
 		constructor, _, err := NewClassBuilder("TestClass").
-			Constructor(func(ctx *Context, instance Value, args []Value) (interface{}, error) {
+			Constructor(func(ctx *Context, instance *Value, args []*Value) (interface{}, error) {
 				// SCHEME C: Return Go object for automatic association
 				return &Point{X: 1, Y: 2}, nil
 			}).
@@ -315,7 +315,7 @@ func TestBridgeClassConstructorErrors(t *testing.T) {
 
 		// MODIFIED FOR SCHEME C: Create class with new constructor signature
 		constructor, _, err := NewClassBuilder("TestClass").
-			Constructor(func(ctx *Context, instance Value, args []Value) (interface{}, error) {
+			Constructor(func(ctx *Context, instance *Value, args []*Value) (interface{}, error) {
 				// SCHEME C: Return Go object for automatic association
 				return &Point{X: 1, Y: 2}, nil
 			}).
@@ -354,7 +354,7 @@ func TestBridgeClassConstructorErrors(t *testing.T) {
 
 		// MODIFIED FOR SCHEME C: Create class with new constructor signature
 		constructor, _, err := NewClassBuilder("TestClass").
-			Constructor(func(ctx *Context, instance Value, args []Value) (interface{}, error) {
+			Constructor(func(ctx *Context, instance *Value, args []*Value) (interface{}, error) {
 				// SCHEME C: Return Go object for automatic association
 				return &Point{X: 1, Y: 2}, nil
 			}).
@@ -413,7 +413,7 @@ func TestBridgeClassConstructorErrors(t *testing.T) {
 
 		// Create class with constructor
 		constructor, _, err := NewClassBuilder("TestClass").
-			Constructor(func(ctx *Context, instance Value, args []Value) (interface{}, error) {
+			Constructor(func(ctx *Context, instance *Value, args []*Value) (interface{}, error) {
 				return &Point{X: 1, Y: 2}, nil
 			}).
 			Build(ctx)
@@ -453,7 +453,7 @@ func TestBridgeClassConstructorErrors(t *testing.T) {
 
 		// Create class with instance properties
 		constructor, _, err := NewClassBuilder("TestClass").
-			Constructor(func(ctx *Context, instance Value, args []Value) (interface{}, error) {
+			Constructor(func(ctx *Context, instance *Value, args []*Value) (interface{}, error) {
 				return &Point{X: 1, Y: 2}, nil
 			}).
 			Property("version", ctx.String("1.0.0")).
@@ -493,10 +493,10 @@ func TestBridgeClassMethodErrors(t *testing.T) {
 
 		// MODIFIED FOR SCHEME C: Create class with new constructor signature
 		constructor, _, err := NewClassBuilder("TestClass").
-			Constructor(func(ctx *Context, instance Value, args []Value) (interface{}, error) {
+			Constructor(func(ctx *Context, instance *Value, args []*Value) (interface{}, error) {
 				return &Point{X: 1, Y: 2}, nil
 			}).
-			Method("testMethod", func(ctx *Context, this Value, args []Value) Value {
+			Method("testMethod", func(ctx *Context, this *Value, args []*Value) *Value {
 				return ctx.String("method called")
 			}).
 			Build(ctx)
@@ -547,10 +547,10 @@ func TestBridgeClassMethodErrors(t *testing.T) {
 
 		// MODIFIED FOR SCHEME C: Create class with new constructor signature
 		constructor, _, err := NewClassBuilder("TestClass").
-			Constructor(func(ctx *Context, instance Value, args []Value) (interface{}, error) {
+			Constructor(func(ctx *Context, instance *Value, args []*Value) (interface{}, error) {
 				return &Point{X: 1, Y: 2}, nil
 			}).
-			Method("testMethod", func(ctx *Context, this Value, args []Value) Value {
+			Method("testMethod", func(ctx *Context, this *Value, args []*Value) *Value {
 				return ctx.String("method called")
 			}).
 			Build(ctx)
@@ -598,10 +598,10 @@ func TestBridgeClassMethodErrors(t *testing.T) {
 
 		// MODIFIED FOR SCHEME C: Create class with new constructor signature
 		constructor, _, err := NewClassBuilder("TestClass").
-			Constructor(func(ctx *Context, instance Value, args []Value) (interface{}, error) {
+			Constructor(func(ctx *Context, instance *Value, args []*Value) (interface{}, error) {
 				return &Point{X: 1, Y: 2}, nil
 			}).
-			Method("testMethod", func(ctx *Context, this Value, args []Value) Value {
+			Method("testMethod", func(ctx *Context, this *Value, args []*Value) *Value {
 				return ctx.String("method called")
 			}).
 			Build(ctx)
@@ -693,10 +693,10 @@ func TestBridgeClassGetterErrors(t *testing.T) {
 
 		// MODIFIED FOR SCHEME C: Create class with new constructor signature
 		constructor, _, err := NewClassBuilder("TestClass").
-			Constructor(func(ctx *Context, instance Value, args []Value) (interface{}, error) {
+			Constructor(func(ctx *Context, instance *Value, args []*Value) (interface{}, error) {
 				return &Point{X: 1, Y: 2}, nil
 			}).
-			Accessor("testProp", func(ctx *Context, this Value) Value {
+			Accessor("testProp", func(ctx *Context, this *Value) *Value {
 				return ctx.String("getter called")
 			}, nil).
 			Build(ctx)
@@ -747,10 +747,10 @@ func TestBridgeClassGetterErrors(t *testing.T) {
 
 		// MODIFIED FOR SCHEME C: Create class with new constructor signature
 		constructor, _, err := NewClassBuilder("TestClass").
-			Constructor(func(ctx *Context, instance Value, args []Value) (interface{}, error) {
+			Constructor(func(ctx *Context, instance *Value, args []*Value) (interface{}, error) {
 				return &Point{X: 1, Y: 2}, nil
 			}).
-			Accessor("testProp", func(ctx *Context, this Value) Value {
+			Accessor("testProp", func(ctx *Context, this *Value) *Value {
 				return ctx.String("getter called")
 			}, nil).
 			Build(ctx)
@@ -798,10 +798,10 @@ func TestBridgeClassGetterErrors(t *testing.T) {
 
 		// MODIFIED FOR SCHEME C: Create class with new constructor signature
 		constructor, _, err := NewClassBuilder("TestClass").
-			Constructor(func(ctx *Context, instance Value, args []Value) (interface{}, error) {
+			Constructor(func(ctx *Context, instance *Value, args []*Value) (interface{}, error) {
 				return &Point{X: 1, Y: 2}, nil
 			}).
-			Accessor("testProp", func(ctx *Context, this Value) Value {
+			Accessor("testProp", func(ctx *Context, this *Value) *Value {
 				return ctx.String("getter called")
 			}, nil).
 			Build(ctx)
@@ -893,10 +893,10 @@ func TestBridgeClassSetterErrors(t *testing.T) {
 
 		// MODIFIED FOR SCHEME C: Create class with new constructor signature
 		constructor, _, err := NewClassBuilder("TestClass").
-			Constructor(func(ctx *Context, instance Value, args []Value) (interface{}, error) {
+			Constructor(func(ctx *Context, instance *Value, args []*Value) (interface{}, error) {
 				return &Point{X: 1, Y: 2}, nil
 			}).
-			Accessor("testProp", nil, func(ctx *Context, this Value, value Value) Value {
+			Accessor("testProp", nil, func(ctx *Context, this *Value, value *Value) *Value {
 				return ctx.Undefined()
 			}).
 			Build(ctx)
@@ -948,10 +948,10 @@ func TestBridgeClassSetterErrors(t *testing.T) {
 
 		// MODIFIED FOR SCHEME C: Create class with new constructor signature
 		constructor, _, err := NewClassBuilder("TestClass").
-			Constructor(func(ctx *Context, instance Value, args []Value) (interface{}, error) {
+			Constructor(func(ctx *Context, instance *Value, args []*Value) (interface{}, error) {
 				return &Point{X: 1, Y: 2}, nil
 			}).
-			Accessor("testProp", nil, func(ctx *Context, this Value, value Value) Value {
+			Accessor("testProp", nil, func(ctx *Context, this *Value, value *Value) *Value {
 				return ctx.Undefined()
 			}).
 			Build(ctx)
@@ -1000,10 +1000,10 @@ func TestBridgeClassSetterErrors(t *testing.T) {
 
 		// MODIFIED FOR SCHEME C: Create class with new constructor signature
 		constructor, _, err := NewClassBuilder("TestClass").
-			Constructor(func(ctx *Context, instance Value, args []Value) (interface{}, error) {
+			Constructor(func(ctx *Context, instance *Value, args []*Value) (interface{}, error) {
 				return &Point{X: 1, Y: 2}, nil
 			}).
-			Accessor("testProp", nil, func(ctx *Context, this Value, value Value) Value {
+			Accessor("testProp", nil, func(ctx *Context, this *Value, value *Value) *Value {
 				return ctx.Undefined()
 			}).
 			Build(ctx)
@@ -1107,7 +1107,7 @@ func TestBridgeClassFinalizerContextIteration(t *testing.T) {
 		// Create classes in all contexts
 		for i, ctx := range []*Context{ctx1, ctx2, ctx3} {
 			constructor, _, err := NewClassBuilder(fmt.Sprintf("TestClass%d", i)).
-				Constructor(func(ctx *Context, instance Value, args []Value) (interface{}, error) {
+				Constructor(func(ctx *Context, instance *Value, args []*Value) (interface{}, error) {
 					// MODIFIED FOR SCHEME C: Return Go object for automatic association
 					// Create a simple object that implements finalizer
 					obj := &Point{X: float64(i), Y: float64(i)}
@@ -1145,7 +1145,7 @@ func TestBridgeCreateClassInstanceEdgeCases(t *testing.T) {
 
 		// Create class without instance properties
 		constructor, _, err := NewClassBuilder("NoPropsClass").
-			Constructor(func(ctx *Context, instance Value, args []Value) (interface{}, error) {
+			Constructor(func(ctx *Context, instance *Value, args []*Value) (interface{}, error) {
 				return &Point{X: 1, Y: 2}, nil
 			}).
 			Build(ctx)
@@ -1173,7 +1173,7 @@ func TestBridgeCreateClassInstanceEdgeCases(t *testing.T) {
 
 		// Create class with many instance properties
 		builder := NewClassBuilder("ManyPropsClass").
-			Constructor(func(ctx *Context, instance Value, args []Value) (interface{}, error) {
+			Constructor(func(ctx *Context, instance *Value, args []*Value) (interface{}, error) {
 				return &Point{X: 1, Y: 2}, nil
 			})
 
@@ -1213,7 +1213,7 @@ func TestBridgeCreateClassInstanceFailures(t *testing.T) {
 
 		// Create class
 		constructor, originalClassID, err := NewClassBuilder("TestClass").
-			Constructor(func(ctx *Context, instance Value, args []Value) (interface{}, error) {
+			Constructor(func(ctx *Context, instance *Value, args []*Value) (interface{}, error) {
 				return &Point{X: 1, Y: 2}, nil
 			}).
 			Build(ctx)

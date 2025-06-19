@@ -76,17 +76,18 @@ func getRuntimeFromJS(cRt *C.JSRuntime) *Runtime {
 // convertCArgsToGoValues converts C arguments to Go Value slice (unified helper)
 // Reused by all proxy functions for consistent parameter conversion
 // Note: Works with both JSValue and JSValueConst since we only read values
-func convertCArgsToGoValues(argc C.int, argv *C.JSValue, ctx *Context) []Value {
+// MODIFIED: Returns []*Value instead of []Value
+func convertCArgsToGoValues(argc C.int, argv *C.JSValue, ctx *Context) []*Value {
 	if argc == 0 {
 		return nil
 	}
 
 	// Use unsafe.Slice to convert C array to Go slice (Go 1.17+)
 	cArgs := unsafe.Slice(argv, int(argc))
-	goArgs := make([]Value, int(argc))
+	goArgs := make([]*Value, int(argc))
 
 	for i, cArg := range cArgs {
-		goArgs[i] = Value{ctx: ctx, ref: cArg}
+		goArgs[i] = &Value{ctx: ctx, ref: cArg}
 	}
 
 	return goArgs
@@ -206,6 +207,7 @@ func goInterruptHandler(runtimePtr *C.JSRuntime) C.int {
 // =============================================================================
 
 // New efficient proxy function for regular functions using HandleStore
+// MODIFIED: Function signature changed to use *Value
 //
 //export goFunctionProxy
 func goFunctionProxy(ctx *C.JSContext, thisVal C.JSValueConst,
@@ -217,15 +219,16 @@ func goFunctionProxy(ctx *C.JSContext, thisVal C.JSValueConst,
 		return throwProxyError(ctx, *err)
 	}
 
-	// Type assertion to function signature
-	goFn, ok := fn.(func(*Context, Value, []Value) Value)
+	// Type assertion to function signature - MODIFIED: now uses pointers
+	goFn, ok := fn.(func(*Context, *Value, []*Value) *Value)
 	if !ok {
 		return throwProxyError(ctx, errInvalidFunctionType)
 	}
 
-	// Convert arguments and call function
+	// Convert arguments and call function - MODIFIED: now uses pointer conversion
 	args := convertCArgsToGoValues(argc, (*C.JSValue)(argv), goCtx)
-	result := goFn(goCtx, Value{ctx: goCtx, ref: thisVal}, args)
+	thisValue := &Value{ctx: goCtx, ref: thisVal}
+	result := goFn(goCtx, thisValue, args)
 	return result.ref
 }
 
@@ -260,7 +263,7 @@ func goClassConstructorProxy(ctx *C.JSContext, newTarget C.JSValue,
 		// This should not happen in normal cases since we register constructors
 		// But provide fallback for defensive programming
 		// return throwProxyError(ctx, proxyError{"InternalError", "Class ID not found for constructor"})
-		v := Value{ctx: goCtx, ref: newTarget}
+		v := &Value{ctx: goCtx, ref: newTarget}
 		classID, exists = v.resolveClassIDFromInheritance()
 	}
 	if !exists {
@@ -315,7 +318,8 @@ func goClassConstructorProxy(ctx *C.JSContext, newTarget C.JSValue,
 
 	// SCHEME C STEP 3: Call constructor function with pre-created instance
 	// Constructor receives the pre-created instance and returns Go object to associate
-	instanceValue := Value{ctx: goCtx, ref: instance}
+	// MODIFIED: now uses pointer conversion
+	instanceValue := &Value{ctx: goCtx, ref: instance}
 	args := convertCArgsToGoValues(argc, argv, goCtx)
 	goObj, err := builder.constructor(goCtx, instanceValue, args)
 	if err != nil {
@@ -336,6 +340,7 @@ func goClassConstructorProxy(ctx *C.JSContext, newTarget C.JSValue,
 
 // Class method proxy - handles both instance and static methods
 // Corresponds to QuickJS JSCFunctionType.generic_magic
+// MODIFIED: Method signature changed to use *Value
 //
 //export goClassMethodProxy
 func goClassMethodProxy(ctx *C.JSContext, thisVal C.JSValue,
@@ -347,14 +352,14 @@ func goClassMethodProxy(ctx *C.JSContext, thisVal C.JSValue,
 		return throwProxyError(ctx, *err)
 	}
 
-	// Type assertion to ClassMethodFunc signature
+	// Type assertion to ClassMethodFunc signature - MODIFIED: now uses pointers
 	method, ok := fn.(ClassMethodFunc)
 	if !ok {
 		return throwProxyError(ctx, errInvalidMethodType)
 	}
 
-	// Convert parameters and call method
-	thisValue := Value{ctx: goCtx, ref: thisVal}
+	// Convert parameters and call method - MODIFIED: now uses pointer conversion
+	thisValue := &Value{ctx: goCtx, ref: thisVal}
 	args := convertCArgsToGoValues(argc, argv, goCtx)
 	result := method(goCtx, thisValue, args)
 	return result.ref
@@ -362,6 +367,7 @@ func goClassMethodProxy(ctx *C.JSContext, thisVal C.JSValue,
 
 // Class property getter proxy
 // Corresponds to QuickJS JSCFunctionType.getter_magic
+// MODIFIED: Getter signature changed to use *Value
 //
 //export goClassGetterProxy
 func goClassGetterProxy(ctx *C.JSContext, thisVal C.JSValue, magic C.int) C.JSValue {
@@ -372,20 +378,21 @@ func goClassGetterProxy(ctx *C.JSContext, thisVal C.JSValue, magic C.int) C.JSVa
 		return throwProxyError(ctx, *err)
 	}
 
-	// Type assertion to ClassGetterFunc signature
+	// Type assertion to ClassGetterFunc signature - MODIFIED: now uses pointers
 	getter, ok := fn.(ClassGetterFunc)
 	if !ok {
 		return throwProxyError(ctx, errInvalidGetterType)
 	}
 
-	// Call getter with this value only
-	thisValue := Value{ctx: goCtx, ref: thisVal}
+	// Call getter with this value only - MODIFIED: now uses pointer conversion
+	thisValue := &Value{ctx: goCtx, ref: thisVal}
 	result := getter(goCtx, thisValue)
 	return result.ref
 }
 
 // Class property setter proxy
 // Corresponds to QuickJS JSCFunctionType.setter_magic
+// MODIFIED: Setter signature changed to use *Value
 //
 //export goClassSetterProxy
 func goClassSetterProxy(ctx *C.JSContext, thisVal C.JSValue,
@@ -397,15 +404,15 @@ func goClassSetterProxy(ctx *C.JSContext, thisVal C.JSValue,
 		return throwProxyError(ctx, *err)
 	}
 
-	// Type assertion to ClassSetterFunc signature
+	// Type assertion to ClassSetterFunc signature - MODIFIED: now uses pointers
 	setter, ok := fn.(ClassSetterFunc)
 	if !ok {
 		return throwProxyError(ctx, errInvalidSetterType)
 	}
 
-	// Call setter with this value and new value
-	thisValue := Value{ctx: goCtx, ref: thisVal}
-	setValue := Value{ctx: goCtx, ref: val}
+	// Call setter with this value and new value - MODIFIED: now uses pointer conversion
+	thisValue := &Value{ctx: goCtx, ref: thisVal}
+	setValue := &Value{ctx: goCtx, ref: val}
 	result := setter(goCtx, thisValue, setValue)
 	return result.ref
 }

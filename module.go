@@ -18,7 +18,7 @@ import "C"
 // ModuleExportEntry represents a single module export
 type ModuleExportEntry struct {
 	Name  string // Export name ("default" for default export)
-	Value Value  // Export value
+	Value *Value // Export value - changed to pointer type
 }
 
 // ModuleBuilder provides a fluent API for building JavaScript modules
@@ -44,10 +44,10 @@ func NewModuleBuilder(name string) *ModuleBuilder {
 // Export adds an export to the module
 // This is the core method that handles all types of exports including default
 // For default export, use name="default"
-func (mb *ModuleBuilder) Export(name string, value Value) *ModuleBuilder {
+func (mb *ModuleBuilder) Export(name string, value *Value) *ModuleBuilder {
 	mb.exports = append(mb.exports, ModuleExportEntry{
 		Name:  name,
-		Value: value,
+		Value: value, // Now expects *Value
 	})
 	return mb
 }

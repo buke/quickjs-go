@@ -14,29 +14,29 @@ type Atom struct {
 }
 
 // Free decrements the reference count of the atom.
-func (a Atom) Free() {
+func (a *Atom) Free() {
 	C.JS_FreeAtom(a.ctx.ref, a.ref)
 }
 
 // String returns the string representation of the atom.
-func (a Atom) String() string {
+func (a *Atom) String() string {
 	ptr := C.JS_AtomToCString(a.ctx.ref, a.ref)
 	defer C.JS_FreeCString(a.ctx.ref, ptr)
 	return C.GoString(ptr)
 }
 
 // Value returns the value representation of the atom.
-func (a Atom) Value() Value {
-	return Value{ctx: a.ctx, ref: C.JS_AtomToValue(a.ctx.ref, a.ref)}
+func (a *Atom) Value() *Value {
+	return &Value{ctx: a.ctx, ref: C.JS_AtomToValue(a.ctx.ref, a.ref)}
 }
 
 // propertyEnum is a wrapper around JSAtom for property enumeration.
 type propertyEnum struct {
 	IsEnumerable bool
-	atom         Atom
+	atom         *Atom
 }
 
 // String returns the atom string representation of the property.
-func (p propertyEnum) String() string {
+func (p *propertyEnum) String() string {
 	return p.atom.String()
 }

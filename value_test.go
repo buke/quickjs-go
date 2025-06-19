@@ -19,17 +19,17 @@ func TestValueBasics(t *testing.T) {
 	// Test basic type creation and checking
 	testCases := []struct {
 		name      string
-		createVal func() Value
-		checkFunc func(Value) bool
+		createVal func() *Value     // Changed to return pointer
+		checkFunc func(*Value) bool // Changed parameter to pointer
 	}{
-		{"Number", func() Value { return ctx.Int32(42) }, func(v Value) bool { return v.IsNumber() }},
-		{"String", func() Value { return ctx.String("test") }, func(v Value) bool { return v.IsString() }},
-		{"Boolean", func() Value { return ctx.Bool(true) }, func(v Value) bool { return v.IsBool() }},
-		{"Null", func() Value { return ctx.Null() }, func(v Value) bool { return v.IsNull() }},
-		{"Undefined", func() Value { return ctx.Undefined() }, func(v Value) bool { return v.IsUndefined() }},
-		{"Uninitialized", func() Value { return ctx.Uninitialized() }, func(v Value) bool { return v.IsUninitialized() }},
-		{"Object", func() Value { return ctx.Object() }, func(v Value) bool { return v.IsObject() }},
-		{"BigInt", func() Value { return ctx.BigInt64(123456789) }, func(v Value) bool { return v.IsBigInt() }},
+		{"Number", func() *Value { return ctx.Int32(42) }, func(v *Value) bool { return v.IsNumber() }},
+		{"String", func() *Value { return ctx.String("test") }, func(v *Value) bool { return v.IsString() }},
+		{"Boolean", func() *Value { return ctx.Bool(true) }, func(v *Value) bool { return v.IsBool() }},
+		{"Null", func() *Value { return ctx.Null() }, func(v *Value) bool { return v.IsNull() }},
+		{"Undefined", func() *Value { return ctx.Undefined() }, func(v *Value) bool { return v.IsUndefined() }},
+		{"Uninitialized", func() *Value { return ctx.Uninitialized() }, func(v *Value) bool { return v.IsUninitialized() }},
+		{"Object", func() *Value { return ctx.Object() }, func(v *Value) bool { return v.IsObject() }},
+		{"BigInt", func() *Value { return ctx.BigInt64(123456789) }, func(v *Value) bool { return v.IsBigInt() }},
 	}
 
 	for _, tc := range testCases {
@@ -64,47 +64,47 @@ func TestValueConversions(t *testing.T) {
 	// Test basic conversions
 	tests := []struct {
 		name           string
-		createVal      func() Value
-		testFunc       func(Value)
-		testDeprecated func(Value) // Test deprecated methods for coverage
+		createVal      func() *Value // Changed to return pointer
+		testFunc       func(*Value)  // Changed parameter to pointer
+		testDeprecated func(*Value)  // Changed parameter to pointer - Test deprecated methods for coverage
 	}{
 		{
 			name:           "Bool",
-			createVal:      func() Value { return ctx.Bool(true) },
-			testFunc:       func(v Value) { require.True(t, v.ToBool()) },
-			testDeprecated: func(v Value) { require.True(t, v.Bool()) },
+			createVal:      func() *Value { return ctx.Bool(true) },
+			testFunc:       func(v *Value) { require.True(t, v.ToBool()) },
+			testDeprecated: func(v *Value) { require.True(t, v.Bool()) },
 		},
 		{
 			name:      "String",
-			createVal: func() Value { return ctx.String("Hello") },
-			testFunc: func(v Value) {
+			createVal: func() *Value { return ctx.String("Hello") },
+			testFunc: func(v *Value) {
 				require.Equal(t, "Hello", v.ToString())
 				require.Equal(t, "Hello", v.String()) // String() calls ToString()
 			},
 		},
 		{
 			name:           "Int32",
-			createVal:      func() Value { return ctx.Int32(42) },
-			testFunc:       func(v Value) { require.Equal(t, int32(42), v.ToInt32()) },
-			testDeprecated: func(v Value) { require.Equal(t, int32(42), v.Int32()) },
+			createVal:      func() *Value { return ctx.Int32(42) },
+			testFunc:       func(v *Value) { require.Equal(t, int32(42), v.ToInt32()) },
+			testDeprecated: func(v *Value) { require.Equal(t, int32(42), v.Int32()) },
 		},
 		{
 			name:           "Int64",
-			createVal:      func() Value { return ctx.Int64(1234567890) },
-			testFunc:       func(v Value) { require.Equal(t, int64(1234567890), v.ToInt64()) },
-			testDeprecated: func(v Value) { require.Equal(t, int64(1234567890), v.Int64()) },
+			createVal:      func() *Value { return ctx.Int64(1234567890) },
+			testFunc:       func(v *Value) { require.Equal(t, int64(1234567890), v.ToInt64()) },
+			testDeprecated: func(v *Value) { require.Equal(t, int64(1234567890), v.Int64()) },
 		},
 		{
 			name:           "Uint32",
-			createVal:      func() Value { return ctx.Uint32(4294967295) },
-			testFunc:       func(v Value) { require.Equal(t, uint32(4294967295), v.ToUint32()) },
-			testDeprecated: func(v Value) { require.Equal(t, uint32(4294967295), v.Uint32()) },
+			createVal:      func() *Value { return ctx.Uint32(4294967295) },
+			testFunc:       func(v *Value) { require.Equal(t, uint32(4294967295), v.ToUint32()) },
+			testDeprecated: func(v *Value) { require.Equal(t, uint32(4294967295), v.Uint32()) },
 		},
 		{
 			name:           "Float64",
-			createVal:      func() Value { return ctx.Float64(3.14159) },
-			testFunc:       func(v Value) { require.InDelta(t, 3.14159, v.ToFloat64(), 0.00001) },
-			testDeprecated: func(v Value) { require.InDelta(t, 3.14159, v.Float64(), 0.00001) },
+			createVal:      func() *Value { return ctx.Float64(3.14159) },
+			testFunc:       func(v *Value) { require.InDelta(t, 3.14159, v.ToFloat64(), 0.00001) },
+			testDeprecated: func(v *Value) { require.InDelta(t, 3.14159, v.Float64(), 0.00001) },
 		},
 	}
 
@@ -153,14 +153,14 @@ func TestValueJSON(t *testing.T) {
 	// Test various value types
 	testCases := []struct {
 		name      string
-		createVal func() Value
+		createVal func() *Value // Changed to return pointer
 		expected  string
 	}{
-		{"String", func() Value { return ctx.String("hello") }, `"hello"`},
-		{"Null", func() Value { return ctx.Null() }, "null"},
-		{"True", func() Value { return ctx.Bool(true) }, "true"},
-		{"False", func() Value { return ctx.Bool(false) }, "false"},
-		{"Number", func() Value { return ctx.Int32(42) }, "42"},
+		{"String", func() *Value { return ctx.String("hello") }, `"hello"`},
+		{"Null", func() *Value { return ctx.Null() }, "null"},
+		{"True", func() *Value { return ctx.Bool(true) }, "true"},
+		{"False", func() *Value { return ctx.Bool(false) }, "false"},
+		{"Number", func() *Value { return ctx.Int32(42) }, "42"},
 	}
 
 	for _, tc := range testCases {
@@ -208,12 +208,12 @@ func TestValueArrayBuffer(t *testing.T) {
 	// Test error cases with non-ArrayBuffer types
 	errorTests := []struct {
 		name      string
-		createVal func() Value
+		createVal func() *Value // Changed to return pointer
 	}{
-		{"Object", func() Value { return ctx.Object() }},
-		{"String", func() Value { return ctx.String("not an array buffer") }},
-		{"Number", func() Value { return ctx.Int32(42) }},
-		{"Null", func() Value { return ctx.Null() }},
+		{"Object", func() *Value { return ctx.Object() }},
+		{"String", func() *Value { return ctx.String("not an array buffer") }},
+		{"Number", func() *Value { return ctx.Int32(42) }},
+		{"Null", func() *Value { return ctx.Null() }},
 	}
 
 	for _, tt := range errorTests {
@@ -237,21 +237,21 @@ func TestValueTypedArrays(t *testing.T) {
 	typedArrayTests := []struct {
 		name      string
 		jsCode    string
-		checkFunc func(Value) bool
+		checkFunc func(*Value) bool // Changed parameter to pointer
 		isTyped   bool
 	}{
-		{"Int8Array", "new Int8Array([1, 2, 3])", func(v Value) bool { return v.IsInt8Array() }, true},
-		{"Uint8Array", "new Uint8Array([1, 2, 3])", func(v Value) bool { return v.IsUint8Array() }, true},
-		{"Uint8ClampedArray", "new Uint8ClampedArray([1, 2, 3])", func(v Value) bool { return v.IsUint8ClampedArray() }, true},
-		{"Int16Array", "new Int16Array([1, 2, 3])", func(v Value) bool { return v.IsInt16Array() }, true},
-		{"Uint16Array", "new Uint16Array([1, 2, 3])", func(v Value) bool { return v.IsUint16Array() }, true},
-		{"Int32Array", "new Int32Array([1, 2, 3])", func(v Value) bool { return v.IsInt32Array() }, true},
-		{"Uint32Array", "new Uint32Array([1, 2, 3])", func(v Value) bool { return v.IsUint32Array() }, true},
-		{"Float32Array", "new Float32Array([1.5, 2.5, 3.5])", func(v Value) bool { return v.IsFloat32Array() }, true},
-		{"Float64Array", "new Float64Array([1.5, 2.5, 3.5])", func(v Value) bool { return v.IsFloat64Array() }, true},
-		{"BigInt64Array", "new BigInt64Array([1n, 2n, 3n])", func(v Value) bool { return v.IsBigInt64Array() }, true},
-		{"BigUint64Array", "new BigUint64Array([1n, 2n, 3n])", func(v Value) bool { return v.IsBigUint64Array() }, true},
-		{"RegularArray", "[1, 2, 3]", func(v Value) bool { return v.IsInt8Array() }, false},
+		{"Int8Array", "new Int8Array([1, 2, 3])", func(v *Value) bool { return v.IsInt8Array() }, true},
+		{"Uint8Array", "new Uint8Array([1, 2, 3])", func(v *Value) bool { return v.IsUint8Array() }, true},
+		{"Uint8ClampedArray", "new Uint8ClampedArray([1, 2, 3])", func(v *Value) bool { return v.IsUint8ClampedArray() }, true},
+		{"Int16Array", "new Int16Array([1, 2, 3])", func(v *Value) bool { return v.IsInt16Array() }, true},
+		{"Uint16Array", "new Uint16Array([1, 2, 3])", func(v *Value) bool { return v.IsUint16Array() }, true},
+		{"Int32Array", "new Int32Array([1, 2, 3])", func(v *Value) bool { return v.IsInt32Array() }, true},
+		{"Uint32Array", "new Uint32Array([1, 2, 3])", func(v *Value) bool { return v.IsUint32Array() }, true},
+		{"Float32Array", "new Float32Array([1.5, 2.5, 3.5])", func(v *Value) bool { return v.IsFloat32Array() }, true},
+		{"Float64Array", "new Float64Array([1.5, 2.5, 3.5])", func(v *Value) bool { return v.IsFloat64Array() }, true},
+		{"BigInt64Array", "new BigInt64Array([1n, 2n, 3n])", func(v *Value) bool { return v.IsBigInt64Array() }, true},
+		{"BigUint64Array", "new BigUint64Array([1n, 2n, 3n])", func(v *Value) bool { return v.IsBigUint64Array() }, true},
+		{"RegularArray", "[1, 2, 3]", func(v *Value) bool { return v.IsInt8Array() }, false},
 	}
 
 	for _, tt := range typedArrayTests {
@@ -273,37 +273,37 @@ func TestValueTypedArrays(t *testing.T) {
 	conversionTests := []struct {
 		name        string
 		jsCode      string
-		convertFunc func(Value) (interface{}, error)
+		convertFunc func(*Value) (interface{}, error) // Changed parameter to pointer
 		expected    interface{}
 	}{
 		{
 			name:        "Int8Array",
 			jsCode:      "new Int8Array([-128, 0, 127])",
-			convertFunc: func(v Value) (interface{}, error) { return v.ToInt8Array() },
+			convertFunc: func(v *Value) (interface{}, error) { return v.ToInt8Array() },
 			expected:    []int8{-128, 0, 127},
 		},
 		{
 			name:        "Uint8Array",
 			jsCode:      "new Uint8Array([0, 128, 255])",
-			convertFunc: func(v Value) (interface{}, error) { return v.ToUint8Array() },
+			convertFunc: func(v *Value) (interface{}, error) { return v.ToUint8Array() },
 			expected:    []uint8{0, 128, 255},
 		},
 		{
 			name:        "Int32Array",
 			jsCode:      "new Int32Array([-2147483648, 0, 2147483647])",
-			convertFunc: func(v Value) (interface{}, error) { return v.ToInt32Array() },
+			convertFunc: func(v *Value) (interface{}, error) { return v.ToInt32Array() },
 			expected:    []int32{-2147483648, 0, 2147483647},
 		},
 		{
 			name:        "Float32Array",
 			jsCode:      "new Float32Array([1.5, 2.5, 3.14159])",
-			convertFunc: func(v Value) (interface{}, error) { return v.ToFloat32Array() },
+			convertFunc: func(v *Value) (interface{}, error) { return v.ToFloat32Array() },
 			expected:    []float32{1.5, 2.5, 3.14159},
 		},
 		{
 			name:        "BigInt64Array",
 			jsCode:      "new BigInt64Array([-9223372036854775808n, 0n, 9223372036854775807n])",
-			convertFunc: func(v Value) (interface{}, error) { return v.ToBigInt64Array() },
+			convertFunc: func(v *Value) (interface{}, error) { return v.ToBigInt64Array() },
 			expected:    []int64{-9223372036854775808, 0, 9223372036854775807},
 		},
 	}
@@ -340,29 +340,29 @@ func TestValueTypedArrays(t *testing.T) {
 	additionalTests := []struct {
 		name   string
 		jsCode string
-		testFn func(Value)
+		testFn func(*Value) // Changed parameter to pointer
 	}{
-		{"Uint8ClampedArray", "new Uint8ClampedArray([0, 128, 255])", func(v Value) {
+		{"Uint8ClampedArray", "new Uint8ClampedArray([0, 128, 255])", func(v *Value) {
 			result, err := v.ToUint8Array() // Uint8ClampedArray uses same method
 			require.NoError(t, err)
 			require.Equal(t, []uint8{0, 128, 255}, result)
 		}},
-		{"Uint16Array", "new Uint16Array([0, 32768, 65535])", func(v Value) {
+		{"Uint16Array", "new Uint16Array([0, 32768, 65535])", func(v *Value) {
 			result, err := v.ToUint16Array()
 			require.NoError(t, err)
 			require.Equal(t, []uint16{0, 32768, 65535}, result)
 		}},
-		{"Int16Array", "new Int16Array([-32768, 0, 32767])", func(v Value) {
+		{"Int16Array", "new Int16Array([-32768, 0, 32767])", func(v *Value) {
 			result, err := v.ToInt16Array()
 			require.NoError(t, err)
 			require.Equal(t, []int16{-32768, 0, 32767}, result)
 		}},
-		{"Uint32Array", "new Uint32Array([0, 2147483648, 4294967295])", func(v Value) {
+		{"Uint32Array", "new Uint32Array([0, 2147483648, 4294967295])", func(v *Value) {
 			result, err := v.ToUint32Array()
 			require.NoError(t, err)
 			require.Equal(t, []uint32{0, 2147483648, 4294967295}, result)
 		}},
-		{"Float64Array", "new Float64Array([1.5, 2.5, 3.141592653589793])", func(v Value) {
+		{"Float64Array", "new Float64Array([1.5, 2.5, 3.141592653589793])", func(v *Value) {
 			result, err := v.ToFloat64Array()
 			require.NoError(t, err)
 			expected := []float64{1.5, 2.5, 3.141592653589793}
@@ -371,7 +371,7 @@ func TestValueTypedArrays(t *testing.T) {
 				require.InDelta(t, exp, result[i], 1e-10)
 			}
 		}},
-		{"BigUint64Array", "new BigUint64Array([0n, 9223372036854775808n, 18446744073709551615n])", func(v Value) {
+		{"BigUint64Array", "new BigUint64Array([0n, 9223372036854775808n, 18446744073709551615n])", func(v *Value) {
 			result, err := v.ToBigUint64Array()
 			require.NoError(t, err)
 			require.Equal(t, []uint64{0, 9223372036854775808, 18446744073709551615}, result)
@@ -451,8 +451,8 @@ func TestValueFunctionCalls(t *testing.T) {
 	obj := ctx.Object()
 	defer obj.Free()
 
-	// Test function calls
-	addFunc := ctx.Function(func(ctx *Context, this Value, args []Value) Value {
+	// Test function calls - UPDATED: function signature now uses pointers
+	addFunc := ctx.Function(func(ctx *Context, this *Value, args []*Value) *Value {
 		if len(args) < 2 {
 			return ctx.Int32(0)
 		}
@@ -466,7 +466,7 @@ func TestValueFunctionCalls(t *testing.T) {
 	require.Equal(t, int32(7), result.ToInt32())
 
 	// Call without arguments (covers len(cargs) == 0 branch)
-	noArgsFunc := ctx.Function(func(ctx *Context, this Value, args []Value) Value {
+	noArgsFunc := ctx.Function(func(ctx *Context, this *Value, args []*Value) *Value {
 		return ctx.String("no arguments")
 	})
 	obj.Set("noArgs", noArgsFunc)
@@ -574,12 +574,12 @@ func TestValueInstanceof(t *testing.T) {
 	// Test false cases to ensure coverage
 	testVals := []struct {
 		name      string
-		createVal func() Value
+		createVal func() *Value // Changed to return pointer
 	}{
-		{"String", func() Value { return ctx.String("test") }},
-		{"Number", func() Value { return ctx.Int32(42) }},
-		{"Null", func() Value { return ctx.Null() }},
-		{"Undefined", func() Value { return ctx.Undefined() }},
+		{"String", func() *Value { return ctx.String("test") }},
+		{"Number", func() *Value { return ctx.Int32(42) }},
+		{"Null", func() *Value { return ctx.Null() }},
+		{"Undefined", func() *Value { return ctx.Undefined() }},
 	}
 
 	for _, tv := range testVals {
@@ -600,8 +600,8 @@ func TestValueSpecialTypes(t *testing.T) {
 	ctx := rt.NewContext()
 	defer ctx.Close()
 
-	// Test function
-	funcVal := ctx.Function(func(ctx *Context, this Value, args []Value) Value {
+	// Test function - UPDATED: function signature now uses pointers
+	funcVal := ctx.Function(func(ctx *Context, this *Value, args []*Value) *Value {
 		return ctx.Null()
 	})
 	defer funcVal.Free()
@@ -636,11 +636,11 @@ func TestValueSpecialTypes(t *testing.T) {
 	// Test non-Promise objects for IsPromise method (covers return false branch)
 	nonPromiseTests := []struct {
 		name      string
-		createVal func() Value
+		createVal func() *Value // Changed to return pointer
 	}{
-		{"Object", func() Value { return ctx.Object() }},
-		{"String", func() Value { return ctx.String("not a promise") }},
-		{"Number", func() Value { return ctx.Int32(42) }},
+		{"Object", func() *Value { return ctx.Object() }},
+		{"String", func() *Value { return ctx.String("not a promise") }},
+		{"Number", func() *Value { return ctx.Int32(42) }},
 	}
 
 	for _, tt := range nonPromiseTests {
@@ -671,6 +671,12 @@ func TestValueSpecialTypes(t *testing.T) {
 	require.NoError(t, err)
 	defer nanVal.Free()
 	require.True(t, nanVal.IsNumber())
+
+	// Test nil value for special type checks
+	var nilValue *Value
+	require.False(t, nilValue.IsPromise(), "nil value should not be a promise")
+	require.False(t, nilValue.IsTypedArray(), "nil value should not be a typed array")
+
 }
 
 // TestPromiseState tests promise state handling
@@ -756,12 +762,12 @@ func TestValueClassInstanceEdgeCases(t *testing.T) {
 	// Test non-object values to cover !v.IsObject() branches
 	nonObjects := []struct {
 		name      string
-		createVal func() Value
+		createVal func() *Value // Changed to return pointer
 	}{
-		{"String", func() Value { return ctx.String("test") }},
-		{"Number", func() Value { return ctx.Int32(42) }},
-		{"Null", func() Value { return ctx.Null() }},
-		{"Undefined", func() Value { return ctx.Undefined() }},
+		{"String", func() *Value { return ctx.String("test") }},
+		{"Number", func() *Value { return ctx.Int32(42) }},
+		{"Null", func() *Value { return ctx.Null() }},
+		{"Undefined", func() *Value { return ctx.Undefined() }},
 	}
 
 	for _, no := range nonObjects {
@@ -792,7 +798,7 @@ func TestValueClassInstanceEdgeCases(t *testing.T) {
 			val := no.createVal()
 			defer val.Free()
 
-			fn := ctx.Function(func(ctx *Context, this Value, args []Value) Value {
+			fn := ctx.Function(func(ctx *Context, this *Value, args []*Value) *Value {
 				return ctx.Null()
 			})
 			defer fn.Free()
@@ -819,7 +825,7 @@ func TestValueClassInstanceEdgeCases(t *testing.T) {
 		obj := ctx.Object()
 		defer obj.Free()
 
-		fn := ctx.Function(func(ctx *Context, this Value, args []Value) Value {
+		fn := ctx.Function(func(ctx *Context, this *Value, args []*Value) *Value {
 			return ctx.Null()
 		})
 		defer fn.Free()
@@ -831,7 +837,7 @@ func TestValueClassInstanceEdgeCases(t *testing.T) {
 	// Test GetGoObject "instance data not found in handle store" branch
 	t.Run("GetGoObject_HandleStoreManipulation", func(t *testing.T) {
 		// Create a function to get a valid object with opaque data
-		fn := ctx.Function(func(ctx *Context, this Value, args []Value) Value {
+		fn := ctx.Function(func(ctx *Context, this *Value, args []*Value) *Value {
 			return ctx.String("test")
 		})
 		defer fn.Free()
@@ -914,12 +920,12 @@ func TestValueCallConstructorEdgeCases(t *testing.T) {
 	t.Run("CallConstructor_VariousNonConstructors", func(t *testing.T) {
 		testCases := []struct {
 			name string
-			val  func() Value
+			val  func() *Value // Changed to return pointer
 		}{
-			{"Number", func() Value { return ctx.Int32(42) }},
-			{"Boolean", func() Value { return ctx.Bool(true) }},
-			{"Null", func() Value { return ctx.Null() }},
-			{"Undefined", func() Value { return ctx.Undefined() }},
+			{"Number", func() *Value { return ctx.Int32(42) }},
+			{"Boolean", func() *Value { return ctx.Bool(true) }},
+			{"Null", func() *Value { return ctx.Null() }},
+			{"Undefined", func() *Value { return ctx.Undefined() }},
 		}
 
 		for _, tc := range testCases {
@@ -1030,14 +1036,14 @@ func TestValueCallConstructorEdgeCases(t *testing.T) {
 		builtInTests := []struct {
 			name     string
 			jsCode   string
-			args     []Value
-			validate func(Value)
+			args     []*Value     // Changed to slice of pointers
+			validate func(*Value) // Changed parameter to pointer
 		}{
 			{
 				name:   "Array",
 				jsCode: "Array",
-				args:   []Value{ctx.Int32(3)},
-				validate: func(v Value) {
+				args:   []*Value{ctx.Int32(3)},
+				validate: func(v *Value) {
 					require.True(t, v.IsArray())
 					require.Equal(t, int64(3), v.Len())
 				},
@@ -1046,7 +1052,7 @@ func TestValueCallConstructorEdgeCases(t *testing.T) {
 				name:   "Object",
 				jsCode: "Object",
 				args:   nil,
-				validate: func(v Value) {
+				validate: func(v *Value) {
 					require.True(t, v.IsObject())
 					require.False(t, v.IsArray())
 				},
@@ -1054,8 +1060,8 @@ func TestValueCallConstructorEdgeCases(t *testing.T) {
 			{
 				name:   "Date",
 				jsCode: "Date",
-				args:   []Value{ctx.String("2023-01-01")},
-				validate: func(v Value) {
+				args:   []*Value{ctx.String("2023-01-01")},
+				validate: func(v *Value) {
 					require.True(t, v.IsObject())
 					// Date objects have getTime method
 					getTime := v.Get("getTime")
@@ -1071,7 +1077,7 @@ func TestValueCallConstructorEdgeCases(t *testing.T) {
 				require.NoError(t, err)
 				defer constructor.Free()
 
-				var result Value
+				var result *Value
 				if len(tt.args) > 0 {
 					result = constructor.CallConstructor(tt.args...)
 				} else {
@@ -1087,9 +1093,9 @@ func TestValueCallConstructorEdgeCases(t *testing.T) {
 
 	// Test Case 9: Successful CallConstructor with registered class (for comparison)
 	t.Run("CallConstructor_RegisteredClass", func(t *testing.T) {
-		// Create a Point class using our class system
+		// Create a Point class using our class system - UPDATED: constructor signature now uses pointers
 		pointConstructor, _, err := NewClassBuilder("Point").
-			Constructor(func(ctx *Context, instance Value, args []Value) (interface{}, error) {
+			Constructor(func(ctx *Context, instance *Value, args []*Value) (interface{}, error) {
 				x, y := 0.0, 0.0
 				if len(args) > 0 {
 					x = args[0].Float64()
@@ -1102,7 +1108,7 @@ func TestValueCallConstructorEdgeCases(t *testing.T) {
 				point := &Point{X: x, Y: y}
 				return point, nil
 			}).
-			Method("norm", func(ctx *Context, this Value, args []Value) Value {
+			Method("norm", func(ctx *Context, this *Value, args []*Value) *Value {
 				obj, err := this.GetGoObject()
 				if err != nil {
 					return ctx.ThrowError(err)
@@ -1337,7 +1343,7 @@ func TestValueCallConstructorComprehensive(t *testing.T) {
 
 		// Create multiple instances to test performance
 		const numInstances = 100
-		instances := make([]Value, numInstances)
+		instances := make([]*Value, numInstances) // Changed to slice of pointers
 
 		for i := 0; i < numInstances; i++ {
 			instances[i] = constructor.CallConstructor(ctx.Int32(int32(i)))

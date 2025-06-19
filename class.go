@@ -63,22 +63,22 @@ type ClassFinalizer interface {
 // MODIFIED FOR SCHEME C: ClassConstructorFunc signature changed
 // Constructor now receives pre-created instance and returns Go object to associate
 // This aligns with Scheme C design where instances are pre-created with bound properties
-type ClassConstructorFunc func(ctx *Context, instance Value, args []Value) (interface{}, error)
+type ClassConstructorFunc func(ctx *Context, instance *Value, args []*Value) (interface{}, error)
 
-// ClassMethodFunc represents both instance and static methods - unchanged
+// ClassMethodFunc represents both instance and static methods - changed to use pointers
 // this parameter represents the object instance for instance methods,
 // or the constructor function for static methods
 // Corresponds to QuickJS JSCFunctionType.generic_magic
-type ClassMethodFunc func(ctx *Context, this Value, args []Value) Value
+type ClassMethodFunc func(ctx *Context, this *Value, args []*Value) *Value
 
-// ClassGetterFunc represents accessor getter functions - unchanged
+// ClassGetterFunc represents accessor getter functions - changed to use pointers
 // Corresponds to QuickJS JSCFunctionType.getter_magic
-type ClassGetterFunc func(ctx *Context, this Value) Value
+type ClassGetterFunc func(ctx *Context, this *Value) *Value
 
-// ClassSetterFunc represents accessor setter functions - unchanged
+// ClassSetterFunc represents accessor setter functions - changed to use pointers
 // Returns the set value or an exception
 // Corresponds to QuickJS JSCFunctionType.setter_magic
-type ClassSetterFunc func(ctx *Context, this Value, value Value) Value
+type ClassSetterFunc func(ctx *Context, this *Value, value *Value) *Value
 
 // =============================================================================
 // CLASS BINDING CONFIGURATION STRUCTURES
@@ -100,10 +100,10 @@ type AccessorEntry struct {
 	Static bool            // true for static accessors, false for instance accessors
 }
 
-// PropertyEntry represents a property binding configuration - unchanged
+// PropertyEntry represents a property binding configuration - changed to use pointer
 type PropertyEntry struct {
 	Name   string // Property name in JavaScript
-	Value  Value  // Property value (JavaScript Value)
+	Value  *Value // Property value (JavaScript Value) - changed to pointer
 	Static bool   // true for static properties, false for instance properties
 	Flags  int    // Property flags (writable, enumerable, configurable)
 }
@@ -214,10 +214,10 @@ func (cb *ClassBuilder) StaticAccessor(name string, getter ClassGetterFunc, sett
 // PROPERTY API METHODS
 // =============================================================================
 
-// Property adds a data property to the class instance - unchanged
+// Property adds a data property to the class instance - changed to use pointer
 // Default flags: writable, enumerable, configurable
 // SCHEME C: Instance properties will be bound during instance creation
-func (cb *ClassBuilder) Property(name string, value Value, flags ...int) *ClassBuilder {
+func (cb *ClassBuilder) Property(name string, value *Value, flags ...int) *ClassBuilder {
 	propFlags := PropertyDefault
 	if len(flags) > 0 {
 		propFlags = flags[0]
@@ -225,16 +225,16 @@ func (cb *ClassBuilder) Property(name string, value Value, flags ...int) *ClassB
 
 	cb.properties = append(cb.properties, PropertyEntry{
 		Name:   name,
-		Value:  value,
+		Value:  value, // Now expects *Value
 		Static: false, // Instance property
 		Flags:  propFlags,
 	})
 	return cb
 }
 
-// StaticProperty adds a data property to the class constructor - unchanged
+// StaticProperty adds a data property to the class constructor - changed to use pointer
 // Default flags: writable, enumerable, configurable
-func (cb *ClassBuilder) StaticProperty(name string, value Value, flags ...int) *ClassBuilder {
+func (cb *ClassBuilder) StaticProperty(name string, value *Value, flags ...int) *ClassBuilder {
 	propFlags := PropertyDefault
 	if len(flags) > 0 {
 		propFlags = flags[0]
@@ -242,8 +242,8 @@ func (cb *ClassBuilder) StaticProperty(name string, value Value, flags ...int) *
 
 	cb.properties = append(cb.properties, PropertyEntry{
 		Name:   name,
-		Value:  value,
-		Static: true, // Static property
+		Value:  value, // Now expects *Value
+		Static: true,  // Static property
 		Flags:  propFlags,
 	})
 	return cb
@@ -251,7 +251,7 @@ func (cb *ClassBuilder) StaticProperty(name string, value Value, flags ...int) *
 
 // Build creates and registers the JavaScript class in the given context
 // Returns the constructor function and classID for NewInstance
-func (cb *ClassBuilder) Build(ctx *Context) (Value, uint32, error) {
+func (cb *ClassBuilder) Build(ctx *Context) (*Value, uint32, error) {
 	return ctx.createClass(cb)
 }
 
@@ -269,10 +269,10 @@ func validateClassBuilder(builder *ClassBuilder) error {
 
 // createClass implements the core class creation logic using C layer optimization
 // MODIFIED FOR SCHEME C: Now stores entire ClassBuilder and separates static/instance properties
-func (ctx *Context) createClass(builder *ClassBuilder) (Value, uint32, error) {
+func (ctx *Context) createClass(builder *ClassBuilder) (*Value, uint32, error) {
 	// Step 1: Input validation (keep in Go layer for business logic) - unchanged
 	if err := validateClassBuilder(builder); err != nil {
-		return Value{}, 0, err
+		return ctx.ThrowError(err), 0, err
 	}
 
 	// Step 2: Go layer manages class name and JSClassDef memory - unchanged
@@ -377,7 +377,7 @@ func (ctx *Context) createClass(builder *ClassBuilder) (Value, uint32, error) {
 			// Create C property entry for static property only
 			cProperties = append(cProperties, C.PropertyEntry{
 				name:      propertyName,
-				value:     property.Value.ref, // Use JSValue directly
+				value:     property.Value.ref, // Use JSValue directly from *Value
 				is_static: C.int(1),           // Always static for CreateClass
 				flags:     C.int(property.Flags),
 			})
@@ -434,7 +434,7 @@ func (ctx *Context) createClass(builder *ClassBuilder) (Value, uint32, error) {
 		// Note: Don't clean up className and classDef - let Go GC handle them
 		// The C function failed, so QuickJS isn't using them
 
-		return Value{ctx: ctx, ref: constructor}, 0, ctx.Exception()
+		return &Value{ctx: ctx, ref: constructor}, 0, ctx.Exception()
 	}
 
 	// SCHEME C STEP 11: Register constructor -> classID mapping for constructor proxy access
@@ -446,5 +446,5 @@ func (ctx *Context) createClass(builder *ClassBuilder) (Value, uint32, error) {
 	// - classID: returned via pointer from C function
 	// - All handlers: stored in handleStore for proper cleanup
 	// - ClassBuilder: stored in handleStore for constructor proxy access
-	return Value{ctx: ctx, ref: constructor}, uint32(classID), nil
+	return &Value{ctx: ctx, ref: constructor}, uint32(classID), nil
 }

@@ -21,7 +21,7 @@ func TestAtomBasics(t *testing.T) {
 
 	require.EqualValues(t, "testProperty", atom.String())
 
-	// Test Value method
+	// Test Value method - now returns *Value
 	atomValue := atom.Value()
 	defer atomValue.Free()
 	require.True(t, atomValue.IsString())
@@ -83,7 +83,7 @@ func TestAtomSpecialCases(t *testing.T) {
 			defer atom.Free()
 			require.EqualValues(t, tc.expected, atom.String())
 
-			// Test Value conversion
+			// Test Value conversion - now returns *Value
 			atomValue := atom.Value()
 			defer atomValue.Free()
 			require.EqualValues(t, tc.expected, atomValue.String())
@@ -146,7 +146,7 @@ func TestAtomWithObjects(t *testing.T) {
 
 	// Test setting and getting properties using atoms
 	propNames := []string{"name", "value", "flag", "data"}
-	propValues := []Value{
+	propValues := []*Value{ // MODIFIED: now uses *Value slice
 		ctx.String("test"),
 		ctx.Int32(42),
 		ctx.Bool(true),

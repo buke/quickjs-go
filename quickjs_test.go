@@ -46,11 +46,11 @@ func Example() {
 	test := ctx.Object()
 	defer test.Free()
 	// bind properties to the object
-	test.Set("A", test.Context().String("String A"))
+	test.Set("A", ctx.String("String A"))
 	test.Set("B", ctx.Int32(0))
 	test.Set("C", ctx.Bool(false))
-	// bind go function to js object
-	test.Set("hello", ctx.Function(func(ctx *quickjs.Context, this quickjs.Value, args []quickjs.Value) quickjs.Value {
+	// bind go function to js object - UPDATED: function signature now uses pointers
+	test.Set("hello", ctx.Function(func(ctx *quickjs.Context, this *quickjs.Value, args []*quickjs.Value) *quickjs.Value {
 		return ctx.String("Hello " + args[0].String())
 	}))
 
@@ -67,9 +67,9 @@ func Example() {
 	defer go_ret.Free()
 	fmt.Println(go_ret.String())
 
-	// bind go function to Javascript async function using Function + Promise
-	ctx.Globals().Set("testAsync", ctx.Function(func(ctx *quickjs.Context, this quickjs.Value, args []quickjs.Value) quickjs.Value {
-		return ctx.Promise(func(resolve, reject func(quickjs.Value)) {
+	// bind go function to Javascript async function using Function + Promise - UPDATED: function signature now uses pointers
+	ctx.Globals().Set("testAsync", ctx.Function(func(ctx *quickjs.Context, this *quickjs.Value, args []*quickjs.Value) *quickjs.Value {
+		return ctx.Promise(func(resolve, reject func(*quickjs.Value)) {
 			resolve(ctx.String("Hello Async Function!"))
 		})
 	}))

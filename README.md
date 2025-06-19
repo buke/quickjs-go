@@ -10,6 +10,8 @@ English | [简体中文](README_zh-cn.md)
 
 Go bindings to QuickJS: a fast, small, and embeddable ES2020 JavaScript interpreter.
 
+**⚠️ This project is not ready for production use yet. Use at your own risk. APIs may change without notice.**
+
 ## Platform Support
 
 we prebuilt quickjs static library for the following platforms:
@@ -47,6 +49,30 @@ we prebuilt quickjs static library for the following platforms:
 - **Create JavaScript Classes from Go with ClassBuilder**
 - **Create JavaScript Modules from Go with ModuleBuilder**
 
+## Breaking Changes
+
+### Since v0.5.10
+
+**Value Type System Changed from Value to *Value**
+
+All `Value` parameters and return values have been changed from value types to pointer types (`*Value`).
+
+#### Affected APIs
+
+**Context Methods:**
+- `Context.Function(fn func(*Context, Value, []Value) Value)` → `Context.Function(fn func(*Context, *Value, []*Value) *Value)`
+- All value creation methods now return `*Value` instead of `Value`
+
+**Class System:**
+- `ClassConstructorFunc: func(*Context, Value, []Value) (interface{}, error)` → `func(*Context, *Value, []*Value) (interface{}, error)`
+- `ClassMethodFunc: func(*Context, Value, []Value) Value` → `func(*Context, *Value, []*Value) *Value`
+- `ClassGetterFunc: func(*Context, Value) Value` → `func(*Context, *Value) *Value`
+- `ClassSetterFunc: func(*Context, Value, Value) Value` → `func(*Context, *Value, *Value) *Value`
+
+**Value Methods:**
+- `Value.Call()`, `Value.Execute()`, `Value.New()` etc. now accept `[]*Value` instead of `[]Value`
+- `Value.Set()`, `Value.Get()` etc. now work with `*Value` parameters
+
 ## Guidelines
 
 1. Free `quickjs.Runtime` and `quickjs.Context` once you are done using them.
@@ -54,8 +80,8 @@ we prebuilt quickjs static library for the following platforms:
 3. Use `ctx.Loop()` wait for promise/job result after you using promise/job
 4. You may access the stacktrace of an error returned by `Eval()` or `EvalFile()` by casting it to a `*quickjs.Error`.
 5. Make new copies of arguments should you want to return them in functions you created.
-6. When creating modules, ensure proper resource cleanup by deferring `Free()` on exported function values.
-7. Use `EvalAwait(true)` when evaluating JavaScript code that contains `import()` statements to handle async module loading.
+
+
 
 ## Usage
 
@@ -87,6 +113,7 @@ func main() {
     if err != nil {
         println(err.Error())
     }
+    defer ret.Free()
     fmt.Println(ret.String())
 }
 ```
@@ -128,7 +155,11 @@ func main() {
 
 ```go
 package main
-import "github.com/buke/quickjs-go"
+
+import (
+    "fmt"
+    "github.com/buke/quickjs-go"
+)
 
 func main() {
     // Create a new runtime
@@ -141,13 +172,12 @@ func main() {
 
     // Create a new object
     test := ctx.Object()
-    defer test.Free()
     // bind properties to the object
-    test.Set("A", test.Context().String("String A"))
+    test.Set("A", ctx.String("String A"))
     test.Set("B", ctx.Int32(0))
     test.Set("C", ctx.Bool(false))
     // bind go function to js object
-    test.Set("hello", ctx.Function(func(ctx *quickjs.Context, this quickjs.Value, args []quickjs.Value) quickjs.Value {
+    test.Set("hello", ctx.Function(func(ctx *quickjs.Context, this *quickjs.Value, args []*quickjs.Value) *quickjs.Value {
         return ctx.String("Hello " + args[0].String())
     }))
 
@@ -156,15 +186,17 @@ func main() {
 
     // call js function by js
     js_ret, _ := ctx.Eval(`test.hello("Javascript!")`)
+    defer js_ret.Free()
     fmt.Println(js_ret.String())
 
     // call js function by go
-    go_ret := ctx.Globals().Get("test").Call("hello", ctx.String("Golang!"))
+    go_ret := test.Call("hello", ctx.String("Golang!"))
+    defer go_ret.Free()
     fmt.Println(go_ret.String())
 
     // bind go function to Javascript async function using Function + Promise
-    ctx.Globals().Set("testAsync", ctx.Function(func(ctx *quickjs.Context, this quickjs.Value, args []quickjs.Value) quickjs.Value {
-        return ctx.Promise(func(resolve, reject func(quickjs.Value)) {
+    ctx.Globals().Set("testAsync", ctx.Function(func(ctx *quickjs.Context, this *quickjs.Value, args []*quickjs.Value) *quickjs.Value {
+        return ctx.Promise(func(resolve, reject func(*quickjs.Value)) {
             resolve(ctx.String("Hello Async Function!"))
         })
     }))
@@ -198,6 +230,7 @@ package main
 
 import (
     "fmt"
+    "errors"
 
     "github.com/buke/quickjs-go"
 )
@@ -211,9 +244,9 @@ func main() {
     ctx := rt.NewContext()
     defer ctx.Close()
 
-    ctx.Globals().SetFunction("A", func(ctx *Context, this Value, args []Value) Value {
+    ctx.Globals().SetFunction("A", func(ctx *quickjs.Context, this *quickjs.Value, args []*quickjs.Value) *quickjs.Value {
         // raise error
-        return ctx.ThrowError(expected)
+        return ctx.ThrowError(errors.New("expected error"))
     })
 
     _, actual := ctx.Eval("A()")
@@ -244,19 +277,15 @@ func main() {
     // Create various TypedArrays from Go slices
     int8Data := []int8{-128, -1, 0, 1, 127}
     int8Array := ctx.Int8Array(int8Data)
-    defer int8Array.Free()
 
     uint8Data := []uint8{0, 128, 255}
     uint8Array := ctx.Uint8Array(uint8Data)
-    defer uint8Array.Free()
 
     float32Data := []float32{-3.14, 0.0, 2.718, 100.5}
     float32Array := ctx.Float32Array(float32Data)
-    defer float32Array.Free()
 
     int64Data := []int64{-9223372036854775808, 0, 9223372036854775807}
     bigInt64Array := ctx.BigInt64Array(int64Data)
-    defer bigInt64Array.Free()
 
     // Set TypedArrays as global variables
     ctx.Globals().Set("int8Array", int8Array)
@@ -387,10 +416,11 @@ func main() {
     defer regularArray.Free()
 
     int32Array := ctx.Int32Array([]int32{1, 2, 3})
-    defer int32Array.Free()
-
     float64Array := ctx.Float64Array([]float64{1.1, 2.2, 3.3})
-    defer float64Array.Free()
+
+    // Set arrays as global variables to be referenced by globals
+    ctx.Globals().Set("int32Array", int32Array)
+    ctx.Globals().Set("float64Array", float64Array)
 
     // Detect array types
     fmt.Printf("Regular array IsArray: %v\n", regularArray.IsArray())
@@ -597,7 +627,6 @@ func main() {
         });
     `)
     defer result.Free()
-    fmt.Println("TypedArray info:", result.JSONStringify())
 
     // Modify in JavaScript
     modifyResult, _ := ctx.Eval(`
@@ -637,12 +666,12 @@ type CustomType struct {
 }
 
 // Implement Marshaler interface
-func (c CustomType) MarshalJS(ctx *quickjs.Context) (quickjs.Value, error) {
+func (c CustomType) MarshalJS(ctx *quickjs.Context) (*quickjs.Value, error) {
     return ctx.String("custom:" + c.Value), nil
 }
 
 // Implement Unmarshaler interface
-func (c *CustomType) UnmarshalJS(ctx *quickjs.Context, val quickjs.Value) error {
+func (c *CustomType) UnmarshalJS(ctx *quickjs.Context, val *quickjs.Value) error {
     if val.IsString() {
         str := val.ToString()
         if strings.HasPrefix(str, "custom:") {
@@ -758,7 +787,7 @@ func main() {
     defer ctx.Close()
 
     // Create a math module with Go functions and values
-    addFunc := ctx.Function(func(ctx *quickjs.Context, this quickjs.Value, args []quickjs.Value) quickjs.Value {
+    addFunc := ctx.Function(func(ctx *quickjs.Context, this *quickjs.Value, args []*quickjs.Value) *quickjs.Value {
         if len(args) >= 2 {
             return ctx.Float64(args[0].Float64() + args[1].Float64())
         }
@@ -821,9 +850,8 @@ func main() {
     config.Set("appName", ctx.String("MyApp"))
     config.Set("version", ctx.String("2.0.0"))
     config.Set("debug", ctx.Bool(true))
-    defer config.Free()
 
-    greetFunc := ctx.Function(func(ctx *quickjs.Context, this quickjs.Value, args []quickjs.Value) quickjs.Value {
+    greetFunc := ctx.Function(func(ctx *quickjs.Context, this *quickjs.Value, args []*quickjs.Value) *quickjs.Value {
         name := "World"
         if len(args) > 0 {
             name = args[0].String()
@@ -832,11 +860,14 @@ func main() {
     })
     defer greetFunc.Free()
 
+    jsonVal := ctx.ParseJSON(`{"MAX": 100, "MIN": 1}`)
+    defer jsonVal.Free()
+
     // Create module with various export types
     module := quickjs.NewModuleBuilder("utils").
         Export("config", config).                    // Object export
         Export("greet", greetFunc).                  // Function export
-        Export("constants", ctx.ParseJSON(`{"MAX": 100, "MIN": 1}`)).  // JSON export
+        Export("constants", jsonVal).                // JSON export
         Export("default", ctx.String("Utils Library"))  // Default export
 
     err := module.Build(ctx)
@@ -847,16 +878,15 @@ func main() {
     // Use mixed imports in JavaScript
     result, err := ctx.Eval(`
         (async function() {
-            // Import from multiple modules
-            const { add, PI } = await import('math');
-            const { upper } = await import('strings');
+            // Import from utils module
+            const { greet, config, constants } = await import('utils');
             
             // Combine functionality
-            const sum = add(PI, 1);
-            const message = "Result: " + sum.toFixed(2);
-            const finalMessage = upper(message);
+            const message = greet("JavaScript");
+            const info = config.appName + " v" + config.version;
+            const limits = "Max: " + constants.MAX + ", Min: " + constants.MIN;
             
-            return finalMessage;
+            return { message, info, limits };
         })()
     `, quickjs.EvalAwait(true))
     defer result.Free()
@@ -887,7 +917,7 @@ func main() {
     defer ctx.Close()
 
     // Create math module
-    addFunc := ctx.Function(func(ctx *quickjs.Context, this quickjs.Value, args []quickjs.Value) quickjs.Value {
+    addFunc := ctx.Function(func(ctx *quickjs.Context, this *quickjs.Value, args []*quickjs.Value) *quickjs.Value {
         if len(args) >= 2 {
             return ctx.Float64(args[0].Float64() + args[1].Float64())
         }
@@ -900,7 +930,7 @@ func main() {
         Export("PI", ctx.Float64(3.14159))
 
     // Create string utilities module
-    upperFunc := ctx.Function(func(ctx *quickjs.Context, this quickjs.Value, args []quickjs.Value) quickjs.Value {
+    upperFunc := ctx.Function(func(ctx *quickjs.Context, this *quickjs.Value, args []*quickjs.Value) *quickjs.Value {
         if len(args) > 0 {
             return ctx.String(strings.ToUpper(args[0].String()))
         }
@@ -994,7 +1024,7 @@ func main() {
 
     // Create Point class using ClassBuilder
     pointConstructor, _, err := quickjs.NewClassBuilder("Point").
-        Constructor(func(ctx *quickjs.Context, instance quickjs.Value, args []quickjs.Value) (interface{}, error) {
+        Constructor(func(ctx *quickjs.Context, instance *quickjs.Value, args []*quickjs.Value) (interface{}, error) {
             x, y := 0.0, 0.0
             name := "Unnamed Point"
             
@@ -1007,21 +1037,21 @@ func main() {
         }).
         // Accessors provide getter/setter functionality with custom logic
         Accessor("x", 
-            func(ctx *quickjs.Context, this quickjs.Value) quickjs.Value {
+            func(ctx *quickjs.Context, this *quickjs.Value) *quickjs.Value {
                 point, _ := this.GetGoObject()
                 return ctx.Float64(point.(*Point).X)
             },
-            func(ctx *quickjs.Context, this quickjs.Value, value quickjs.Value) quickjs.Value {
+            func(ctx *quickjs.Context, this *quickjs.Value, value *quickjs.Value) *quickjs.Value {
                 point, _ := this.GetGoObject()
                 point.(*Point).X = value.Float64()
                 return ctx.Undefined()
             }).
         Accessor("y",
-            func(ctx *quickjs.Context, this quickjs.Value) quickjs.Value {
+            func(ctx *quickjs.Context, this *quickjs.Value) *quickjs.Value {
                 point, _ := this.GetGoObject()
                 return ctx.Float64(point.(*Point).Y)
             },
-            func(ctx *quickjs.Context, this quickjs.Value, value quickjs.Value) quickjs.Value {
+            func(ctx *quickjs.Context, this *quickjs.Value, value *quickjs.Value) *quickjs.Value {
                 point, _ := this.GetGoObject()
                 point.(*Point).Y = value.Float64()
                 return ctx.Undefined()
@@ -1032,11 +1062,11 @@ func main() {
         // Read-only property
         Property("readOnly", ctx.Bool(true), quickjs.PropertyConfigurable).
         // Instance methods
-        Method("distance", func(ctx *quickjs.Context, this quickjs.Value, args []quickjs.Value) quickjs.Value {
+        Method("distance", func(ctx *quickjs.Context, this *quickjs.Value, args []*quickjs.Value) *quickjs.Value {
             point, _ := this.GetGoObject()
             return ctx.Float64(point.(*Point).Distance())
         }).
-        Method("move", func(ctx *quickjs.Context, this quickjs.Value, args []quickjs.Value) quickjs.Value {
+        Method("move", func(ctx *quickjs.Context, this *quickjs.Value, args []*quickjs.Value) *quickjs.Value {
             point, _ := this.GetGoObject()
             dx, dy := 0.0, 0.0
             if len(args) > 0 { dx = args[0].Float64() }
@@ -1044,12 +1074,12 @@ func main() {
             point.(*Point).Move(dx, dy)
             return ctx.Undefined()
         }).
-        Method("getName", func(ctx *quickjs.Context, this quickjs.Value, args []quickjs.Value) quickjs.Value {
+        Method("getName", func(ctx *quickjs.Context, this *quickjs.Value, args []*quickjs.Value) *quickjs.Value {
             point, _ := this.GetGoObject()
             return ctx.String(point.(*Point).Name)
         }).
         // Static method
-        StaticMethod("origin", func(ctx *quickjs.Context, this quickjs.Value, args []quickjs.Value) quickjs.Value {
+        StaticMethod("origin", func(ctx *quickjs.Context, this *quickjs.Value, args []*quickjs.Value) *quickjs.Value {
             // Create a new Point at origin
             origin := &Point{X: 0, Y: 0, Name: "Origin"}
             jsVal, _ := ctx.Marshal(origin)
@@ -1237,7 +1267,6 @@ func main() {
 ### Bytecode Compiler
 
 ```go
-
 package main
 
 import (
@@ -1279,6 +1308,7 @@ func main() {
 
     //Eval bytecode
     result, _ := ctx2.EvalBytecode(buf)
+    defer result.Free()
     fmt.Println(result.Int32())
 }
 ```
@@ -1318,7 +1348,6 @@ func main() {
 ### ES6 Module Support
 
 ```go
-
 package main
 
 import (
@@ -1328,7 +1357,7 @@ import (
 )
 
 func main() {
-// enable module import
+    // enable module import
     rt := quickjs.NewRuntime(quickjs.WithModuleImport(true))
     defer rt.Close()
 
@@ -1338,13 +1367,16 @@ func main() {
     // eval module
     r1, err := ctx.EvalFile("./test/hello_module.js")
     defer r1.Free()
-    require.NoError(t, err)
-    require.EqualValues(t, 55, ctx.Globals().Get("result").Int32())
+    if err != nil {
+        panic(err)
+    }
 
     // load module
     r2, err := ctx.LoadModuleFile("./test/fib_module.js", "fib_foo")
     defer r2.Free()
-    require.NoError(t, err)
+    if err != nil {
+        panic(err)
+    }
 
     // call module
     r3, err := ctx.Eval(`
@@ -1352,23 +1384,12 @@ func main() {
     globalThis.result = fib(9);
     `)
     defer r3.Free()
-    require.NoError(t, err)
+    if err != nil {
+        panic(err)
+    }
 
-    require.EqualValues(t, 34, ctx.Globals().Get("result").Int32())
+    result := ctx.Globals().Get("result")
+    defer result.Free()
+    fmt.Println("Fibonacci result:", result.Int32())
 }
-
 ```
-
-## Documentation
-
-Go Reference & more examples: https://pkg.go.dev/github.com/buke/quickjs-go
-
-## License
-
-[MIT](./LICENSE)
-
-[![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2Fbuke%2Fquickjs-go.svg?type=large)](https://app.fossa.com/projects/git%2Bgithub.com%2Fbuke%2Fquickjs-go?ref=badge_large)
-
-## Related Projects
-
-- https://github.com/buke/quickjs-go-polyfill
