@@ -144,7 +144,7 @@ func TestErrorSpecialCharacters(t *testing.T) {
 
 // TestErrorAsGoInterface tests Error implementing Go's error interface
 func TestErrorAsGoInterface(t *testing.T) {
-	quickjsErr := Error{
+	quickjsErr := &Error{
 		Name:    "TestError",
 		Message: "test error message",
 	}
