@@ -668,18 +668,8 @@ func (v *Value) PromiseState() PromiseState {
 
 // Await waits for promise resolution and executes pending jobs
 // Similar to Context.Await but called on Value directly
-func (v *Value) Await() (*Value, error) {
-	if !v.IsPromise() {
-		// Not a promise, return as-is
-		return v, nil
-	}
-
-	// Use js_std_await which handles the event loop
-	result := &Value{ctx: v.ctx, ref: C.js_std_await(v.ctx.ref, v.ref)}
-	if result.IsException() {
-		return result, v.ctx.Exception()
-	}
-	return result, nil
+func (v *Value) Await() *Value {
+	return v.ctx.Await(v)
 }
 
 // =============================================================================
@@ -838,7 +828,7 @@ func (v *Value) resolveClassIDFromInheritance() (uint32, bool) {
         })
     `
 
-	traverser, _ := v.ctx.Eval(script)
+	traverser := v.ctx.Eval(script)
 	defer traverser.Free()
 
 	// Get all parent constructors

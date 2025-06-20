@@ -26,7 +26,7 @@ func TestBridgeGetContextFromJSReturnNil(t *testing.T) {
 		unregisterContext(ctx.ref)
 
 		// Call function from JavaScript - triggers goFunctionProxy -> getContextFromJS with unmapped context
-		result, err := ctx.Eval(`
+		result := ctx.Eval(`
             try {
                 testFn();
             } catch(e) {
@@ -35,8 +35,9 @@ func TestBridgeGetContextFromJSReturnNil(t *testing.T) {
         `)
 
 		// Should get an error or exception
-		if err != nil {
-			t.Logf("Expected error when context not in mapping: %v", err)
+		if result.IsException() {
+			err := ctx.Exception()
+			t.Logf("Expected exception when context not in mapping: %v", err)
 		} else {
 			defer result.Free()
 			resultStr := result.String()
@@ -70,7 +71,7 @@ func TestBridgeGetRuntimeFromJSReturnNil(t *testing.T) {
 		unregisterRuntime(rt.ref)
 
 		// Execute long-running code that may trigger interrupt handler
-		result, err := ctx.Eval(`
+		result := ctx.Eval(`
             var sum = 0;
             for(var i = 0; i < 100000; i++) {
                 sum += i;
@@ -83,9 +84,10 @@ func TestBridgeGetRuntimeFromJSReturnNil(t *testing.T) {
 
 		// Since runtime is not in mapping, goInterruptHandler should return 0
 		t.Logf("Interrupt handler called: %v", interruptCalled)
-		t.Logf("Execution result - Error: %v", err)
-
-		if err == nil {
+		if result.IsException() {
+			err := ctx.Exception()
+			t.Logf("Execution resulted in exception: %v", err)
+		} else {
 			defer result.Free()
 			t.Logf("Computation completed with result: %d", result.ToInt32())
 		}
@@ -116,8 +118,8 @@ func TestBridgeContextNotFound(t *testing.T) {
 		ctx.Globals().Set("testFunc", fn)
 
 		// Verify function works initially
-		result, err := ctx.Eval(`testFunc()`)
-		require.NoError(t, err)
+		result := ctx.Eval(`testFunc()`)
+		require.False(t, result.IsException())
 		require.Equal(t, "test", result.String())
 		result.Free()
 
@@ -125,7 +127,7 @@ func TestBridgeContextNotFound(t *testing.T) {
 		unregisterContext(ctx.ref)
 
 		// Call function from JavaScript - triggers goFunctionProxy -> getContextAndFunction with unmapped context
-		result2, err := ctx.Eval(`
+		result2 := ctx.Eval(`
             try {
                 testFunc();
             } catch(e) {
@@ -133,8 +135,9 @@ func TestBridgeContextNotFound(t *testing.T) {
             }
         `)
 
-		if err != nil {
-			t.Logf("Expected error when context not found: %v", err)
+		if result2.IsException() {
+			err := ctx.Exception()
+			t.Logf("Expected exception when context not found: %v", err)
 			require.Contains(t, err.Error(), "Context not found")
 		} else {
 			defer result2.Free()
@@ -165,8 +168,8 @@ func TestBridgeFunctionNotFoundInHandleStore(t *testing.T) {
 		ctx.Globals().Set("testFunc", fn)
 
 		// Verify function works initially
-		result, err := ctx.Eval(`testFunc()`)
-		require.NoError(t, err)
+		result := ctx.Eval(`testFunc()`)
+		require.False(t, result.IsException())
 		require.Equal(t, "test", result.String())
 		result.Free()
 
@@ -174,7 +177,7 @@ func TestBridgeFunctionNotFoundInHandleStore(t *testing.T) {
 		ctx.handleStore.Clear()
 
 		// Call function from JavaScript - triggers goFunctionProxy -> getContextAndFunction with cleared handleStore
-		result2, err := ctx.Eval(`
+		result2 := ctx.Eval(`
             try {
                 testFunc();
             } catch(e) {
@@ -182,8 +185,9 @@ func TestBridgeFunctionNotFoundInHandleStore(t *testing.T) {
             }
         `)
 
-		if err != nil {
-			t.Logf("Expected error when function not found: %v", err)
+		if result2.IsException() {
+			err := ctx.Exception()
+			t.Logf("Expected exception when function not found: %v", err)
 			require.Contains(t, err.Error(), "Function not found")
 		} else {
 			defer result2.Free()
@@ -211,8 +215,8 @@ func TestBridgeInvalidFunctionType(t *testing.T) {
 		ctx.Globals().Set("testFunc", fn)
 
 		// Verify function works initially
-		result, err := ctx.Eval(`testFunc()`)
-		require.NoError(t, err)
+		result := ctx.Eval(`testFunc()`)
+		require.False(t, result.IsException())
 		require.Equal(t, "test", result.String())
 		result.Free()
 
@@ -230,7 +234,7 @@ func TestBridgeInvalidFunctionType(t *testing.T) {
 		ctx.handleStore.handles.Store(fnID, invalidHandle)
 
 		// Call function from JavaScript - triggers goFunctionProxy with invalid function type
-		result2, err := ctx.Eval(`
+		result2 := ctx.Eval(`
             try {
                 testFunc();
             } catch(e) {
@@ -239,8 +243,9 @@ func TestBridgeInvalidFunctionType(t *testing.T) {
         `)
 
 		// Check for expected error
-		if err != nil {
-			t.Logf("Expected error when invalid function type: %v", err)
+		if result2.IsException() {
+			err := ctx.Exception()
+			t.Logf("Expected exception when invalid function type: %v", err)
 			require.Contains(t, err.Error(), "Invalid function type")
 		} else {
 			defer result2.Free()
@@ -267,26 +272,26 @@ func TestBridgeClassConstructorErrors(t *testing.T) {
 		defer ctx.Close()
 
 		// MODIFIED FOR SCHEME C: Create class with new constructor signature
-		constructor, _, err := NewClassBuilder("TestClass").
+		constructor, _ := NewClassBuilder("TestClass").
 			Constructor(func(ctx *Context, instance *Value, args []*Value) (interface{}, error) {
 				// SCHEME C: Return Go object for automatic association
 				return &Point{X: 1, Y: 2}, nil
 			}).
 			Build(ctx)
-		require.NoError(t, err)
+		require.False(t, constructor.IsException())
 
 		ctx.Globals().Set("TestClass", constructor)
 
 		// Verify constructor works initially
-		result, err := ctx.Eval(`new TestClass()`)
-		require.NoError(t, err)
+		result := ctx.Eval(`new TestClass()`)
+		require.False(t, result.IsException())
 		result.Free()
 
 		// Unregister context from mapping
 		unregisterContext(ctx.ref)
 
 		// Call constructor - triggers goClassConstructorProxy with unmapped context
-		result2, err := ctx.Eval(`
+		result2 := ctx.Eval(`
             try {
                 new TestClass();
             } catch(e) {
@@ -294,7 +299,8 @@ func TestBridgeClassConstructorErrors(t *testing.T) {
             }
         `)
 
-		if err != nil {
+		if result2.IsException() {
+			err := ctx.Exception()
 			require.Contains(t, err.Error(), "Context not found")
 		} else {
 			defer result2.Free()
@@ -314,13 +320,13 @@ func TestBridgeClassConstructorErrors(t *testing.T) {
 		defer ctx.Close()
 
 		// MODIFIED FOR SCHEME C: Create class with new constructor signature
-		constructor, _, err := NewClassBuilder("TestClass").
+		constructor, _ := NewClassBuilder("TestClass").
 			Constructor(func(ctx *Context, instance *Value, args []*Value) (interface{}, error) {
 				// SCHEME C: Return Go object for automatic association
 				return &Point{X: 1, Y: 2}, nil
 			}).
 			Build(ctx)
-		require.NoError(t, err)
+		require.False(t, constructor.IsException())
 
 		ctx.Globals().Set("TestClass", constructor)
 
@@ -328,7 +334,7 @@ func TestBridgeClassConstructorErrors(t *testing.T) {
 		ctx.handleStore.Clear()
 
 		// Call constructor - triggers goClassConstructorProxy with cleared handleStore
-		result, err := ctx.Eval(`
+		result := ctx.Eval(`
             try {
                 new TestClass();
             } catch(e) {
@@ -336,7 +342,8 @@ func TestBridgeClassConstructorErrors(t *testing.T) {
             }
         `)
 
-		if err != nil {
+		if result.IsException() {
+			err := ctx.Exception()
 			require.Contains(t, err.Error(), "Constructor function not found")
 		} else {
 			defer result.Free()
@@ -353,13 +360,13 @@ func TestBridgeClassConstructorErrors(t *testing.T) {
 		defer ctx.Close()
 
 		// MODIFIED FOR SCHEME C: Create class with new constructor signature
-		constructor, _, err := NewClassBuilder("TestClass").
+		constructor, _ := NewClassBuilder("TestClass").
 			Constructor(func(ctx *Context, instance *Value, args []*Value) (interface{}, error) {
 				// SCHEME C: Return Go object for automatic association
 				return &Point{X: 1, Y: 2}, nil
 			}).
 			Build(ctx)
-		require.NoError(t, err)
+		require.False(t, constructor.IsException())
 
 		ctx.Globals().Set("TestClass", constructor)
 
@@ -382,7 +389,7 @@ func TestBridgeClassConstructorErrors(t *testing.T) {
 		ctx.handleStore.handles.Store(constructorID, invalidHandle)
 
 		// Call constructor - triggers type assertion failure
-		result, err := ctx.Eval(`
+		result := ctx.Eval(`
             try {
                 new TestClass();
             } catch(e) {
@@ -390,7 +397,8 @@ func TestBridgeClassConstructorErrors(t *testing.T) {
             }
         `)
 
-		if err != nil {
+		if result.IsException() {
+			err := ctx.Exception()
 			require.Contains(t, err.Error(), "Invalid constructor function type")
 		} else {
 			defer result.Free()
@@ -412,12 +420,12 @@ func TestBridgeClassConstructorErrors(t *testing.T) {
 		defer ctx.Close()
 
 		// Create class with constructor
-		constructor, _, err := NewClassBuilder("TestClass").
+		constructor, _ := NewClassBuilder("TestClass").
 			Constructor(func(ctx *Context, instance *Value, args []*Value) (interface{}, error) {
 				return &Point{X: 1, Y: 2}, nil
 			}).
 			Build(ctx)
-		require.NoError(t, err)
+		require.False(t, constructor.IsException())
 
 		ctx.Globals().Set("TestClass", constructor)
 
@@ -426,7 +434,7 @@ func TestBridgeClassConstructorErrors(t *testing.T) {
 		globalConstructorRegistry.Delete(constructorKey)
 
 		// Call constructor - triggers "Class ID not found for constructor" branch
-		result, err := ctx.Eval(`
+		result := ctx.Eval(`
             try {
                 new TestClass();
             } catch(e) {
@@ -434,7 +442,8 @@ func TestBridgeClassConstructorErrors(t *testing.T) {
             }
         `)
 
-		if err != nil {
+		if result.IsException() {
+			err := ctx.Exception()
 			require.Contains(t, err.Error(), "Class ID not found")
 		} else {
 			defer result.Free()
@@ -452,23 +461,23 @@ func TestBridgeClassConstructorErrors(t *testing.T) {
 		defer ctx.Close()
 
 		// Create class with instance properties
-		constructor, _, err := NewClassBuilder("TestClass").
+		constructor, _ := NewClassBuilder("TestClass").
 			Constructor(func(ctx *Context, instance *Value, args []*Value) (interface{}, error) {
 				return &Point{X: 1, Y: 2}, nil
 			}).
 			Property("version", ctx.String("1.0.0")).
 			Property("readOnly", ctx.Bool(true), PropertyConfigurable).
 			Build(ctx)
-		require.NoError(t, err)
+		require.False(t, constructor.IsException())
 
 		ctx.Globals().Set("TestClass", constructor)
 
 		// Test that instance properties are properly bound during construction
-		result, err := ctx.Eval(`
+		result := ctx.Eval(`
             let obj = new TestClass();
             [obj.version, obj.readOnly, typeof obj.version, typeof obj.readOnly];
         `)
-		require.NoError(t, err)
+		require.False(t, result.IsException())
 		defer result.Free()
 
 		// Verify instance properties were bound correctly
@@ -492,7 +501,7 @@ func TestBridgeClassMethodErrors(t *testing.T) {
 		defer ctx.Close()
 
 		// MODIFIED FOR SCHEME C: Create class with new constructor signature
-		constructor, _, err := NewClassBuilder("TestClass").
+		constructor, _ := NewClassBuilder("TestClass").
 			Constructor(func(ctx *Context, instance *Value, args []*Value) (interface{}, error) {
 				return &Point{X: 1, Y: 2}, nil
 			}).
@@ -500,16 +509,16 @@ func TestBridgeClassMethodErrors(t *testing.T) {
 				return ctx.String("method called")
 			}).
 			Build(ctx)
-		require.NoError(t, err)
+		require.False(t, constructor.IsException())
 
 		ctx.Globals().Set("TestClass", constructor)
 
 		// Create instance and verify method works
-		result, err := ctx.Eval(`
+		result := ctx.Eval(`
             let obj = new TestClass();
             obj.testMethod();
         `)
-		require.NoError(t, err)
+		require.False(t, result.IsException())
 		require.Equal(t, "method called", result.String())
 		result.Free()
 
@@ -517,7 +526,7 @@ func TestBridgeClassMethodErrors(t *testing.T) {
 		unregisterContext(ctx.ref)
 
 		// Call method - triggers goClassMethodProxy with unmapped context
-		result2, err := ctx.Eval(`
+		result2 := ctx.Eval(`
             try {
                 let obj = new TestClass();
                 obj.testMethod();
@@ -526,7 +535,8 @@ func TestBridgeClassMethodErrors(t *testing.T) {
             }
         `)
 
-		if err != nil {
+		if result2.IsException() {
+			err := ctx.Exception()
 			require.Contains(t, err.Error(), "Context not found")
 		} else {
 			defer result2.Free()
@@ -546,7 +556,7 @@ func TestBridgeClassMethodErrors(t *testing.T) {
 		defer ctx.Close()
 
 		// MODIFIED FOR SCHEME C: Create class with new constructor signature
-		constructor, _, err := NewClassBuilder("TestClass").
+		constructor, _ := NewClassBuilder("TestClass").
 			Constructor(func(ctx *Context, instance *Value, args []*Value) (interface{}, error) {
 				return &Point{X: 1, Y: 2}, nil
 			}).
@@ -554,17 +564,17 @@ func TestBridgeClassMethodErrors(t *testing.T) {
 				return ctx.String("method called")
 			}).
 			Build(ctx)
-		require.NoError(t, err)
+		require.False(t, constructor.IsException())
 
 		ctx.Globals().Set("TestClass", constructor)
 
 		// First create an instance and store it in global scope
-		result, err := ctx.Eval(`
+		result := ctx.Eval(`
 			let obj = new TestClass();
 			globalThis.testObj = obj;  // Store instance globally
 			obj.testMethod();  // Verify method works
 		`)
-		require.NoError(t, err)
+		require.False(t, result.IsException())
 		require.Equal(t, "method called", result.String())
 		result.Free()
 
@@ -572,7 +582,7 @@ func TestBridgeClassMethodErrors(t *testing.T) {
 		ctx.handleStore.Clear()
 
 		// Call method on existing instance - triggers goClassMethodProxy with cleared handleStore
-		result2, err := ctx.Eval(`
+		result2 := ctx.Eval(`
 			try {
 				globalThis.testObj.testMethod();  // Use existing instance
 			} catch(e) {
@@ -580,7 +590,8 @@ func TestBridgeClassMethodErrors(t *testing.T) {
 			}
 		`)
 
-		if err != nil {
+		if result2.IsException() {
+			err := ctx.Exception()
 			require.Contains(t, err.Error(), "Method function not found")
 		} else {
 			defer result2.Free()
@@ -597,7 +608,7 @@ func TestBridgeClassMethodErrors(t *testing.T) {
 		defer ctx.Close()
 
 		// MODIFIED FOR SCHEME C: Create class with new constructor signature
-		constructor, _, err := NewClassBuilder("TestClass").
+		constructor, _ := NewClassBuilder("TestClass").
 			Constructor(func(ctx *Context, instance *Value, args []*Value) (interface{}, error) {
 				return &Point{X: 1, Y: 2}, nil
 			}).
@@ -605,17 +616,17 @@ func TestBridgeClassMethodErrors(t *testing.T) {
 				return ctx.String("method called")
 			}).
 			Build(ctx)
-		require.NoError(t, err)
+		require.False(t, constructor.IsException())
 
 		ctx.Globals().Set("TestClass", constructor)
 
 		// Store existing instance to use later
-		result, err := ctx.Eval(`
+		result := ctx.Eval(`
             let obj = new TestClass();
             globalThis.testObj = obj;  // Store instance globally
             obj.testMethod();  // Verify method works initially
         `)
-		require.NoError(t, err)
+		require.False(t, result.IsException())
 		require.Equal(t, "method called", result.String())
 		result.Free()
 
@@ -659,7 +670,7 @@ func TestBridgeClassMethodErrors(t *testing.T) {
 		ctx.handleStore.handles.Store(methodID, invalidHandle)
 
 		// Call method on existing instance - triggers type assertion failure
-		result2, err := ctx.Eval(`
+		result2 := ctx.Eval(`
             try {
                 globalThis.testObj.testMethod();
             } catch(e) {
@@ -667,7 +678,8 @@ func TestBridgeClassMethodErrors(t *testing.T) {
             }
         `)
 
-		if err != nil {
+		if result2.IsException() {
+			err := ctx.Exception()
 			require.Contains(t, err.Error(), "Invalid method function type")
 		} else {
 			defer result2.Free()
@@ -692,7 +704,7 @@ func TestBridgeClassGetterErrors(t *testing.T) {
 		defer ctx.Close()
 
 		// MODIFIED FOR SCHEME C: Create class with new constructor signature
-		constructor, _, err := NewClassBuilder("TestClass").
+		constructor, _ := NewClassBuilder("TestClass").
 			Constructor(func(ctx *Context, instance *Value, args []*Value) (interface{}, error) {
 				return &Point{X: 1, Y: 2}, nil
 			}).
@@ -700,16 +712,16 @@ func TestBridgeClassGetterErrors(t *testing.T) {
 				return ctx.String("getter called")
 			}, nil).
 			Build(ctx)
-		require.NoError(t, err)
+		require.False(t, constructor.IsException())
 
 		ctx.Globals().Set("TestClass", constructor)
 
 		// Verify getter works initially
-		result, err := ctx.Eval(`
+		result := ctx.Eval(`
             let obj = new TestClass();
             obj.testProp;
         `)
-		require.NoError(t, err)
+		require.False(t, result.IsException())
 		require.Equal(t, "getter called", result.String())
 		result.Free()
 
@@ -717,7 +729,7 @@ func TestBridgeClassGetterErrors(t *testing.T) {
 		unregisterContext(ctx.ref)
 
 		// Access getter - triggers goClassGetterProxy with unmapped context
-		result2, err := ctx.Eval(`
+		result2 := ctx.Eval(`
             try {
                 let obj = new TestClass();
                 obj.testProp;
@@ -726,7 +738,8 @@ func TestBridgeClassGetterErrors(t *testing.T) {
             }
         `)
 
-		if err != nil {
+		if result2.IsException() {
+			err := ctx.Exception()
 			require.Contains(t, err.Error(), "Context not found")
 		} else {
 			defer result2.Free()
@@ -746,7 +759,7 @@ func TestBridgeClassGetterErrors(t *testing.T) {
 		defer ctx.Close()
 
 		// MODIFIED FOR SCHEME C: Create class with new constructor signature
-		constructor, _, err := NewClassBuilder("TestClass").
+		constructor, _ := NewClassBuilder("TestClass").
 			Constructor(func(ctx *Context, instance *Value, args []*Value) (interface{}, error) {
 				return &Point{X: 1, Y: 2}, nil
 			}).
@@ -754,17 +767,17 @@ func TestBridgeClassGetterErrors(t *testing.T) {
 				return ctx.String("getter called")
 			}, nil).
 			Build(ctx)
-		require.NoError(t, err)
+		require.False(t, constructor.IsException())
 
 		ctx.Globals().Set("TestClass", constructor)
 
 		// First create an instance and store it in global scope
-		result, err := ctx.Eval(`
+		result := ctx.Eval(`
 			let obj = new TestClass();
 			globalThis.testObj = obj;  // Store instance globally
 			obj.testProp;  // Verify getter works
 		`)
-		require.NoError(t, err)
+		require.False(t, result.IsException())
 		require.Equal(t, "getter called", result.String())
 		result.Free()
 
@@ -772,7 +785,7 @@ func TestBridgeClassGetterErrors(t *testing.T) {
 		ctx.handleStore.Clear()
 
 		// Access getter on existing instance - triggers goClassGetterProxy with cleared handleStore
-		result2, err := ctx.Eval(`
+		result2 := ctx.Eval(`
 			try {
 				globalThis.testObj.testProp;  // Use existing instance
 			} catch(e) {
@@ -780,7 +793,8 @@ func TestBridgeClassGetterErrors(t *testing.T) {
 			}
 		`)
 
-		if err != nil {
+		if result2.IsException() {
+			err := ctx.Exception()
 			require.Contains(t, err.Error(), "Getter function not found")
 		} else {
 			defer result2.Free()
@@ -797,7 +811,7 @@ func TestBridgeClassGetterErrors(t *testing.T) {
 		defer ctx.Close()
 
 		// MODIFIED FOR SCHEME C: Create class with new constructor signature
-		constructor, _, err := NewClassBuilder("TestClass").
+		constructor, _ := NewClassBuilder("TestClass").
 			Constructor(func(ctx *Context, instance *Value, args []*Value) (interface{}, error) {
 				return &Point{X: 1, Y: 2}, nil
 			}).
@@ -805,17 +819,17 @@ func TestBridgeClassGetterErrors(t *testing.T) {
 				return ctx.String("getter called")
 			}, nil).
 			Build(ctx)
-		require.NoError(t, err)
+		require.False(t, constructor.IsException())
 
 		ctx.Globals().Set("TestClass", constructor)
 
 		// Store existing instance to use later
-		result, err := ctx.Eval(`
+		result := ctx.Eval(`
             let obj = new TestClass();
             globalThis.testObj = obj;  // Store instance globally
             obj.testProp;  // Verify getter works initially
         `)
-		require.NoError(t, err)
+		require.False(t, result.IsException())
 		require.Equal(t, "getter called", result.String())
 		result.Free()
 
@@ -859,7 +873,7 @@ func TestBridgeClassGetterErrors(t *testing.T) {
 		ctx.handleStore.handles.Store(getterID, invalidHandle)
 
 		// Access getter on existing instance - triggers type assertion failure
-		result2, err := ctx.Eval(`
+		result2 := ctx.Eval(`
             try {
                 globalThis.testObj.testProp;
             } catch(e) {
@@ -867,7 +881,8 @@ func TestBridgeClassGetterErrors(t *testing.T) {
             }
         `)
 
-		if err != nil {
+		if result2.IsException() {
+			err := ctx.Exception()
 			require.Contains(t, err.Error(), "Invalid getter function type")
 		} else {
 			defer result2.Free()
@@ -892,7 +907,7 @@ func TestBridgeClassSetterErrors(t *testing.T) {
 		defer ctx.Close()
 
 		// MODIFIED FOR SCHEME C: Create class with new constructor signature
-		constructor, _, err := NewClassBuilder("TestClass").
+		constructor, _ := NewClassBuilder("TestClass").
 			Constructor(func(ctx *Context, instance *Value, args []*Value) (interface{}, error) {
 				return &Point{X: 1, Y: 2}, nil
 			}).
@@ -900,17 +915,17 @@ func TestBridgeClassSetterErrors(t *testing.T) {
 				return ctx.Undefined()
 			}).
 			Build(ctx)
-		require.NoError(t, err)
+		require.False(t, constructor.IsException())
 
 		ctx.Globals().Set("TestClass", constructor)
 
 		// Verify setter works initially
-		result, err := ctx.Eval(`
+		result := ctx.Eval(`
             let obj = new TestClass();
             obj.testProp = "test";
             "setter works";
         `)
-		require.NoError(t, err)
+		require.False(t, result.IsException())
 		require.Equal(t, "setter works", result.String())
 		result.Free()
 
@@ -918,7 +933,7 @@ func TestBridgeClassSetterErrors(t *testing.T) {
 		unregisterContext(ctx.ref)
 
 		// Call setter - triggers goClassSetterProxy with unmapped context
-		result2, err := ctx.Eval(`
+		result2 := ctx.Eval(`
             try {
                 let obj = new TestClass();
                 obj.testProp = "test";
@@ -927,7 +942,8 @@ func TestBridgeClassSetterErrors(t *testing.T) {
             }
         `)
 
-		if err != nil {
+		if result2.IsException() {
+			err := ctx.Exception()
 			require.Contains(t, err.Error(), "Context not found")
 		} else {
 			defer result2.Free()
@@ -947,7 +963,7 @@ func TestBridgeClassSetterErrors(t *testing.T) {
 		defer ctx.Close()
 
 		// MODIFIED FOR SCHEME C: Create class with new constructor signature
-		constructor, _, err := NewClassBuilder("TestClass").
+		constructor, _ := NewClassBuilder("TestClass").
 			Constructor(func(ctx *Context, instance *Value, args []*Value) (interface{}, error) {
 				return &Point{X: 1, Y: 2}, nil
 			}).
@@ -955,18 +971,18 @@ func TestBridgeClassSetterErrors(t *testing.T) {
 				return ctx.Undefined()
 			}).
 			Build(ctx)
-		require.NoError(t, err)
+		require.False(t, constructor.IsException())
 
 		ctx.Globals().Set("TestClass", constructor)
 
 		// First create an instance and store it in global scope
-		result, err := ctx.Eval(`
+		result := ctx.Eval(`
         let obj = new TestClass();
         globalThis.testObj = obj;  // Store instance globally
         obj.testProp = "test";     // Verify setter works
         "setter works";
     `)
-		require.NoError(t, err)
+		require.False(t, result.IsException())
 		require.Equal(t, "setter works", result.String())
 		result.Free()
 
@@ -974,7 +990,7 @@ func TestBridgeClassSetterErrors(t *testing.T) {
 		ctx.handleStore.Clear()
 
 		// Call setter on existing instance - triggers goClassSetterProxy with cleared handleStore
-		result2, err := ctx.Eval(`
+		result2 := ctx.Eval(`
         try {
             globalThis.testObj.testProp = "test2";  // Use existing instance
         } catch(e) {
@@ -982,7 +998,8 @@ func TestBridgeClassSetterErrors(t *testing.T) {
         }
     `)
 
-		if err != nil {
+		if result2.IsException() {
+			err := ctx.Exception()
 			require.Contains(t, err.Error(), "Setter function not found")
 		} else {
 			defer result2.Free()
@@ -999,7 +1016,7 @@ func TestBridgeClassSetterErrors(t *testing.T) {
 		defer ctx.Close()
 
 		// MODIFIED FOR SCHEME C: Create class with new constructor signature
-		constructor, _, err := NewClassBuilder("TestClass").
+		constructor, _ := NewClassBuilder("TestClass").
 			Constructor(func(ctx *Context, instance *Value, args []*Value) (interface{}, error) {
 				return &Point{X: 1, Y: 2}, nil
 			}).
@@ -1007,18 +1024,18 @@ func TestBridgeClassSetterErrors(t *testing.T) {
 				return ctx.Undefined()
 			}).
 			Build(ctx)
-		require.NoError(t, err)
+		require.False(t, constructor.IsException())
 
 		ctx.Globals().Set("TestClass", constructor)
 
 		// Store existing instance to use later
-		result, err := ctx.Eval(`
+		result := ctx.Eval(`
             let obj = new TestClass();
             globalThis.testObj = obj;  // Store instance globally
             obj.testProp = "test";     // Verify setter works initially
             "setter works";
         `)
-		require.NoError(t, err)
+		require.False(t, result.IsException())
 		require.Equal(t, "setter works", result.String())
 		result.Free()
 
@@ -1062,7 +1079,7 @@ func TestBridgeClassSetterErrors(t *testing.T) {
 		ctx.handleStore.handles.Store(setterID, invalidHandle)
 
 		// Call setter on existing instance - triggers type assertion failure
-		result2, err := ctx.Eval(`
+		result2 := ctx.Eval(`
             try {
                 globalThis.testObj.testProp = "test2";
             } catch(e) {
@@ -1070,7 +1087,8 @@ func TestBridgeClassSetterErrors(t *testing.T) {
             }
         `)
 
-		if err != nil {
+		if result2.IsException() {
+			err := ctx.Exception()
 			require.Contains(t, err.Error(), "Invalid setter function type")
 		} else {
 			defer result2.Free()
@@ -1106,7 +1124,7 @@ func TestBridgeClassFinalizerContextIteration(t *testing.T) {
 
 		// Create classes in all contexts
 		for i, ctx := range []*Context{ctx1, ctx2, ctx3} {
-			constructor, _, err := NewClassBuilder(fmt.Sprintf("TestClass%d", i)).
+			constructor, _ := NewClassBuilder(fmt.Sprintf("TestClass%d", i)).
 				Constructor(func(ctx *Context, instance *Value, args []*Value) (interface{}, error) {
 					// MODIFIED FOR SCHEME C: Return Go object for automatic association
 					// Create a simple object that implements finalizer
@@ -1114,15 +1132,15 @@ func TestBridgeClassFinalizerContextIteration(t *testing.T) {
 					return obj, nil
 				}).
 				Build(ctx)
-			require.NoError(t, err)
+			require.False(t, constructor.IsException())
 
 			ctx.Globals().Set(fmt.Sprintf("TestClass%d", i), constructor)
 		}
 
 		// Create instances in all contexts
 		for i, ctx := range []*Context{ctx1, ctx2, ctx3} {
-			result, err := ctx.Eval(fmt.Sprintf(`new TestClass%d()`, i))
-			require.NoError(t, err)
+			result := ctx.Eval(fmt.Sprintf(`new TestClass%d()`, i))
+			require.False(t, result.IsException())
 			result.Free()
 		}
 
@@ -1144,21 +1162,21 @@ func TestBridgeCreateClassInstanceEdgeCases(t *testing.T) {
 		defer ctx.Close()
 
 		// Create class without instance properties
-		constructor, _, err := NewClassBuilder("NoPropsClass").
+		constructor, _ := NewClassBuilder("NoPropsClass").
 			Constructor(func(ctx *Context, instance *Value, args []*Value) (interface{}, error) {
 				return &Point{X: 1, Y: 2}, nil
 			}).
 			Build(ctx)
-		require.NoError(t, err)
+		require.False(t, constructor.IsException())
 
 		ctx.Globals().Set("NoPropsClass", constructor)
 
 		// Test that instances are created successfully even without properties
-		result, err := ctx.Eval(`
+		result := ctx.Eval(`
             let obj = new NoPropsClass();
             typeof obj;
         `)
-		require.NoError(t, err)
+		require.False(t, result.IsException())
 		defer result.Free()
 		require.Equal(t, "object", result.String())
 
@@ -1182,17 +1200,17 @@ func TestBridgeCreateClassInstanceEdgeCases(t *testing.T) {
 			builder = builder.Property(fmt.Sprintf("prop%d", i), ctx.String(fmt.Sprintf("value%d", i)))
 		}
 
-		constructor, _, err := builder.Build(ctx)
-		require.NoError(t, err)
+		constructor, _ := builder.Build(ctx)
+		require.False(t, constructor.IsException())
 
 		ctx.Globals().Set("ManyPropsClass", constructor)
 
 		// Test that all properties are bound correctly
-		result, err := ctx.Eval(`
+		result := ctx.Eval(`
             let obj = new ManyPropsClass();
             [obj.prop0, obj.prop5, obj.prop9];
         `)
-		require.NoError(t, err)
+		require.False(t, result.IsException())
 		defer result.Free()
 
 		require.Equal(t, "value0", result.GetIdx(0).String())
@@ -1212,12 +1230,12 @@ func TestBridgeCreateClassInstanceFailures(t *testing.T) {
 		defer ctx.Close()
 
 		// Create class
-		constructor, originalClassID, err := NewClassBuilder("TestClass").
+		constructor, originalClassID := NewClassBuilder("TestClass").
 			Constructor(func(ctx *Context, instance *Value, args []*Value) (interface{}, error) {
 				return &Point{X: 1, Y: 2}, nil
 			}).
 			Build(ctx)
-		require.NoError(t, err)
+		require.False(t, constructor.IsException())
 
 		ctx.Globals().Set("TestClass", constructor)
 
@@ -1226,14 +1244,17 @@ func TestBridgeCreateClassInstanceFailures(t *testing.T) {
 		globalConstructorRegistry.Store(constructorKey, uint32(999999))
 
 		// This should trigger CreateClassInstance to return JS_EXCEPTION
-		result, err := ctx.Eval(`new TestClass()`)
+		result := ctx.Eval(`new TestClass()`)
 		defer result.Free()
 
 		// Restore for cleanup
 		globalConstructorRegistry.Store(constructorKey, originalClassID)
 
 		// Should get an error
-		require.Error(t, err)
+		if result.IsException() {
+			err := ctx.Exception()
+			t.Logf("Expected exception from CreateClassInstance: %v", err)
+		}
 
 		t.Log("Successfully triggered CreateClassInstance JS_EXCEPTION branch")
 	})

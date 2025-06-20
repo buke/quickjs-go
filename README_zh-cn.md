@@ -44,43 +44,51 @@ Go 语言的 QuickJS 绑定库：快速、小型、可嵌入的 ES2020 JavaScrip
 - 在 Go 中操作 JavaScript 值和对象
 - 绑定 Go 函数到 JavaScript 同步/异步函数
 - 简单的异常抛出和捕获
-- **Go 值与 JavaScript 值的序列化/反序列化**
+- **Go 值与 JavaScript 值的 Marshal/Unmarshal**
 - **完整的 TypedArray 支持 (Int8Array, Uint8Array, Float32Array 等)**
 - **使用 ClassBuilder 从 Go 创建 JavaScript 类**
 - **使用 ModuleBuilder 从 Go 创建 JavaScript 模块**
 
 ## 重大变更
 
-### 自 v0.5.10 版本开始
+### v0.5.11 (最新版本)
+- **API 简化**: 移除了 JavaScript 执行方法的 error 返回值
+  - `Context.Eval()`, `Context.EvalFile()`, `Context.LoadModule()`, `Context.LoadModuleBytecode()` 现在只返回 `*Value`
+  - `Context.EvalBytecode()`, `Context.Await()` 现在只返回 `*Value`  
+  - `Context.BindClass()`, `ClassBuilder.Build()` 现在只返回 `(*Value, uint32)`
+  - 提示：使用 `Value.IsException()` 检查异常，使用 `Context.Exception()` 获取异常作为 Go error
 
-**值类型系统从 Value 改为 *Value**
-
-所有 `Value` 参数和返回值都已从值类型更改为指针类型 (`*Value`)。
-
-#### 受影响的 API
-
-**Context 方法:**
-- `Context.Function(fn func(*Context, Value, []Value) Value)` → `Context.Function(fn func(*Context, *Value, []*Value) *Value`
-- 所有值创建方法现在返回 `*Value` 而不是 `Value`
-
-**类系统:**
-- `ClassConstructorFunc: func(*Context, Value, []Value) (interface{}, error)` → `func(*Context, *Value, []*Value) (interface{}, error)`
-- `ClassMethodFunc: func(*Context, Value, []Value) Value` → `func(*Context, *Value, []*Value) *Value`
-- `ClassGetterFunc: func(*Context, Value) Value` → `func(*Context, *Value) *Value`
-- `ClassSetterFunc: func(*Context, Value, Value) Value` → `func(*Context, *Value, *Value) *Value`
-
-**Value 方法:**
-- `Value.Call()`, `Value.Execute()`, `Value.New()` 等现在接受 `[]*Value` 而不是 `[]Value`
-- `Value.Set()`, `Value.Get()` 等现在使用 `*Value` 参数
+### v0.5.10
+- **Value类型从 Value 改为 *Value**
+  - 所有 `Value` 参数和返回值都已从值类型更改为指针类型 (`*Value`)
+  - `Context.Function(fn func(*Context, Value, []Value) Value)` → `Context.Function(fn func(*Context, *Value, []*Value) *Value)`
+  - 所有Value创建方法现在返回 `*Value` 而不是 `Value`
+  - Class 相关方法签名更新为使用 `*Value` 参数
 
 ## 使用指南
 
-1. 在使用完毕后，请记得关闭 `quickjs.Runtime` 和 `quickjs.Context`。
-2. 在不再需要时手动释放 `quickjs.Value` 以防止内存泄漏。QuickJS 使用引用计数，所以如果一个值被其他对象引用，你只需要确保引用对象被正确释放。
-3. 如果你使用了 promise/job，请使用 `ctx.Loop()` 等待 promise/job 结果
-4. 如果 `Eval()` 或 `EvalFile()` 返回了错误，可强制转换为 `*quickjs.Error` 以读取错误的堆栈信息。
-5. 如果你想在函数中返回参数，请在函数中复制参数。
+### 错误处理
+- 使用 `Value.IsException()` 或 `Context.HasException()` 检查异常
+- 使用 `Context.Exception()` 获取异常作为 Go error
+- 始终对返回的值调用 `defer value.Free()` 以防止内存泄漏
+- 在可能抛出异常的操作后检查 `Context.HasException()`
 
+### 内存管理
+- 对您创建或接收的 `*Value` 对象调用 `value.Free()`。QuickJS 使用引用计数进行内存管理，因此如果一个值被其他对象引用，您只需要确保引用对象被正确释放。
+- Runtime 和 Context 对象有自己的清理方法 (`Close()`)。使用完毕后立即关闭它们。
+- 谨慎使用 `runtime.SetFinalizer()`，因为它可能会干扰 QuickJS 的 GC。
+
+### 性能建议
+- QuickJS 不是线程安全的。确保在单线程中执行，或者使用预初始化运行时的线程池模式
+- 尽可能重复使用 Runtime 和 Context 对象
+- 避免频繁在 Go 和 JS 值之间转换
+- 对于频繁执行的脚本考虑使用字节码编译
+
+### 最佳实践
+- 保持 JavaScript 执行隔离以防止干扰 - **为不同的任务或用户创建单独的 Runtime/Context 实例**
+- 为不同的脚本类型使用适当的 `EvalOptions`
+- 适当处理 JavaScript 异常和 Go 错误
+- 在负载下测试内存使用以防止泄漏
 
 ## 用法
 
@@ -108,11 +116,15 @@ func main() {
     ctx := rt.NewContext()
     defer ctx.Close()
 
-    ret, err := ctx.Eval("'Hello ' + 'QuickJS!'")
-    if err != nil {
-        println(err.Error())
-    }
+    ret := ctx.Eval("'Hello ' + 'QuickJS!'")
     defer ret.Free()
+    
+    if ret.IsException() {
+        err := ctx.Exception()
+        println(err.Error())
+        return
+    }
+    
     fmt.Println(ret.String())
 }
 ```
@@ -143,10 +155,18 @@ func main() {
     test.Set("C", ctx.String("String C"))
     ctx.Globals().Set("test", test)
 
-    ret, _ := ctx.Eval(`Object.keys(test).map(key => test[key]).join(" ")`)
+    ret := ctx.Eval(`Object.keys(test).map(key => test[key]).join(" ")`)
     defer ret.Free()
+    
+    if ret.IsException() {
+        err := ctx.Exception()
+        fmt.Println("Error:", err.Error())
+        return
+    }
+    
     fmt.Println(ret.String())
 }
+
 ```
 
 ### 绑定 Go 函数到 JavaScript 同步/异步函数
@@ -183,13 +203,27 @@ func main() {
     ctx.Globals().Set("test", test)
 
     // 通过 js 调用 js 函数
-    js_ret, _ := ctx.Eval(`test.hello("Javascript!")`)
+    js_ret := ctx.Eval(`test.hello("Javascript!")`)
     defer js_ret.Free()
+    
+    if js_ret.IsException() {
+        err := ctx.Exception()
+        fmt.Println("Error:", err.Error())
+        return
+    }
+    
     fmt.Println(js_ret.String())
 
     // 通过 go 调用 js 函数
     go_ret := test.Call("hello", ctx.String("Golang!"))
     defer go_ret.Free()
+    
+    if go_ret.IsException() {
+        err := ctx.Exception()
+        fmt.Println("Error:", err.Error())
+        return
+    }
+    
     fmt.Println(go_ret.String())
 
     // 使用 Function + Promise 将 Go 函数绑定为 JavaScript 异步函数
@@ -199,18 +233,30 @@ func main() {
         })
     }))
 
-    ret, _ := ctx.Eval(`
+    ret := ctx.Eval(`
             var ret;
             testAsync().then(v => ret = v)
         `)
     defer ret.Free()
 
+    if ret.IsException() {
+        err := ctx.Exception()
+        fmt.Println("Error:", err.Error())
+        return
+    }
+
     // 等待 promise 解析
     ctx.Loop()
 
     // 获取 promise 结果
-    asyncRet, _ := ctx.Eval("ret")
+    asyncRet := ctx.Eval("ret")
     defer asyncRet.Free()
+
+    if asyncRet.IsException() {
+        err := ctx.Exception()
+        fmt.Println("Error:", err.Error())
+        return
+    }
 
     fmt.Println(asyncRet.String())
 
@@ -247,8 +293,13 @@ func main() {
         return ctx.ThrowError(errors.New("expected error"))
     })
 
-    _, actual := ctx.Eval("A()")
-    fmt.Println(actual.Error())
+    result := ctx.Eval("A()")
+    defer result.Free()
+    
+    if result.IsException() {
+        actual := ctx.Exception()
+        fmt.Println(actual.Error())
+    }
 }
 ```
 
@@ -292,7 +343,7 @@ func main() {
     ctx.Globals().Set("bigInt64Array", bigInt64Array)
 
     // 在 JavaScript 中使用
-    result, _ := ctx.Eval(`
+    result := ctx.Eval(`
         // 检查类型
         const results = {
             int8Type: int8Array instanceof Int8Array,
@@ -305,6 +356,12 @@ func main() {
         results;
     `)
     defer result.Free()
+
+    if result.IsException() {
+        err := ctx.Exception()
+        fmt.Println("Error:", err.Error())
+        return
+    }
 
     fmt.Println("结果:", result.JSONStringify())
 }
@@ -327,7 +384,7 @@ func main() {
     defer ctx.Close()
 
     // 在 JavaScript 中创建 TypedArray
-    jsTypedArrays, _ := ctx.Eval(`
+    jsTypedArrays := ctx.Eval(`
         ({
             int8: new Int8Array([-128, -1, 0, 1, 127]),
             uint16: new Uint16Array([0, 32768, 65535]),
@@ -336,6 +393,12 @@ func main() {
         })
     `)
     defer jsTypedArrays.Free()
+
+    if jsTypedArrays.IsException() {
+        err := ctx.Exception()
+        fmt.Println("Error:", err.Error())
+        return
+    }
 
     // 转换为 Go 切片
     int8Array := jsTypedArrays.Get("int8")
@@ -410,7 +473,7 @@ func main() {
     defer ctx.Close()
 
     // 创建各种数组
-    regularArray, _ := ctx.Eval(`[1, 2, 3]`)
+    regularArray := ctx.Eval(`[1, 2, 3]`)
     defer regularArray.Free()
 
     int32Array := ctx.Int32Array([]int32{1, 2, 3})
@@ -463,7 +526,7 @@ func main() {
     ctx.Globals().Set("imageData", imageArray)
 
     // 在 JavaScript 中处理
-    result, _ := ctx.Eval(`
+    result := ctx.Eval(`
         // 将 RGB 转换为灰度
         const grayscale = new Uint8Array(imageData.length / 3);
         for (let i = 0; i < imageData.length; i += 3) {
@@ -476,6 +539,12 @@ func main() {
     `)
     defer result.Free()
 
+    if result.IsException() {
+        err := ctx.Exception()
+        fmt.Println("Error:", err.Error())
+        return
+    }
+
     // 转换回 Go
     if result.IsUint8Array() {
         grayscaleData, err := result.ToUint8Array()
@@ -487,7 +556,7 @@ func main() {
 }
 ```
 
-### Go 值序列化和反序列化
+### Marshal/Unmarshal Go 值
 
 QuickJS-Go 通过 `Marshal` 和 `Unmarshal` 方法提供 Go 和 JavaScript 值之间的转换。
 
@@ -507,7 +576,7 @@ func main() {
     ctx := rt.NewContext()
     defer ctx.Close()
 
-    // 将 Go 值序列化为 JavaScript 值
+    // 将 Go 值 Marshal 为 JavaScript 值
     data := map[string]interface{}{
         "name":    "张三",
         "age":     30,
@@ -529,9 +598,9 @@ func main() {
     }
     defer jsVal.Free()
 
-    // 在 JavaScript 中使用序列化的值
+    // 在 JavaScript 中使用 marshal 的值
     ctx.Globals().Set("user", jsVal)
-    result, _ := ctx.Eval(`
+    result := ctx.Eval(`
         const info = user.name + " 今年 " + user.age + " 岁";
         const floatArrayType = user.floatData instanceof Float32Array;
         const intArrayType = user.intData instanceof Int32Array;
@@ -546,19 +615,26 @@ func main() {
         });
     `)
     defer result.Free()
+    
+    if result.IsException() {
+        err := ctx.Exception()
+        fmt.Println("Error:", err.Error())
+        return
+    }
+    
     fmt.Println("结果:", result.JSONStringify())
 
-    // 将 JavaScript 值反序列化回 Go
+    // 将 JavaScript 值 unmarshal 回 Go
     var userData map[string]interface{}
     err = ctx.Unmarshal(jsVal, &userData)
     if err != nil {
         panic(err)
     }
-    fmt.Printf("反序列化结果: %+v\n", userData)
+    fmt.Printf("Unmarshal 结果: %+v\n", userData)
 }
 ```
 
-#### 带标签的结构体序列化
+#### 带标签的结构体 Marshal
 
 ```go
 package main
@@ -606,7 +682,7 @@ func main() {
         Secret:    "top-secret",
     }
 
-    // 将结构体序列化为 JavaScript
+    // 将结构体 marshal 为 JavaScript
     jsVal, err := ctx.Marshal(user)
     if err != nil {
         panic(err)
@@ -615,7 +691,7 @@ func main() {
 
     // 在 JavaScript 中检查 TypedArray 类型
     ctx.Globals().Set("user", jsVal)
-    result, _ := ctx.Eval(`
+    result := ctx.Eval(`
         ({
             scoresType: user.scores instanceof Float32Array,
             dataType: user.data instanceof Int32Array,
@@ -625,10 +701,15 @@ func main() {
         });
     `)
     defer result.Free()
-    fmt.Println("TypedArray 信息:", result.JSONStringify())
+
+    if result.IsException() {
+        err := ctx.Exception()
+        fmt.Println("Error:", err.Error())
+        return
+    }
 
     // 在 JavaScript 中修改
-    modifyResult, _ := ctx.Eval(`
+    modifyResult := ctx.Eval(`
         user.name = "小明同学";
         user.tags.push("moderator");
         // 修改 TypedArray 数据
@@ -637,7 +718,13 @@ func main() {
     `)
     defer modifyResult.Free()
 
-    // 反序列化回 Go 结构体
+    if modifyResult.IsException() {
+        err := ctx.Exception()
+        fmt.Println("Error:", err.Error())
+        return
+    }
+
+    // Unmarshal 回 Go 结构体
     var updatedUser User
     err = ctx.Unmarshal(modifyResult, &updatedUser)
     if err != nil {
@@ -649,7 +736,7 @@ func main() {
 }
 ```
 
-#### 自定义序列化/反序列化
+#### 自定义 Marshal/Unmarshal
 
 ```go
 package main
@@ -688,7 +775,7 @@ func main() {
     ctx := rt.NewContext()
     defer ctx.Close()
 
-    // 序列化自定义类型
+    // Marshal 自定义类型
     custom := CustomType{Value: "hello"}
     jsVal, err := ctx.Marshal(custom)
     if err != nil {
@@ -696,15 +783,15 @@ func main() {
     }
     defer jsVal.Free()
 
-    fmt.Println("序列化结果:", jsVal.String()) // 输出: custom:hello
+    fmt.Println("Marshal 结果:", jsVal.String()) // 输出: custom:hello
 
-    // 反序列化
+    // Unmarshal 回来
     var result CustomType
     err = ctx.Unmarshal(jsVal, &result)
     if err != nil {
         panic(err)
     }
-    fmt.Printf("反序列化结果: %+v\n", result) // 输出: {Value:hello}
+    fmt.Printf("Unmarshal 结果: %+v\n", result) // 输出: {Value:hello}
 }
 ```
 
@@ -732,7 +819,7 @@ func main() {
 - `slice/array` → JavaScript Array (对于非类型化数组)
 - `map` → JavaScript Object
 - `struct` → JavaScript Object
-- `pointer` → 递归序列化指向的值（nil 变为 null）
+- `pointer` → 递归 marshal 指向的值（nil 变为 null）
 
 **JavaScript 到 Go:**
 - JavaScript null/undefined → Go nil 指针或零值
@@ -754,7 +841,7 @@ func main() {
 - JavaScript BigInt64Array → Go `[]int64`
 - JavaScript BigUint64Array → Go `[]uint64`
 
-当反序列化到 `interface{}` 时，使用以下类型：
+当 unmarshal 到 `interface{}` 时，使用以下类型：
 - `nil` 对应 null/undefined
 - `bool` 对应 boolean
 - `int64` 对应整数
@@ -807,7 +894,7 @@ func main() {
     }
 
     // 在 JavaScript 中使用标准 ES6 import 使用模块
-    result, err := ctx.Eval(`
+    result := ctx.Eval(`
         (async function() {
             // 命名导入
             const { PI, add, version } = await import('math');
@@ -819,7 +906,8 @@ func main() {
     `, quickjs.EvalAwait(true))
     defer result.Free()
 
-    if err != nil {
+    if result.IsException() {
+        err := ctx.Exception()
         panic(err)
     }
 
@@ -875,7 +963,7 @@ func main() {
     }
 
     // 在 JavaScript 中使用混合导入
-    result, err := ctx.Eval(`
+    result := ctx.Eval(`
         (async function() {
             // 从 utils 模块导入
             const { greet, config, constants } = await import('utils');
@@ -890,7 +978,8 @@ func main() {
     `, quickjs.EvalAwait(true))
     defer result.Free()
 
-    if err != nil {
+    if result.IsException() {
+        err := ctx.Exception()
         panic(err)
     }
 
@@ -952,7 +1041,7 @@ func main() {
     }
 
     // 一起使用多个模块
-    result, err := ctx.Eval(`
+    result := ctx.Eval(`
         (async function() {
             // 从多个模块导入
             const { add, PI } = await import('math');
@@ -968,7 +1057,8 @@ func main() {
     `, quickjs.EvalAwait(true))
     defer result.Free()
 
-    if err != nil {
+    if result.IsException() {
+        err := ctx.Exception()
         panic(err)
     }
 
@@ -1022,7 +1112,7 @@ func main() {
     defer ctx.Close()
 
     // 使用 ClassBuilder 创建 Point 类
-    pointConstructor, _, err := quickjs.NewClassBuilder("Point").
+    pointConstructor, _ := quickjs.NewClassBuilder("Point").
         Constructor(func(ctx *quickjs.Context, instance *quickjs.Value, args []*quickjs.Value) (interface{}, error) {
             x, y := 0.0, 0.0
             name := "未命名点"
@@ -1086,15 +1176,11 @@ func main() {
         }).
         Build(ctx)
 
-    if err != nil {
-        panic(err)
-    }
-
     // 注册类
     ctx.Globals().Set("Point", pointConstructor)
 
     // 在 JavaScript 中使用
-    result, _ := ctx.Eval(`
+    result := ctx.Eval(`
         const p = new Point(3, 4, "我的点");
         const dist1 = p.distance();
         p.move(1, 1);
@@ -1122,10 +1208,16 @@ func main() {
     `)
     defer result.Free()
     
+    if result.IsException() {
+        err := ctx.Exception()
+        fmt.Println("Error:", err.Error())
+        return
+    }
+    
     fmt.Println("结果:", result.JSONStringify())
     
     // 演示访问器和属性之间的区别
-    propertyTest, _ := ctx.Eval(`
+    propertyTest := ctx.Eval(`
         const p1 = new Point(1, 1);
         const p2 = new Point(2, 2);
         
@@ -1185,7 +1277,7 @@ func main() {
     defer ctx.Close()
 
     // 自动从结构体创建 User 类
-    userConstructor, _, err := ctx.BindClass(&User{})
+    userConstructor, _ := ctx.BindClass(&User{})
     if err != nil {
         panic(err)
     }
@@ -1193,7 +1285,7 @@ func main() {
     ctx.Globals().Set("User", userConstructor)
 
     // 使用位置参数
-    result1, _ := ctx.Eval(`
+    result1 := ctx.Eval(`
         const user1 = new User(1, "小明", "xiaoming@example.com", 25, true, [95.5, 87.2]);
         user1.GetFullInfo();
     `)
@@ -1201,7 +1293,7 @@ func main() {
     fmt.Println("位置参数:", result1.String())
 
     // 使用命名参数（对象参数）
-    result2, _ := ctx.Eval(`
+    result2 := ctx.Eval(`
         const user2 = new User({
             id: 2,
             name: "小红",
@@ -1231,7 +1323,7 @@ func main() {
     fmt.Println("命名参数:", result2.JSONStringify())
 
     // 演示字段访问器同步
-    result3, _ := ctx.Eval(`
+    result3 := ctx.Eval(`
         const user3 = new User(3, "小刚", "xiaogang@example.com", 35, true, []);
         
         // 字段访问器提供对 Go 结构体字段的直接访问

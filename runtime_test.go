@@ -17,9 +17,9 @@ func TestRuntimeBasics(t *testing.T) {
 	ctx := rt.NewContext()
 	defer ctx.Close()
 
-	result, err := ctx.Eval(`1 + 1`)
-	require.NoError(t, err)
+	result := ctx.Eval(`1 + 1`)
 	defer result.Free()
+	require.False(t, result.IsException()) // Check for exceptions instead of error
 	require.EqualValues(t, 2, result.ToInt32())
 
 	// Test runtime with all options in one go
@@ -37,9 +37,9 @@ func TestRuntimeBasics(t *testing.T) {
 	ctx2 := rt2.NewContext()
 	defer ctx2.Close()
 
-	result2, err := ctx2.Eval(`"Hello World"`)
-	require.NoError(t, err)
+	result2 := ctx2.Eval(`"Hello World"`)
 	defer result2.Free()
+	require.False(t, result2.IsException()) // Check for exceptions instead of error
 	require.Equal(t, "Hello World", result2.String())
 }
 
@@ -52,8 +52,12 @@ func TestRuntimeLimitsAndErrors(t *testing.T) {
 		ctx := rt.NewContext()
 		defer ctx.Close()
 
-		_, err := ctx.Eval(`while(true){}`)
-		require.Error(t, err)
+		result := ctx.Eval(`while(true){}`)
+		defer result.Free()
+		require.True(t, result.IsException()) // Check for exceptions instead of error
+
+		// Use Context.Exception() instead of result.ToError()
+		err := ctx.Exception()
 		require.Contains(t, err.Error(), "interrupted")
 	})
 
@@ -64,9 +68,12 @@ func TestRuntimeLimitsAndErrors(t *testing.T) {
 		ctx := rt.NewContext()
 		defer ctx.Close()
 
-		result, err := ctx.Eval(`var array = []; while (true) { array.push(null) }`)
+		result := ctx.Eval(`var array = []; while (true) { array.push(null) }`)
 		defer result.Free()
-		require.Error(t, err)
+		require.True(t, result.IsException()) // Check for exceptions instead of error
+
+		// Use Context.Exception() instead of result.ToError()
+		err := ctx.Exception()
 		require.Contains(t, err.Error(), "out of memory")
 	})
 
@@ -77,14 +84,18 @@ func TestRuntimeLimitsAndErrors(t *testing.T) {
 		ctx := rt.NewContext()
 		defer ctx.Close()
 
-		_, err := ctx.Eval(`
+		result := ctx.Eval(`
             function recursive(n) {
                 if (n <= 0) return 0;
                 return recursive(n - 1) + 1;
             }
             recursive(10000);
         `)
-		require.Error(t, err)
+		defer result.Free()
+		require.True(t, result.IsException()) // Check for exceptions instead of error
+
+		// Use Context.Exception() instead of result.ToError()
+		err := ctx.Exception()
 		require.Contains(t, err.Error(), "stack overflow")
 	})
 }
@@ -109,9 +120,9 @@ func TestRuntimeConfiguration(t *testing.T) {
 	ctx := rt.NewContext()
 	defer ctx.Close()
 
-	result, err := ctx.Eval(`"configuration test"`)
-	require.NoError(t, err)
+	result := ctx.Eval(`"configuration test"`)
 	defer result.Free()
+	require.False(t, result.IsException()) // Check for exceptions instead of error
 	require.Equal(t, "configuration test", result.String())
 }
 
@@ -132,8 +143,12 @@ func TestRuntimeInterruptHandler(t *testing.T) {
 			return 0 // Continue
 		})
 
-		_, err := ctx.Eval(`while(true){}`)
-		require.Error(t, err)
+		result := ctx.Eval(`while(true){}`)
+		defer result.Free()
+		require.True(t, result.IsException()) // Check for exceptions instead of error
+
+		// Use Context.Exception() instead of result.ToError()
+		err := ctx.Exception()
 		require.Contains(t, err.Error(), "interrupted")
 	})
 
@@ -144,8 +159,9 @@ func TestRuntimeInterruptHandler(t *testing.T) {
 
 		done := make(chan bool, 1)
 		go func() {
-			_, err := ctx.Eval(`let sum = 0; for(let i = 0; i < 100000; i++) sum += i; sum`)
-			done <- (err == nil)
+			result := ctx.Eval(`let sum = 0; for(let i = 0; i < 100000; i++) sum += i; sum`)
+			defer result.Free()
+			done <- !result.IsException() // Check for exceptions instead of error
 		}()
 
 		select {
@@ -162,8 +178,9 @@ func TestRuntimeInterruptHandler(t *testing.T) {
 
 		done := make(chan bool, 1)
 		go func() {
-			_, err := ctx.Eval(`let result = 42; result`)
-			done <- (err == nil)
+			result := ctx.Eval(`let result = 42; result`)
+			defer result.Free()
+			done <- !result.IsException() // Check for exceptions instead of error
 		}()
 
 		select {
@@ -206,10 +223,14 @@ func TestRuntimeTimeoutVsInterruptHandler(t *testing.T) {
 		rt.SetExecuteTimeout(1)
 
 		start := time.Now()
-		_, err := ctx.Eval(`while(true){}`)
+		result := ctx.Eval(`while(true){}`)
+		defer result.Free()
 		elapsed := time.Since(start)
 
-		require.Error(t, err)
+		require.True(t, result.IsException()) // Check for exceptions instead of error
+
+		// Use Context.Exception() instead of result.ToError()
+		err := ctx.Exception()
 		require.Contains(t, err.Error(), "interrupted")
 		require.Less(t, elapsed, 3*time.Second)
 	})
@@ -226,10 +247,14 @@ func TestRuntimeTimeoutVsInterruptHandler(t *testing.T) {
 		rt.SetInterruptHandler(func() int { return 1 })
 
 		start := time.Now()
-		_, err := ctx.Eval(`while(true){}`)
+		result := ctx.Eval(`while(true){}`)
+		defer result.Free()
 		elapsed := time.Since(start)
 
-		require.Error(t, err)
+		require.True(t, result.IsException()) // Check for exceptions instead of error
+
+		// Use Context.Exception() instead of result.ToError()
+		err := ctx.Exception()
 		require.Contains(t, err.Error(), "interrupted")
 		require.Less(t, elapsed, 3*time.Second)
 	})
@@ -247,20 +272,20 @@ func TestRuntimeMultipleContexts(t *testing.T) {
 	defer ctx2.Close()
 
 	// Test context isolation
-	result1, err := ctx1.Eval(`var x = "ctx1"; x`)
-	require.NoError(t, err)
+	result1 := ctx1.Eval(`var x = "ctx1"; x`)
 	defer result1.Free()
+	require.False(t, result1.IsException()) // Check for exceptions instead of error
 	require.Equal(t, "ctx1", result1.String())
 
-	result2, err := ctx2.Eval(`var x = "ctx2"; x`)
-	require.NoError(t, err)
+	result2 := ctx2.Eval(`var x = "ctx2"; x`)
 	defer result2.Free()
+	require.False(t, result2.IsException()) // Check for exceptions instead of error
 	require.Equal(t, "ctx2", result2.String())
 
 	// Verify isolation
-	result3, err := ctx1.Eval(`x`)
-	require.NoError(t, err)
+	result3 := ctx1.Eval(`x`)
 	defer result3.Free()
+	require.False(t, result3.IsException()) // Check for exceptions instead of error
 	require.Equal(t, "ctx1", result3.String())
 }
 
@@ -284,11 +309,10 @@ func TestRuntimeConcurrency(t *testing.T) {
 			defer ctx.Close()
 
 			for j := 0; j < opsPerGoroutine; j++ {
-				result, err := ctx.Eval(`new Date().getTime()`)
-				results <- (err == nil)
-				if err == nil {
-					result.Free()
-				}
+				result := ctx.Eval(`new Date().getTime()`)
+				success := !result.IsException() // Check for exceptions instead of error
+				results <- success
+				result.Free()
 			}
 		}()
 	}
@@ -315,9 +339,9 @@ func TestRuntimeAdvancedOptions(t *testing.T) {
 	ctx1 := rt1.NewContext()
 	defer ctx1.Close()
 
-	result1, err := ctx1.Eval(`"canBlock disabled"`)
-	require.NoError(t, err)
+	result1 := ctx1.Eval(`"canBlock disabled"`)
 	defer result1.Free()
+	require.False(t, result1.IsException()) // Check for exceptions instead of error
 	require.Equal(t, "canBlock disabled", result1.String())
 
 	// Test WithModuleImport(true)
@@ -327,9 +351,9 @@ func TestRuntimeAdvancedOptions(t *testing.T) {
 	ctx2 := rt2.NewContext()
 	defer ctx2.Close()
 
-	result2, err := ctx2.Eval(`"module import enabled"`)
-	require.NoError(t, err)
+	result2 := ctx2.Eval(`"module import enabled"`)
 	defer result2.Free()
+	require.False(t, result2.IsException()) // Check for exceptions instead of error
 	require.Equal(t, "module import enabled", result2.String())
 
 	// Test WithStripInfo(0)
@@ -339,9 +363,9 @@ func TestRuntimeAdvancedOptions(t *testing.T) {
 	ctx3 := rt3.NewContext()
 	defer ctx3.Close()
 
-	result3, err := ctx3.Eval(`"strip info test"`)
-	require.NoError(t, err)
+	result3 := ctx3.Eval(`"strip info test"`)
 	defer result3.Free()
+	require.False(t, result3.IsException()) // Check for exceptions instead of error
 	require.Equal(t, "strip info test", result3.String())
 
 	// Test GC options
@@ -354,8 +378,8 @@ func TestRuntimeAdvancedOptions(t *testing.T) {
 	ctx4 := rt4.NewContext()
 	defer ctx4.Close()
 
-	result4, err := ctx4.Eval(`"GC test"`)
-	require.NoError(t, err)
+	result4 := ctx4.Eval(`"GC test"`)
 	defer result4.Free()
+	require.False(t, result4.IsException()) // Check for exceptions instead of error
 	require.Equal(t, "GC test", result4.String())
 }

@@ -196,19 +196,19 @@ func TestMarshalBasicTypes(t *testing.T) {
 	// Merged BigInt edge cases
 	t.Run("BigIntEdgeCases", func(t *testing.T) {
 		// Test valid BigInt that can be converted to int64
-		jsVal, err := ctx.Eval("BigInt('123456789')")
-		require.NoError(t, err)
+		jsVal := ctx.Eval("BigInt('123456789')")
 		defer jsVal.Free()
+		require.False(t, jsVal.IsException())
 
 		var result int64
-		err = ctx.Unmarshal(jsVal, &result)
+		err := ctx.Unmarshal(jsVal, &result)
 		require.NoError(t, err)
 		require.Equal(t, int64(123456789), result)
 
 		// Test valid BigInt that can be converted to uint64
-		jsVal2, err := ctx.Eval("BigInt('18446744073709551615')") // max uint64
-		require.NoError(t, err)
+		jsVal2 := ctx.Eval("BigInt('18446744073709551615')")
 		defer jsVal2.Free()
+		require.False(t, jsVal2.IsException())
 
 		var result2 uint64
 		err = ctx.Unmarshal(jsVal2, &result2)
@@ -651,11 +651,11 @@ func TestTypedArrays(t *testing.T) {
 
 		for _, tt := range jsTests {
 			t.Run(tt.name, func(t *testing.T) {
-				jsVal, err := ctx.Eval(tt.jsCode)
-				require.NoError(t, err)
+				jsVal := ctx.Eval(tt.jsCode)
 				defer jsVal.Free()
+				require.False(t, jsVal.IsException())
 
-				err = ctx.Unmarshal(jsVal, tt.target)
+				err := ctx.Unmarshal(jsVal, tt.target)
 				require.NoError(t, err)
 
 				result := reflect.ValueOf(tt.target).Elem().Interface()
@@ -683,7 +683,7 @@ func TestTypedArrayErrors(t *testing.T) {
             });
             corrupted;
         `, typeName, typeName)
-		val, _ := ctx.Eval(jsCode)
+		val := ctx.Eval(jsCode)
 		return val
 	}
 
@@ -719,7 +719,7 @@ func TestTypedArrayErrors(t *testing.T) {
 
 	// Test specific error cases for byte arrays
 	t.Run("ByteArrayErrors", func(t *testing.T) {
-		fakeArrayBuffer, err := ctx.Eval(`
+		fakeArrayBuffer := ctx.Eval(`
             var fakeBuffer = {
                 constructor: ArrayBuffer,
                 byteLength: 10
@@ -727,11 +727,11 @@ func TestTypedArrayErrors(t *testing.T) {
             Object.setPrototypeOf(fakeBuffer, ArrayBuffer.prototype);
             fakeBuffer;
         `)
-		require.NoError(t, err)
 		defer fakeArrayBuffer.Free()
+		require.False(t, fakeArrayBuffer.IsException())
 
 		var result []byte
-		err = ctx.Unmarshal(fakeArrayBuffer, &result)
+		err := ctx.Unmarshal(fakeArrayBuffer, &result)
 		if err != nil {
 			t.Logf("✓ Covered ToByteArray error branch: %v", err)
 		}
@@ -739,12 +739,12 @@ func TestTypedArrayErrors(t *testing.T) {
 
 	// Test fallback to regular array
 	t.Run("FallbackToRegularArray", func(t *testing.T) {
-		jsVal, err := ctx.Eval(`[1, 2, 3]`)
-		require.NoError(t, err)
+		jsVal := ctx.Eval(`[1, 2, 3]`)
 		defer jsVal.Free()
+		require.False(t, jsVal.IsException())
 
 		var result []int8
-		err = ctx.Unmarshal(jsVal, &result)
+		err := ctx.Unmarshal(jsVal, &result)
 		require.NoError(t, err)
 		require.Equal(t, []int8{1, 2, 3}, result)
 	})
@@ -810,11 +810,11 @@ func TestComplexTypes(t *testing.T) {
 
 		for _, tt := range tests {
 			t.Run(tt.name, func(t *testing.T) {
-				jsVal, err := ctx.Eval(tt.jsCode)
-				require.NoError(t, err)
+				jsVal := ctx.Eval(tt.jsCode)
 				defer jsVal.Free()
+				require.False(t, jsVal.IsException())
 
-				err = ctx.Unmarshal(jsVal, tt.target)
+				err := ctx.Unmarshal(jsVal, tt.target)
 				require.NoError(t, err)
 
 				result := reflect.ValueOf(tt.target).Elem().Interface()
@@ -858,9 +858,9 @@ func TestComplexTypes(t *testing.T) {
 		require.NotNil(t, result3)
 
 		// Mixed key types (numeric string to int key)
-		jsVal4, err := ctx.Eval(`({abc: "value", "123": "numeric"})`)
-		require.NoError(t, err)
+		jsVal4 := ctx.Eval(`({abc: "value", "123": "numeric"})`)
 		defer jsVal4.Free()
+		require.False(t, jsVal4.IsException())
 
 		var result4 map[int]string
 		err = ctx.Unmarshal(jsVal4, &result4)
@@ -1004,18 +1004,17 @@ func TestUnmarshalInterface(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var jsVal *Value
-			var err error
 
 			if tt.jsCode == "undefined" {
 				jsVal = ctx.Undefined()
 			} else {
-				jsVal, err = ctx.Eval(tt.jsCode)
-				require.NoError(t, err)
+				jsVal = ctx.Eval(tt.jsCode)
+				require.False(t, jsVal.IsException())
 			}
 			defer jsVal.Free()
 
 			var result interface{}
-			err = ctx.Unmarshal(jsVal, &result)
+			err := ctx.Unmarshal(jsVal, &result)
 			require.NoError(t, err)
 			require.Equal(t, tt.expected, result)
 		})
@@ -1118,11 +1117,11 @@ func TestErrorCases(t *testing.T) {
 
 		for _, tt := range tests {
 			t.Run(tt.name, func(t *testing.T) {
-				jsVal, err := ctx.Eval(tt.jsCode)
-				require.NoError(t, err)
+				jsVal := ctx.Eval(tt.jsCode)
 				defer jsVal.Free()
+				require.False(t, jsVal.IsException())
 
-				err = ctx.Unmarshal(jsVal, tt.target)
+				err := ctx.Unmarshal(jsVal, tt.target)
 				require.Error(t, err)
 				require.Contains(t, err.Error(), tt.expectedErr)
 			})
@@ -1131,18 +1130,18 @@ func TestErrorCases(t *testing.T) {
 
 	t.Run("SpecificErrorPaths", func(t *testing.T) {
 		// PropertyNames error
-		jsVal, err := ctx.Eval(`
+		jsVal := ctx.Eval(`
             new Proxy({}, {
                 ownKeys: function(target) {
                     throw new Error("PropertyNames test error");
                 }
             });
         `)
-		require.NoError(t, err)
 		defer jsVal.Free()
+		require.False(t, jsVal.IsException())
 
 		var mapResult map[string]interface{}
-		err = ctx.Unmarshal(jsVal, &mapResult)
+		err := ctx.Unmarshal(jsVal, &mapResult)
 		require.Error(t, err)
 
 		var interfaceResult interface{}
@@ -1150,9 +1149,9 @@ func TestErrorCases(t *testing.T) {
 		require.Error(t, err)
 
 		// BigInt range errors
-		jsVal2, err := ctx.Eval("BigInt('9223372036854775808')")
-		require.NoError(t, err)
+		jsVal2 := ctx.Eval("BigInt('9223372036854775808')")
 		defer jsVal2.Free()
+		require.False(t, jsVal2.IsException())
 
 		var result int64
 		err = ctx.Unmarshal(jsVal2, &result)
@@ -1160,9 +1159,9 @@ func TestErrorCases(t *testing.T) {
 		require.Contains(t, err.Error(), "BigInt value out of range for int64")
 
 		// Negative BigInt to uint64
-		jsVal3, err := ctx.Eval("BigInt('-1')")
-		require.NoError(t, err)
+		jsVal3 := ctx.Eval("BigInt('-1')")
 		defer jsVal3.Free()
+		require.False(t, jsVal3.IsException())
 
 		var result2 uint64
 		err = ctx.Unmarshal(jsVal3, &result2)
@@ -1179,9 +1178,9 @@ func TestErrorCases(t *testing.T) {
 		require.Contains(t, err.Error(), "cannot unmarshal negative number into Go uint64")
 
 		// Unsupported JavaScript types
-		jsVal5, err := ctx.Eval(`Symbol('test')`)
-		require.NoError(t, err)
+		jsVal5 := ctx.Eval(`Symbol('test')`)
 		defer jsVal5.Free()
+		require.False(t, jsVal5.IsException())
 
 		var result4 interface{}
 		err = ctx.Unmarshal(jsVal5, &result4)
@@ -1210,11 +1209,11 @@ func TestErrorCases(t *testing.T) {
 
 		for _, tt := range errorCases {
 			t.Run(tt.name, func(t *testing.T) {
-				jsVal, err := ctx.Eval(tt.jsCode)
-				require.NoError(t, err)
+				jsVal := ctx.Eval(tt.jsCode)
 				defer jsVal.Free()
+				require.False(t, jsVal.IsException())
 
-				err = ctx.Unmarshal(jsVal, tt.target)
+				err := ctx.Unmarshal(jsVal, tt.target)
 				require.Error(t, err)
 				require.Contains(t, err.Error(), tt.expectedErr)
 			})
@@ -1223,7 +1222,7 @@ func TestErrorCases(t *testing.T) {
 
 	// Test ToByteArray error in unmarshalInterface
 	t.Run("ToByteArrayErrorInInterface", func(t *testing.T) {
-		fakeArrayBuffer, err := ctx.Eval(`
+		fakeArrayBuffer := ctx.Eval(`
             var fakeArrayBuffer = {
                 constructor: ArrayBuffer,
                 byteLength: 10,
@@ -1236,11 +1235,11 @@ func TestErrorCases(t *testing.T) {
             });
             fakeArrayBuffer;
         `)
-		require.NoError(t, err)
 		defer fakeArrayBuffer.Free()
+		require.False(t, fakeArrayBuffer.IsException())
 
 		var result interface{}
-		err = ctx.Unmarshal(fakeArrayBuffer, &result)
+		err := ctx.Unmarshal(fakeArrayBuffer, &result)
 		if err != nil {
 			t.Logf("✓ Covered ToByteArray error in unmarshalInterface: %v", err)
 		}
@@ -1275,13 +1274,13 @@ func TestIntegrationExample(t *testing.T) {
 
 	// Use in JavaScript
 	ctx.Globals().Set("user", jsVal)
-	result, err := ctx.Eval(`
+	result := ctx.Eval(`
         user.name = "Jane Doe";
         user.tags.push("moderator");
         user;
     `)
-	require.NoError(t, err)
 	defer result.Free()
+	require.False(t, result.IsException())
 
 	// Unmarshal JavaScript -> Go
 	var updatedUser User

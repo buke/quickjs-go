@@ -418,7 +418,7 @@ func EvalLoadOnly(loadOnly bool) EvalOption {
 // Eval returns a js value with given code.
 // Need call Free() `quickjs.Value`'s returned by `Eval()` and `EvalFile()` and `EvalBytecode()`.
 // func (ctx *Context) Eval(code string) (*Value, error) { return ctx.EvalFile(code, "code") }
-func (ctx *Context) Eval(code string, opts ...EvalOption) (*Value, error) {
+func (ctx *Context) Eval(code string, opts ...EvalOption) *Value {
 	options := EvalOptions{
 		js_eval_type_global: true,
 		filename:            "<input>",
@@ -458,26 +458,23 @@ func (ctx *Context) Eval(code string, opts ...EvalOption) (*Value, error) {
 	} else {
 		val = &Value{ctx: ctx, ref: C.JS_Eval(ctx.ref, codePtr, C.size_t(len(code)), filenamePtr, cFlag)}
 	}
-	if val.IsException() {
-		return val, ctx.Exception()
-	}
 
-	return val, nil
+	return val
 }
 
 // EvalFile returns a js value with given code and filename.
 // Need call Free() `quickjs.Value`'s returned by `Eval()` and `EvalFile()` and `EvalBytecode()`.
-func (ctx *Context) EvalFile(filePath string, opts ...EvalOption) (*Value, error) {
+func (ctx *Context) EvalFile(filePath string, opts ...EvalOption) *Value {
 	b, err := os.ReadFile(filePath)
 	if err != nil {
-		return ctx.Null(), err
+		return ctx.ThrowError(err)
 	}
 	opts = append(opts, EvalFileName(filePath))
 	return ctx.Eval(string(b), opts...)
 }
 
 // LoadModule returns a js value with given code and module name.
-func (ctx *Context) LoadModule(code string, moduleName string, opts ...EvalOption) (*Value, error) {
+func (ctx *Context) LoadModule(code string, moduleName string, opts ...EvalOption) *Value {
 	options := EvalOptions{
 		load_only: false,
 	}
@@ -489,12 +486,12 @@ func (ctx *Context) LoadModule(code string, moduleName string, opts ...EvalOptio
 	defer C.free(unsafe.Pointer(codePtr))
 
 	if C.JS_DetectModule(codePtr, C.size_t(len(code))) == 0 {
-		return ctx.Null(), fmt.Errorf("not a module")
+		return ctx.ThrowSyntaxError("not a module: %s", moduleName)
 	}
 
 	codeByte, err := ctx.Compile(code, EvalFlagModule(true), EvalFlagCompileOnly(true), EvalFileName(moduleName))
 	if err != nil {
-		return ctx.Null(), err
+		return ctx.ThrowError(err)
 	}
 
 	return ctx.LoadModuleBytecode(codeByte, EvalLoadOnly(options.load_only))
@@ -502,10 +499,10 @@ func (ctx *Context) LoadModule(code string, moduleName string, opts ...EvalOptio
 }
 
 // LoadModuleFile returns a js value with given file path and module name.
-func (ctx *Context) LoadModuleFile(filePath string, moduleName string) (*Value, error) {
+func (ctx *Context) LoadModuleFile(filePath string, moduleName string) *Value {
 	b, err := os.ReadFile(filePath)
 	if err != nil {
-		return ctx.Null(), err
+		return ctx.ThrowError(err)
 	}
 	return ctx.LoadModule(string(b), moduleName)
 }
@@ -517,9 +514,9 @@ func (ctx *Context) CompileModule(filePath string, moduleName string, opts ...Ev
 }
 
 // LoadModuleByteCode returns a js value with given bytecode and module name.
-func (ctx *Context) LoadModuleBytecode(buf []byte, opts ...EvalOption) (*Value, error) {
+func (ctx *Context) LoadModuleBytecode(buf []byte, opts ...EvalOption) *Value {
 	if len(buf) == 0 {
-		return ctx.Null(), fmt.Errorf("empty bytecode")
+		return ctx.ThrowSyntaxError("empty bytecode")
 	}
 
 	options := EvalOptions{}
@@ -535,38 +532,26 @@ func (ctx *Context) LoadModuleBytecode(buf []byte, opts ...EvalOption) (*Value, 
 	// Use our custom LoadModuleBytecode function instead of js_std_eval_binary
 	cVal := C.LoadModuleBytecode(ctx.ref, (*C.uint8_t)(unsafe.Pointer(&buf[0])), C.size_t(len(buf)), cLoadOnlyFlag)
 
-	if C.JS_IsException(cVal) == 1 {
-		return ctx.Null(), ctx.Exception()
-	}
-
-	return &Value{ctx: ctx, ref: cVal}, nil
+	return &Value{ctx: ctx, ref: cVal}
 }
 
 // EvalBytecode returns a js value with given bytecode.
 // Need call Free() `quickjs.Value`'s returned by `Eval()` and `EvalFile()` and `EvalBytecode()`.
-func (ctx *Context) EvalBytecode(buf []byte) (*Value, error) {
+func (ctx *Context) EvalBytecode(buf []byte) *Value {
 	cbuf := C.CBytes(buf)
 	obj := &Value{ctx: ctx, ref: C.JS_ReadObject(ctx.ref, (*C.uint8_t)(cbuf), C.size_t(len(buf)), C.int(C.GetReadObjBytecode()))}
 	defer C.js_free(ctx.ref, unsafe.Pointer(cbuf))
 	if obj.IsException() {
-		return obj, ctx.Exception()
+		return obj
 	}
 
-	val := &Value{ctx: ctx, ref: C.JS_EvalFunction(ctx.ref, obj.ref)}
-	if val.IsException() {
-		return val, ctx.Exception()
-	}
-
-	return val, nil
+	return &Value{ctx: ctx, ref: C.JS_EvalFunction(ctx.ref, obj.ref)}
 }
 
 // Compile returns a compiled bytecode with given code.
 func (ctx *Context) Compile(code string, opts ...EvalOption) ([]byte, error) {
 	opts = append(opts, EvalFlagCompileOnly(true))
-	val, err := ctx.Eval(code, opts...)
-	if err != nil {
-		return nil, err
-	}
+	val := ctx.Eval(code, opts...)
 	defer val.Free()
 
 	var kSize C.size_t = 0
@@ -684,19 +669,19 @@ func (ctx *Context) Loop() {
 }
 
 // Wait for a promise and execute pending jobs while waiting for it. Return the promise result or JS_EXCEPTION in case of promise rejection.
-func (ctx *Context) Await(v *Value) (*Value, error) {
-	val := &Value{ctx: ctx, ref: C.js_std_await(ctx.ref, v.ref)}
-	if val.IsException() {
-		return val, ctx.Exception()
+func (ctx *Context) Await(v *Value) *Value {
+	if !v.IsPromise() {
+		// Not a promise, return as-is
+		return v
 	}
-	return val, nil
+	return &Value{ctx: ctx, ref: C.js_std_await(ctx.ref, v.ref)}
 }
 
 // Promise creates a new Promise with executor function
 // Executor runs synchronously in current thread for thread safety
 func (ctx *Context) Promise(executor func(resolve, reject func(*Value))) *Value {
 	// Create Promise using JavaScript code to avoid complex C API reference management
-	promiseSetup, _ := ctx.Eval(`
+	promiseSetup := ctx.Eval(`
         (() => {
             let _resolve, _reject;
             const promise = new Promise((resolve, reject) => {

@@ -57,9 +57,15 @@ func Example() {
 	// bind "test" object to global object
 	ctx.Globals().Set("test", test)
 
-	// call js function by js
-	js_ret, _ := ctx.Eval(`test.hello("Javascript!")`)
+	// call js function by js - FIXED: removed error handling
+	js_ret := ctx.Eval(`test.hello("Javascript!")`)
 	defer js_ret.Free()
+	// Check for exceptions instead of error
+	if js_ret.IsException() {
+		err := ctx.Exception()
+		fmt.Printf("Error: %v\n", err)
+		return
+	}
 	fmt.Println(js_ret.String())
 
 	// call js function by go
@@ -74,17 +80,29 @@ func Example() {
 		})
 	}))
 
-	ret, _ := ctx.Eval(`
+	ret := ctx.Eval(`
         var ret;
         testAsync().then(v => ret = v)
     `)
 	defer ret.Free()
+	// Check for exceptions instead of error
+	if ret.IsException() {
+		err := ctx.Exception()
+		fmt.Printf("Error: %v\n", err)
+		return
+	}
 
 	// wait for promise resolve
 	ctx.Loop()
 
-	asyncRet, _ := ctx.Eval("ret")
+	asyncRet := ctx.Eval("ret")
 	defer asyncRet.Free()
+	// Check for exceptions instead of error
+	if asyncRet.IsException() {
+		err := ctx.Exception()
+		fmt.Printf("Error: %v\n", err)
+		return
+	}
 	fmt.Println(asyncRet.String())
 
 	// Demonstrate TypedArray functionality
@@ -92,8 +110,14 @@ func Example() {
 	typedArray := ctx.Float32Array(floatData)
 	ctx.Globals().Set("floatData", typedArray)
 
-	arrayResult, _ := ctx.Eval(`floatData instanceof Float32Array`)
+	arrayResult := ctx.Eval(`floatData instanceof Float32Array`)
 	defer arrayResult.Free()
+	// Check for exceptions instead of error
+	if arrayResult.IsException() {
+		err := ctx.Exception()
+		fmt.Printf("Error: %v\n", err)
+		return
+	}
 	fmt.Println("TypedArray:", arrayResult.Bool())
 
 	// Demonstrate Marshal/Unmarshal functionality with User struct
@@ -106,18 +130,35 @@ func Example() {
 		Scores:   []float32{95.5, 87.2, 92.0},
 	}
 
-	jsVal, _ := ctx.Marshal(user)
+	jsVal, err := ctx.Marshal(user)
+	if err != nil {
+		fmt.Printf("Marshal error: %v\n", err)
+		return
+	}
 	ctx.Globals().Set("userData", jsVal)
 
-	marshalResult, _ := ctx.Eval(`userData.name + " avg: " + (userData.scores.reduce((s,v) => s+v) / userData.scores.length).toFixed(1)`)
+	marshalResult := ctx.Eval(`userData.name + " avg: " + (userData.scores.reduce((s,v) => s+v) / userData.scores.length).toFixed(1)`)
 	defer marshalResult.Free()
+	// Check for exceptions instead of error
+	if marshalResult.IsException() {
+		err := ctx.Exception()
+		fmt.Printf("Error: %v\n", err)
+		return
+	}
 	fmt.Println("Marshal:", marshalResult.String())
 
 	// Demonstrate Class Binding functionality with the same User struct
-	userConstructor, _, _ := ctx.BindClass(&User{})
+	userConstructor, _ := ctx.BindClass(&User{})
+	if userConstructor.IsException() {
+		defer userConstructor.Free()
+		err := ctx.Exception()
+		fmt.Printf("BindClass error: %v\n", err)
+		return
+	}
+
 	ctx.Globals().Set("User", userConstructor)
 
-	classResult, _ := ctx.Eval(`
+	classResult := ctx.Eval(`
         const user = new User({
             id: 456,
             name: "Bob",
@@ -129,6 +170,12 @@ func Example() {
         user.GetAverageScore().toFixed(1)
     `)
 	defer classResult.Free()
+	// Check for exceptions instead of error
+	if classResult.IsException() {
+		err := ctx.Exception()
+		fmt.Printf("Error: %v\n", err)
+		return
+	}
 	fmt.Println("Class binding:", classResult.String())
 
 	// Output:

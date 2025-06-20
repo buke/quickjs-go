@@ -51,36 +51,44 @@ we prebuilt quickjs static library for the following platforms:
 
 ## Breaking Changes
 
-### Since v0.5.10
+### v0.5.11
+- **API Simplification**: Removed error return values from JavaScript execution methods
+  - `Context.Eval()`, `Context.EvalFile()`, `Context.LoadModule()`, `Context.LoadModuleBytecode()` now return only `*Value`
+  - `Context.EvalBytecode()`, `Context.Await()` now return only `*Value`  
+  - `Context.BindClass()`, `ClassBuilder.Build()` now return only `(*Value, uint32)`
+  * Tips: Use `Value.IsException()` to check for exceptions and Use `Context.Exception()` to get exception as Go error
 
-**Value Type System Changed from Value to *Value**
-
-All `Value` parameters and return values have been changed from value types to pointer types (`*Value`).
-
-#### Affected APIs
-
-**Context Methods:**
-- `Context.Function(fn func(*Context, Value, []Value) Value)` → `Context.Function(fn func(*Context, *Value, []*Value) *Value)`
-- All value creation methods now return `*Value` instead of `Value`
-
-**Class System:**
-- `ClassConstructorFunc: func(*Context, Value, []Value) (interface{}, error)` → `func(*Context, *Value, []*Value) (interface{}, error)`
-- `ClassMethodFunc: func(*Context, Value, []Value) Value` → `func(*Context, *Value, []*Value) *Value`
-- `ClassGetterFunc: func(*Context, Value) Value` → `func(*Context, *Value) *Value`
-- `ClassSetterFunc: func(*Context, Value, Value) Value` → `func(*Context, *Value, *Value) *Value`
-
-**Value Methods:**
-- `Value.Call()`, `Value.Execute()`, `Value.New()` etc. now accept `[]*Value` instead of `[]Value`
-- `Value.Set()`, `Value.Get()` etc. now work with `*Value` parameters
+### v0.5.10
+- **Value Type Changed from Value to *Value**
+  - All `Value` parameters and return values have been changed from value types to pointer types (`*Value`)
+  - `Context.Function(fn func(*Context, Value, []Value) Value)` → `Context.Function(fn func(*Context, *Value, []*Value) *Value)`
+  - All value creation methods now return `*Value` instead of `Value`
+  - Class struct signatures updated to use `*Value` parameters
 
 ## Guidelines
 
-1. Free `quickjs.Runtime` and `quickjs.Context` once you are done using them.
-2. Manually free `quickjs.Value` when no longer needed to prevent memory leaks. QuickJS uses reference counting, so if a value is referenced by other objects, you only need to ensure the referencing objects are properly freed.
-3. Use `ctx.Loop()` wait for promise/job result after you using promise/job
-4. You may access the stacktrace of an error returned by `Eval()` or `EvalFile()` by casting it to a `*quickjs.Error`.
-5. Make new copies of arguments should you want to return them in functions you created.
+### Error Handling
+- Use `Value.IsException()` or `Context.HasException()` to check for exceptions
+- Use `Context.Exception()` to get the exception as a Go error
+- Always call `defer value.Free()` for returned values to prevent memory leaks
+- Check `Context.HasException()` after operations that might throw
 
+### Memory Management
+- Call  `value.Free()` for `*Value` objects you create or receive. QuickJS uses reference counting for memory management, so if a value is referenced by other objects, you only need to ensure the referencing objects are properly freed.
+- Runtime and Context objects have their own cleanup methods (`Close()`). Close them once you are done using them.
+- Use `runtime.SetFinalizer()` cautiously as it may interfere with QuickJS's GC.
+
+### Performance Tips
+- QuickJS is not thread-safe. Ensure execution in a single thread or use a thread pool pattern with pre-initialized runtimes
+- Reuse Runtime and Context objects when possible
+- Avoid frequent conversion between Go and JS values
+- Consider using bytecode compilation for frequently executed scripts
+
+### Best Practices
+- Keep JavaScript execution isolated to prevent interference - **Create separate Runtime/Context instances for different tasks or users**
+- Use appropriate `EvalOptions` for different script types
+- Handle both JavaScript exceptions and Go errors appropriately
+- Test memory usage under load to prevent leaks
 
 
 ## Usage
@@ -109,11 +117,15 @@ func main() {
     ctx := rt.NewContext()
     defer ctx.Close()
 
-    ret, err := ctx.Eval("'Hello ' + 'QuickJS!'")
-    if err != nil {
-        println(err.Error())
-    }
+    ret := ctx.Eval("'Hello ' + 'QuickJS!'")
     defer ret.Free()
+    
+    if ret.IsException() {
+        err := ctx.Exception()
+        println(err.Error())
+        return
+    }
+    
     fmt.Println(ret.String())
 }
 ```
@@ -144,8 +156,15 @@ func main() {
     test.Set("C", ctx.String("String C"))
     ctx.Globals().Set("test", test)
 
-    ret, _ := ctx.Eval(`Object.keys(test).map(key => test[key]).join(" ")`)
+    ret := ctx.Eval(`Object.keys(test).map(key => test[key]).join(" ")`)
     defer ret.Free()
+    
+    if ret.IsException() {
+        err := ctx.Exception()
+        fmt.Println("Error:", err.Error())
+        return
+    }
+    
     fmt.Println(ret.String())
 }
 
@@ -185,13 +204,27 @@ func main() {
     ctx.Globals().Set("test", test)
 
     // call js function by js
-    js_ret, _ := ctx.Eval(`test.hello("Javascript!")`)
+    js_ret := ctx.Eval(`test.hello("Javascript!")`)
     defer js_ret.Free()
+    
+    if js_ret.IsException() {
+        err := ctx.Exception()
+        fmt.Println("Error:", err.Error())
+        return
+    }
+    
     fmt.Println(js_ret.String())
 
     // call js function by go
     go_ret := test.Call("hello", ctx.String("Golang!"))
     defer go_ret.Free()
+    
+    if go_ret.IsException() {
+        err := ctx.Exception()
+        fmt.Println("Error:", err.Error())
+        return
+    }
+    
     fmt.Println(go_ret.String())
 
     // bind go function to Javascript async function using Function + Promise
@@ -201,18 +234,30 @@ func main() {
         })
     }))
 
-    ret, _ := ctx.Eval(`
+    ret := ctx.Eval(`
             var ret;
             testAsync().then(v => ret = v)
         `)
     defer ret.Free()
 
+    if ret.IsException() {
+        err := ctx.Exception()
+        fmt.Println("Error:", err.Error())
+        return
+    }
+
     // wait for promise resolve
     ctx.Loop()
 
     //get promise result
-    asyncRet, _ := ctx.Eval("ret")
+    asyncRet := ctx.Eval("ret")
     defer asyncRet.Free()
+
+    if asyncRet.IsException() {
+        err := ctx.Exception()
+        fmt.Println("Error:", err.Error())
+        return
+    }
 
     fmt.Println(asyncRet.String())
 
@@ -249,8 +294,13 @@ func main() {
         return ctx.ThrowError(errors.New("expected error"))
     })
 
-    _, actual := ctx.Eval("A()")
-    fmt.Println(actual.Error())
+    result := ctx.Eval("A()")
+    defer result.Free()
+    
+    if result.IsException() {
+        actual := ctx.Exception()
+        fmt.Println(actual.Error())
+    }
 }
 ```
 
@@ -294,7 +344,7 @@ func main() {
     ctx.Globals().Set("bigInt64Array", bigInt64Array)
 
     // Use in JavaScript
-    result, _ := ctx.Eval(`
+    result := ctx.Eval(`
         // Check types
         const results = {
             int8Type: int8Array instanceof Int8Array,
@@ -307,6 +357,12 @@ func main() {
         results;
     `)
     defer result.Free()
+
+    if result.IsException() {
+        err := ctx.Exception()
+        fmt.Println("Error:", err.Error())
+        return
+    }
 
     fmt.Println("Results:", result.JSONStringify())
 }
@@ -329,7 +385,7 @@ func main() {
     defer ctx.Close()
 
     // Create TypedArrays in JavaScript
-    jsTypedArrays, _ := ctx.Eval(`
+    jsTypedArrays := ctx.Eval(`
         ({
             int8: new Int8Array([-128, -1, 0, 1, 127]),
             uint16: new Uint16Array([0, 32768, 65535]),
@@ -338,6 +394,12 @@ func main() {
         })
     `)
     defer jsTypedArrays.Free()
+
+    if jsTypedArrays.IsException() {
+        err := ctx.Exception()
+        fmt.Println("Error:", err.Error())
+        return
+    }
 
     // Convert to Go slices
     int8Array := jsTypedArrays.Get("int8")
@@ -412,7 +474,7 @@ func main() {
     defer ctx.Close()
 
     // Create various arrays
-    regularArray, _ := ctx.Eval(`[1, 2, 3]`)
+    regularArray := ctx.Eval(`[1, 2, 3]`)
     defer regularArray.Free()
 
     int32Array := ctx.Int32Array([]int32{1, 2, 3})
@@ -465,7 +527,7 @@ func main() {
     ctx.Globals().Set("imageData", imageArray)
 
     // Process in JavaScript
-    result, _ := ctx.Eval(`
+    result := ctx.Eval(`
         // Convert RGB to grayscale
         const grayscale = new Uint8Array(imageData.length / 3);
         for (let i = 0; i < imageData.length; i += 3) {
@@ -477,6 +539,12 @@ func main() {
         grayscale;
     `)
     defer result.Free()
+
+    if result.IsException() {
+        err := ctx.Exception()
+        fmt.Println("Error:", err.Error())
+        return
+    }
 
     // Convert back to Go
     if result.IsUint8Array() {
@@ -533,7 +601,7 @@ func main() {
 
     // Use the marshaled value in JavaScript
     ctx.Globals().Set("user", jsVal)
-    result, _ := ctx.Eval(`
+    result := ctx.Eval(`
         const info = user.name + " is " + user.age + " years old";
         const floatArrayType = user.floatData instanceof Float32Array;
         const intArrayType = user.intData instanceof Int32Array;
@@ -548,6 +616,13 @@ func main() {
         });
     `)
     defer result.Free()
+    
+    if result.IsException() {
+        err := ctx.Exception()
+        fmt.Println("Error:", err.Error())
+        return
+    }
+    
     fmt.Println("Result:", result.JSONStringify())
 
     // Unmarshal JavaScript values back to Go
@@ -617,7 +692,7 @@ func main() {
 
     // Check TypedArray types in JavaScript
     ctx.Globals().Set("user", jsVal)
-    result, _ := ctx.Eval(`
+    result := ctx.Eval(`
         ({
             scoresType: user.scores instanceof Float32Array,
             dataType: user.data instanceof Int32Array,
@@ -628,8 +703,14 @@ func main() {
     `)
     defer result.Free()
 
+    if result.IsException() {
+        err := ctx.Exception()
+        fmt.Println("Error:", err.Error())
+        return
+    }
+
     // Modify in JavaScript
-    modifyResult, _ := ctx.Eval(`
+    modifyResult := ctx.Eval(`
         user.name = "Alice Smith";
         user.tags.push("moderator");
         // Modify TypedArray data
@@ -637,6 +718,12 @@ func main() {
         user;
     `)
     defer modifyResult.Free()
+
+    if modifyResult.IsException() {
+        err := ctx.Exception()
+        fmt.Println("Error:", err.Error())
+        return
+    }
 
     // Unmarshal back to Go struct
     var updatedUser User
@@ -808,7 +895,7 @@ func main() {
     }
 
     // Use the module in JavaScript with standard ES6 import
-    result, err := ctx.Eval(`
+    result := ctx.Eval(`
         (async function() {
             // Named imports
             const { PI, add, version } = await import('math');
@@ -820,7 +907,8 @@ func main() {
     `, quickjs.EvalAwait(true))
     defer result.Free()
 
-    if err != nil {
+    if result.IsException() {
+        err := ctx.Exception()
         panic(err)
     }
 
@@ -876,7 +964,7 @@ func main() {
     }
 
     // Use mixed imports in JavaScript
-    result, err := ctx.Eval(`
+    result := ctx.Eval(`
         (async function() {
             // Import from utils module
             const { greet, config, constants } = await import('utils');
@@ -891,7 +979,8 @@ func main() {
     `, quickjs.EvalAwait(true))
     defer result.Free()
 
-    if err != nil {
+    if result.IsException() {
+        err := ctx.Exception()
         panic(err)
     }
 
@@ -953,7 +1042,7 @@ func main() {
     }
 
     // Use multiple modules together
-    result, err := ctx.Eval(`
+    result := ctx.Eval(`
         (async function() {
             // Import from multiple modules
             const { add, PI } = await import('math');
@@ -969,7 +1058,8 @@ func main() {
     `, quickjs.EvalAwait(true))
     defer result.Free()
 
-    if err != nil {
+    if result.IsException() {
+        err := ctx.Exception()
         panic(err)
     }
 
@@ -1023,7 +1113,7 @@ func main() {
     defer ctx.Close()
 
     // Create Point class using ClassBuilder
-    pointConstructor, _, err := quickjs.NewClassBuilder("Point").
+    pointConstructor, _ := quickjs.NewClassBuilder("Point").
         Constructor(func(ctx *quickjs.Context, instance *quickjs.Value, args []*quickjs.Value) (interface{}, error) {
             x, y := 0.0, 0.0
             name := "Unnamed Point"
@@ -1087,15 +1177,11 @@ func main() {
         }).
         Build(ctx)
 
-    if err != nil {
-        panic(err)
-    }
-
     // Register the class
     ctx.Globals().Set("Point", pointConstructor)
 
     // Use in JavaScript
-    result, _ := ctx.Eval(`
+    result := ctx.Eval(`
         const p = new Point(3, 4, "My Point");
         const dist1 = p.distance();
         p.move(1, 1);
@@ -1123,10 +1209,16 @@ func main() {
     `)
     defer result.Free()
     
+    if result.IsException() {
+        err := ctx.Exception()
+        fmt.Println("Error:", err.Error())
+        return
+    }
+    
     fmt.Println("Result:", result.JSONStringify())
     
     // Demonstrate the difference between accessors and properties
-    propertyTest, _ := ctx.Eval(`
+    propertyTest := ctx.Eval(`
         const p1 = new Point(1, 1);
         const p2 = new Point(2, 2);
         
@@ -1139,6 +1231,12 @@ func main() {
         ({ sameVersion, differentX });
     `)
     defer propertyTest.Free()
+    
+    if propertyTest.IsException() {
+        err := ctx.Exception()
+        fmt.Println("Error:", err.Error())
+        return
+    }
     
     fmt.Println("Property vs Accessor:", propertyTest.JSONStringify())
 }
@@ -1186,23 +1284,27 @@ func main() {
     defer ctx.Close()
 
     // Automatically create User class from struct
-    userConstructor, _, err := ctx.BindClass(&User{})
-    if err != nil {
-        panic(err)
-    }
+    userConstructor, _ := ctx.BindClass(&User{})
 
     ctx.Globals().Set("User", userConstructor)
 
     // Use with positional arguments
-    result1, _ := ctx.Eval(`
+    result1 := ctx.Eval(`
         const user1 = new User(1, "Alice", "alice@example.com", 25, true, [95.5, 87.2]);
         user1.GetFullInfo();
     `)
     defer result1.Free()
+    
+    if result1.IsException() {
+        err := ctx.Exception()
+        fmt.Println("Error:", err.Error())
+        return
+    }
+    
     fmt.Println("Positional:", result1.String())
 
     // Use with named arguments (object parameter)
-    result2, _ := ctx.Eval(`
+    result2 := ctx.Eval(`
         const user2 = new User({
             id: 2,
             name: "Bob",
@@ -1229,10 +1331,17 @@ func main() {
         });
     `)
     defer result2.Free()
+    
+    if result2.IsException() {
+        err := ctx.Exception()
+        fmt.Println("Error:", err.Error())
+        return
+    }
+    
     fmt.Println("Named:", result2.JSONStringify())
 
     // Demonstrate field accessor synchronization
-    result3, _ := ctx.Eval(`
+    result3 := ctx.Eval(`
         const user3 = new User(3, "Charlie", "charlie@example.com", 35, true, []);
         
         // Field accessors provide direct access to Go struct fields
@@ -1260,6 +1369,13 @@ func main() {
         });
     `)
     defer result3.Free()
+    
+    if result3.IsException() {
+        err := ctx.Exception()
+        fmt.Println("Error:", err.Error())
+        return
+    }
+    
     fmt.Println("Synchronization demonstration:", result3.JSONStringify())
 }
 ```
@@ -1296,7 +1412,10 @@ func main() {
     fib(10)
     `
     // Compile the script to bytecode
-    buf, _ := ctx.Compile(jsStr)
+    buf, err := ctx.Compile(jsStr)
+    if err != nil {
+        panic(err)
+    }
 
     // Create a new runtime
     rt2 := quickjs.NewRuntime()
@@ -1307,8 +1426,15 @@ func main() {
     defer ctx2.Close()
 
     //Eval bytecode
-    result, _ := ctx2.EvalBytecode(buf)
+    result := ctx2.EvalBytecode(buf)
     defer result.Free()
+    
+    if result.IsException() {
+        err := ctx2.Exception()
+        fmt.Println("Error:", err.Error())
+        return
+    }
+    
     fmt.Println(result.Int32())
 }
 ```
@@ -1340,8 +1466,13 @@ func main() {
     ctx := rt.NewContext()
     defer ctx.Close()
 
-    result, err := ctx.Eval(`var array = []; while (true) { array.push(null) }`)
+    result := ctx.Eval(`var array = []; while (true) { array.push(null) }`)
     defer result.Free()
+    
+    if result.IsException() {
+        err := ctx.Exception()
+        fmt.Println("Memory limit exceeded:", err.Error())
+    }
 }
 ```
 
@@ -1365,26 +1496,29 @@ func main() {
     defer ctx.Close()
 
     // eval module
-    r1, err := ctx.EvalFile("./test/hello_module.js")
+    r1 := ctx.EvalFile("./test/hello_module.js")
     defer r1.Free()
-    if err != nil {
+    if r1.IsException() {
+        err := ctx.Exception()
         panic(err)
     }
 
     // load module
-    r2, err := ctx.LoadModuleFile("./test/fib_module.js", "fib_foo")
+    r2 := ctx.LoadModuleFile("./test/fib_module.js", "fib_foo")
     defer r2.Free()
-    if err != nil {
+    if r2.IsException() {
+        err := ctx.Exception()
         panic(err)
     }
 
     // call module
-    r3, err := ctx.Eval(`
+    r3 := ctx.Eval(`
     import {fib} from 'fib_foo';
     globalThis.result = fib(9);
     `)
     defer r3.Free()
-    if err != nil {
+    if r3.IsException() {
+        err := ctx.Exception()
         panic(err)
     }
 
