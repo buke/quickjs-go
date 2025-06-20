@@ -125,7 +125,7 @@ func main() {
         return
     }
     
-    fmt.Println(ret.String())
+    fmt.Println(ret.ToString())
 }
 ```
 
@@ -149,10 +149,10 @@ func main() {
     ctx := rt.NewContext()
     defer ctx.Close()
 
-    test := ctx.Object()
-    test.Set("A", ctx.String("String A"))
-    test.Set("B", ctx.String("String B"))
-    test.Set("C", ctx.String("String C"))
+    test := ctx.NewObject()
+    test.Set("A", ctx.NewString("String A"))
+    test.Set("B", ctx.NewString("String B"))
+    test.Set("C", ctx.NewString("String C"))
     ctx.Globals().Set("test", test)
 
     ret := ctx.Eval(`Object.keys(test).map(key => test[key]).join(" ")`)
@@ -164,7 +164,7 @@ func main() {
         return
     }
     
-    fmt.Println(ret.String())
+    fmt.Println(ret.ToString())
 }
 
 ```
@@ -189,14 +189,14 @@ func main() {
     defer ctx.Close()
 
     // 创建新对象
-    test := ctx.Object()
+    test := ctx.NewObject()
     // 将属性绑定到对象
-    test.Set("A", ctx.String("String A"))
-    test.Set("B", ctx.Int32(0))
-    test.Set("C", ctx.Bool(false))
+    test.Set("A", ctx.NewString("String A"))
+    test.Set("B", ctx.NewInt32(0))
+    test.Set("C", ctx.NewBool(false))
     // 将 go 函数绑定到 js 对象
-    test.Set("hello", ctx.Function(func(ctx *quickjs.Context, this *quickjs.Value, args []*quickjs.Value) *quickjs.Value {
-        return ctx.String("Hello " + args[0].String())
+    test.Set("hello", ctx.NewFunction(func(ctx *quickjs.Context, this *quickjs.Value, args []*quickjs.Value) *quickjs.Value {
+        return ctx.NewString("Hello " + args[0].ToString())
     }))
 
     // 将 "test" 对象绑定到全局对象
@@ -212,10 +212,10 @@ func main() {
         return
     }
     
-    fmt.Println(js_ret.String())
+    fmt.Println(js_ret.ToString())
 
     // 通过 go 调用 js 函数
-    go_ret := test.Call("hello", ctx.String("Golang!"))
+    go_ret := test.Call("hello", ctx.NewString("Golang!"))
     defer go_ret.Free()
     
     if go_ret.IsException() {
@@ -224,12 +224,12 @@ func main() {
         return
     }
     
-    fmt.Println(go_ret.String())
+    fmt.Println(go_ret.ToString())
 
     // 使用 Function + Promise 将 Go 函数绑定为 JavaScript 异步函数
-    ctx.Globals().Set("testAsync", ctx.Function(func(ctx *quickjs.Context, this *quickjs.Value, args []*quickjs.Value) *quickjs.Value {
+    ctx.Globals().Set("testAsync", ctx.NewFunction(func(ctx *quickjs.Context, this *quickjs.Value, args []*quickjs.Value) *quickjs.Value {
         return ctx.Promise(func(resolve, reject func(*quickjs.Value)) {
-            resolve(ctx.String("Hello Async Function!"))
+            resolve(ctx.NewString("Hello Async Function!"))
         })
     }))
 
@@ -258,7 +258,7 @@ func main() {
         return
     }
 
-    fmt.Println(asyncRet.String())
+    fmt.Println(asyncRet.ToString())
 
     // 输出:
     // Hello Javascript!
@@ -325,16 +325,16 @@ func main() {
 
     // 从 Go 切片创建各种 TypedArray
     int8Data := []int8{-128, -1, 0, 1, 127}
-    int8Array := ctx.Int8Array(int8Data)
+    int8Array := ctx.NewInt8Array(int8Data)
 
     uint8Data := []uint8{0, 128, 255}
-    uint8Array := ctx.Uint8Array(uint8Data)
+    uint8Array := ctx.NewUint8Array(uint8Data)
 
     float32Data := []float32{-3.14, 0.0, 2.718, 100.5}
-    float32Array := ctx.Float32Array(float32Data)
+    float32Array := ctx.NewFloat32Array(float32Data)
 
     int64Data := []int64{-9223372036854775808, 0, 9223372036854775807}
-    bigInt64Array := ctx.BigInt64Array(int64Data)
+    bigInt64Array := ctx.NewBigInt64Array(int64Data)
 
     // 将 TypedArray 设置为全局变量
     ctx.Globals().Set("int8Array", int8Array)
@@ -443,18 +443,18 @@ func main() {
 
 | Go 类型    | JavaScript TypedArray | Context 方法            | Value 方法          |
 |------------|----------------------|-------------------------|---------------------|
-| `[]int8`   | `Int8Array`          | `ctx.Int8Array()`       | `val.ToInt8Array()` |
-| `[]uint8`  | `Uint8Array`         | `ctx.Uint8Array()`      | `val.ToUint8Array()` |
-| `[]uint8`  | `Uint8ClampedArray`  | `ctx.Uint8ClampedArray()` | `val.ToUint8Array()` |
-| `[]int16`  | `Int16Array`         | `ctx.Int16Array()`      | `val.ToInt16Array()` |
-| `[]uint16` | `Uint16Array`        | `ctx.Uint16Array()`     | `val.ToUint16Array()` |
-| `[]int32`  | `Int32Array`         | `ctx.Int32Array()`      | `val.ToInt32Array()` |
-| `[]uint32` | `Uint32Array`        | `ctx.Uint32Array()`     | `val.ToUint32Array()` |
-| `[]float32` | `Float32Array`      | `ctx.Float32Array()`    | `val.ToFloat32Array()` |
-| `[]float64` | `Float64Array`      | `ctx.Float64Array()`    | `val.ToFloat64Array()` |
-| `[]int64`  | `BigInt64Array`      | `ctx.BigInt64Array()`   | `val.ToBigInt64Array()` |
-| `[]uint64` | `BigUint64Array`     | `ctx.BigUint64Array()`  | `val.ToBigUint64Array()` |
-| `[]byte`   | `ArrayBuffer`        | `ctx.ArrayBuffer()`     | `val.ToByteArray()` |
+| `[]int8`   | `Int8Array`          | `ctx.NewInt8Array()`       | `val.ToInt8Array()` |
+| `[]uint8`  | `Uint8Array`         | `ctx.NewUint8Array()`      | `val.ToUint8Array()` |
+| `[]uint8`  | `Uint8ClampedArray`  | `ctx.NewUint8ClampedArray()` | `val.ToUint8Array()` |
+| `[]int16`  | `Int16Array`         | `ctx.NewInt16Array()`      | `val.ToInt16Array()` |
+| `[]uint16` | `Uint16Array`        | `ctx.NewUint16Array()`     | `val.ToUint16Array()` |
+| `[]int32`  | `Int32Array`         | `ctx.NewInt32Array()`      | `val.ToInt32Array()` |
+| `[]uint32` | `Uint32Array`        | `ctx.NewUint32Array()`     | `val.ToUint32Array()` |
+| `[]float32` | `Float32Array`      | `ctx.NewFloat32Array()`    | `val.ToFloat32Array()` |
+| `[]float64` | `Float64Array`      | `ctx.NewFloat64Array()`    | `val.ToFloat64Array()` |
+| `[]int64`  | `BigInt64Array`      | `ctx.NewBigInt64Array()`   | `val.ToBigInt64Array()` |
+| `[]uint64` | `BigUint64Array`     | `ctx.NewBigUint64Array()`  | `val.ToBigUint64Array()` |
+| `[]byte`   | `ArrayBuffer`        | `ctx.NewArrayBuffer()`     | `val.ToByteArray()` |
 
 #### TypedArray 类型检测
 
@@ -476,8 +476,8 @@ func main() {
     regularArray := ctx.Eval(`[1, 2, 3]`)
     defer regularArray.Free()
 
-    int32Array := ctx.Int32Array([]int32{1, 2, 3})
-    float64Array := ctx.Float64Array([]float64{1.1, 2.2, 3.3})
+    int32Array := ctx.NewInt32Array([]int32{1, 2, 3})
+    float64Array := ctx.NewFloat64Array([]float64{1.1, 2.2, 3.3})
 
     // 将数组设置为全局变量以便被全局对象引用
     ctx.Globals().Set("int32Array", int32Array)
@@ -522,7 +522,7 @@ func main() {
     }
 
     // 发送到 JavaScript 作为 Uint8Array
-    imageArray := ctx.Uint8Array(imageData)
+    imageArray := ctx.NewUint8Array(imageData)
     ctx.Globals().Set("imageData", imageArray)
 
     // 在 JavaScript 中处理
@@ -753,7 +753,7 @@ type CustomType struct {
 
 // 实现 Marshaler 接口
 func (c CustomType) MarshalJS(ctx *quickjs.Context) (*quickjs.Value, error) {
-    return ctx.String("custom:" + c.Value), nil
+    return ctx.NewString("custom:" + c.Value), nil
 }
 
 // 实现 Unmarshaler 接口
@@ -783,7 +783,7 @@ func main() {
     }
     defer jsVal.Free()
 
-    fmt.Println("Marshal 结果:", jsVal.String()) // 输出: custom:hello
+    fmt.Println("Marshal 结果:", jsVal.ToString()) // 输出: custom:hello
 
     // Unmarshal 回来
     var result CustomType
@@ -873,20 +873,20 @@ func main() {
     defer ctx.Close()
 
     // 创建包含 Go 函数和值的数学模块
-    addFunc := ctx.Function(func(ctx *quickjs.Context, this *quickjs.Value, args []*quickjs.Value) *quickjs.Value {
+    addFunc := ctx.NewFunction(func(ctx *quickjs.Context, this *quickjs.Value, args []*quickjs.Value) *quickjs.Value {
         if len(args) >= 2 {
-            return ctx.Float64(args[0].Float64() + args[1].Float64())
+            return ctx.NewFloat64(args[0].ToFloat64() + args[1].ToFloat64())
         }
-        return ctx.Float64(0)
+        return ctx.NewFloat64(0)
     })
     defer addFunc.Free()
 
     // 使用流畅 API 构建模块
     module := quickjs.NewModuleBuilder("math").
-        Export("PI", ctx.Float64(3.14159)).
+        Export("PI", ctx.NewFloat64(3.14159)).
         Export("add", addFunc).
-        Export("version", ctx.String("1.0.0")).
-        Export("default", ctx.String("数学模块"))
+        Export("version", ctx.NewString("1.0.0")).
+        Export("default", ctx.NewString("数学模块"))
 
     err := module.Build(ctx)
     if err != nil {
@@ -933,17 +933,17 @@ func main() {
     defer ctx.Close()
 
     // 创建包含复杂对象的实用工具模块
-    config := ctx.Object()
-    config.Set("appName", ctx.String("我的应用"))
-    config.Set("version", ctx.String("2.0.0"))
-    config.Set("debug", ctx.Bool(true))
+    config := ctx.NewObject()
+    config.Set("appName", ctx.NewString("我的应用"))
+    config.Set("version", ctx.NewString("2.0.0"))
+    config.Set("debug", ctx.NewBool(true))
 
-    greetFunc := ctx.Function(func(ctx *quickjs.Context, this *quickjs.Value, args []*quickjs.Value) *quickjs.Value {
+    greetFunc := ctx.NewFunction(func(ctx *quickjs.Context, this *quickjs.Value, args []*quickjs.Value) *quickjs.Value {
         name := "世界"
         if len(args) > 0 {
-            name = args[0].String()
+            name = args[0].ToString()
         }
-        return ctx.String(fmt.Sprintf("你好, %s!", name))
+        return ctx.NewString(fmt.Sprintf("你好, %s!", name))
     })
     defer greetFunc.Free()
 
@@ -955,7 +955,7 @@ func main() {
         Export("config", config).                    // 对象导出
         Export("greet", greetFunc).                  // 函数导出
         Export("constants", jsonVal).                // JSON 导出
-        Export("default", ctx.String("实用工具库"))  // 默认导出
+        Export("default", ctx.NewString("实用工具库"))  // 默认导出
 
     err := module.Build(ctx)
     if err != nil {
@@ -994,7 +994,6 @@ package main
 
 import (
     "fmt"
-    "strings"
     "github.com/buke/quickjs-go"
 )
 
@@ -1005,24 +1004,24 @@ func main() {
     defer ctx.Close()
 
     // 创建数学模块
-    addFunc := ctx.Function(func(ctx *quickjs.Context, this *quickjs.Value, args []*quickjs.Value) *quickjs.Value {
+    addFunc := ctx.NewFunction(func(ctx *quickjs.Context, this *quickjs.Value, args []*quickjs.Value) *quickjs.Value {
         if len(args) >= 2 {
-            return ctx.Float64(args[0].Float64() + args[1].Float64())
+            return ctx.NewFloat64(args[0].ToFloat64() + args[1].ToFloat64())
         }
-        return ctx.Float64(0)
+        return ctx.NewFloat64(0)
     })
     defer addFunc.Free()
 
     mathModule := quickjs.NewModuleBuilder("math").
         Export("add", addFunc).
-        Export("PI", ctx.Float64(3.14159))
+        Export("PI", ctx.NewFloat64(3.14159))
 
     // 创建字符串实用工具模块
-    upperFunc := ctx.Function(func(ctx *quickjs.Context, this *quickjs.Value, args []*quickjs.Value) *quickjs.Value {
+    upperFunc := ctx.NewFunction(func(ctx *quickjs.Context, this *quickjs.Value, args []*quickjs.Value) *quickjs.Value {
         if len(args) > 0 {
-            return ctx.String(strings.ToUpper(args[0].String()))
+            return ctx.NewString(strings.ToUpper(args[0].ToString()))
         }
-        return ctx.String("")
+        return ctx.NewString("")
     })
     defer upperFunc.Free()
 
@@ -1062,7 +1061,7 @@ func main() {
         panic(err)
     }
 
-    fmt.Println("多模块结果:", result.String())
+    fmt.Println("多模块结果:", result.ToString())
     // 输出: 多模块结果: 结果: 4.14
 }
 ```
@@ -1117,9 +1116,9 @@ func main() {
             x, y := 0.0, 0.0
             name := "未命名点"
             
-            if len(args) > 0 { x = args[0].Float64() }
-            if len(args) > 1 { y = args[1].Float64() }
-            if len(args) > 2 { name = args[2].String() }
+            if len(args) > 0 { x = args[0].ToFloat64() }
+            if len(args) > 1 { y = args[1].ToFloat64() }
+            if len(args) > 2 { name = args[2].ToString() }
             
             // 返回 Go 对象进行自动关联
             return &Point{X: x, Y: y, Name: name}, nil
@@ -1128,44 +1127,44 @@ func main() {
         Accessor("x", 
             func(ctx *quickjs.Context, this *quickjs.Value) *quickjs.Value {
                 point, _ := this.GetGoObject()
-                return ctx.Float64(point.(*Point).X)
+                return ctx.NewFloat64(point.(*Point).X)
             },
             func(ctx *quickjs.Context, this *quickjs.Value, value *quickjs.Value) *quickjs.Value {
                 point, _ := this.GetGoObject()
-                point.(*Point).X = value.Float64()
-                return ctx.Undefined()
+                point.(*Point).X = value.ToFloat64()
+                return ctx.NewUndefined()
             }).
         Accessor("y",
             func(ctx *quickjs.Context, this *quickjs.Value) *quickjs.Value {
                 point, _ := this.GetGoObject()
-                return ctx.Float64(point.(*Point).Y)
+                return ctx.NewFloat64(point.(*Point).Y)
             },
             func(ctx *quickjs.Context, this *quickjs.Value, value *quickjs.Value) *quickjs.Value {
                 point, _ := this.GetGoObject()
-                point.(*Point).Y = value.Float64()
-                return ctx.Undefined()
+                point.(*Point).Y = value.ToFloat64()
+                return ctx.NewUndefined()
             }).
         // 属性直接绑定到每个实例
-        Property("version", ctx.String("1.0.0")).
-        Property("type", ctx.String("Point")).
+        Property("version", ctx.NewString("1.0.0")).
+        Property("type", ctx.NewString("Point")).
         // 只读属性
-        Property("readOnly", ctx.Bool(true), quickjs.PropertyConfigurable).
+        Property("readOnly", ctx.NewBool(true), quickjs.PropertyConfigurable).
         // 实例方法
         Method("distance", func(ctx *quickjs.Context, this *quickjs.Value, args []*quickjs.Value) *quickjs.Value {
             point, _ := this.GetGoObject()
-            return ctx.Float64(point.(*Point).Distance())
+            return ctx.NewFloat64(point.(*Point).Distance())
         }).
         Method("move", func(ctx *quickjs.Context, this *quickjs.Value, args []*quickjs.Value) *quickjs.Value {
             point, _ := this.GetGoObject()
             dx, dy := 0.0, 0.0
-            if len(args) > 0 { dx = args[0].Float64() }
-            if len(args) > 1 { dy = args[1].Float64() }
+            if len(args) > 0 { dx = args[0].ToFloat64() }
+            if len(args) > 1 { dy = args[1].ToFloat64() }
             point.(*Point).Move(dx, dy)
-            return ctx.Undefined()
+            return ctx.NewUndefined()
         }).
         Method("getName", func(ctx *quickjs.Context, this *quickjs.Value, args []*quickjs.Value) *quickjs.Value {
             point, _ := this.GetGoObject()
-            return ctx.String(point.(*Point).Name)
+            return ctx.NewString(point.(*Point).Name)
         }).
         // 静态方法
         StaticMethod("origin", func(ctx *quickjs.Context, this *quickjs.Value, args []*quickjs.Value) *quickjs.Value {
@@ -1231,6 +1230,12 @@ func main() {
     `)
     defer propertyTest.Free()
     
+    if propertyTest.IsException() {
+        err := ctx.Exception()
+        fmt.Println("Error:", err.Error())
+        return
+    }
+    
     fmt.Println("属性 vs 访问器:", propertyTest.JSONStringify())
 }
 ```
@@ -1278,9 +1283,6 @@ func main() {
 
     // 自动从结构体创建 User 类
     userConstructor, _ := ctx.BindClass(&User{})
-    if err != nil {
-        panic(err)
-    }
 
     ctx.Globals().Set("User", userConstructor)
 
@@ -1290,7 +1292,14 @@ func main() {
         user1.GetFullInfo();
     `)
     defer result1.Free()
-    fmt.Println("位置参数:", result1.String())
+    
+    if result1.IsException() {
+        err := ctx.Exception()
+        fmt.Println("Error:", err.Error())
+        return
+    }
+    
+    fmt.Println("位置参数:", result1.ToString())
 
     // 使用命名参数（对象参数）
     result2 := ctx.Eval(`
@@ -1320,6 +1329,13 @@ func main() {
         });
     `)
     defer result2.Free()
+    
+    if result2.IsException() {
+        err := ctx.Exception()
+        fmt.Println("Error:", err.Error())
+        return
+    }
+    
     fmt.Println("命名参数:", result2.JSONStringify())
 
     // 演示字段访问器同步
@@ -1351,6 +1367,13 @@ func main() {
         });
     `)
     defer result3.Free()
+    
+    if result3.IsException() {
+        err := ctx.Exception()
+        fmt.Println("Error:", err.Error())
+        return
+    }
+    
     fmt.Println("同步演示:", result3.JSONStringify())
 }
 ```
@@ -1387,7 +1410,10 @@ func main() {
     fib(10)
     `
     // 将脚本编译为字节码
-    buf, _ := ctx.Compile(jsStr)
+    buf, err := ctx.Compile(jsStr)
+    if err != nil {
+        panic(err)
+    }
 
     // 创建新的运行时
     rt2 := quickjs.NewRuntime()
@@ -1398,9 +1424,16 @@ func main() {
     defer ctx2.Close()
 
     // 执行字节码
-    result, _ := ctx2.EvalBytecode(buf)
+    result := ctx2.EvalBytecode(buf)
     defer result.Free()
-    fmt.Println(result.Int32())
+    
+    if result.IsException() {
+        err := ctx2.Exception()
+        fmt.Println("Error:", err.Error())
+        return
+    }
+    
+    fmt.Println(result.ToInt32())
 }
 ```
 
@@ -1431,8 +1464,13 @@ func main() {
     ctx := rt.NewContext()
     defer ctx.Close()
 
-    result, err := ctx.Eval(`var array = []; while (true) { array.push(null) }`)
+    result := ctx.Eval(`var array = []; while (true) { array.push(null) }`)
     defer result.Free()
+    
+    if result.IsException() {
+        err := ctx.Exception()
+        fmt.Println("内存限制超出:", err.Error())
+    }
 }
 ```
 
@@ -1456,45 +1494,36 @@ func main() {
     defer ctx.Close()
 
     // 执行模块
-    r1, err := ctx.EvalFile("./test/hello_module.js")
+    r1 := ctx.EvalFile("./test/hello_module.js")
     defer r1.Free()
-    if err != nil {
+    if r1.IsException() {
+        err := ctx.Exception()
         panic(err)
     }
 
     // 加载模块
-    r2, err := ctx.LoadModuleFile("./test/fib_module.js", "fib_foo")
+    r2 := ctx.LoadModuleFile("./test/fib_module.js", "fib_foo")
     defer r2.Free()
-    if err != nil {
+    if r2.IsException() {
+        err := ctx.Exception()
         panic(err)
     }
 
     // 调用模块
-    r3, err := ctx.Eval(`
+    r3 := ctx.Eval(`
     import {fib} from 'fib_foo';
     globalThis.result = fib(9);
     `)
     defer r3.Free()
-    if err != nil {
+    if r3.IsException() {
+        err := ctx.Exception()
         panic(err)
     }
 
     result := ctx.Globals().Get("result")
     defer result.Free()
-    fmt.Println("斐波那契结果:", result.Int32())
+    fmt.Println("斐波那契结果:", result.ToInt32())
 }
 ```
 
-## 文档
 
-Go 语言文档和示例: https://pkg.go.dev/github.com/buke/quickjs-go
-
-## 协议
-
-[MIT](./LICENSE)
-
-[![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2Fbuke%2Fquickjs-go.svg?type=large)](https://app.fossa.com/projects/git%2Bgithub.com%2Fbuke%2Fquickjs-go?ref=badge_large)
-
-## 相关项目
-
-- https://github.com/buke/quickjs-go-polyfill

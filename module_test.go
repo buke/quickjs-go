@@ -18,18 +18,18 @@ func TestModuleBuilder_Basic(t *testing.T) {
 	defer ctx.Close()
 
 	t.Run("ModuleWithExports", func(t *testing.T) {
-		addFunc := ctx.Function(func(ctx *Context, this *Value, args []*Value) *Value {
+		addFunc := ctx.NewFunction(func(ctx *Context, this *Value, args []*Value) *Value {
 			if len(args) >= 2 {
-				return ctx.Float64(args[0].Float64() + args[1].Float64())
+				return ctx.NewFloat64(args[0].ToFloat64() + args[1].ToFloat64())
 			}
-			return ctx.Float64(0)
+			return ctx.NewFloat64(0)
 		})
 
 		module := NewModuleBuilder("math").
-			Export("PI", ctx.Float64(3.14159)).
+			Export("PI", ctx.NewFloat64(3.14159)).
 			Export("add", addFunc).
-			Export("version", ctx.String("1.0.0")).
-			Export("default", ctx.String("Math Module"))
+			Export("version", ctx.NewString("1.0.0")).
+			Export("default", ctx.NewString("Math Module"))
 
 		err := module.Build(ctx)
 		require.NoError(t, err)
@@ -43,13 +43,13 @@ func TestModuleBuilder_Basic(t *testing.T) {
 		defer result.Free()
 
 		require.False(t, result.IsException())
-		require.InDelta(t, 4.14159, result.Float64(), 0.0001)
+		require.InDelta(t, 4.14159, result.ToFloat64(), 0.0001)
 	})
 
 	t.Run("DefaultExport", func(t *testing.T) {
 		module := NewModuleBuilder("default-test").
-			Export("default", ctx.String("Default Export Value")).
-			Export("name", ctx.String("test"))
+			Export("default", ctx.NewString("Default Export Value")).
+			Export("name", ctx.NewString("test"))
 
 		err := module.Build(ctx)
 		require.NoError(t, err)
@@ -63,7 +63,7 @@ func TestModuleBuilder_Basic(t *testing.T) {
 		defer result.Free()
 
 		require.False(t, result.IsException())
-		require.Equal(t, "Default Export Value", result.String())
+		require.Equal(t, "Default Export Value", result.ToString())
 	})
 }
 
@@ -78,17 +78,17 @@ func TestModuleBuilder_Import(t *testing.T) {
 	defer ctx.Close()
 
 	t.Run("NamedImports", func(t *testing.T) {
-		greetFunc := ctx.Function(func(ctx *Context, this *Value, args []*Value) *Value {
+		greetFunc := ctx.NewFunction(func(ctx *Context, this *Value, args []*Value) *Value {
 			name := "World"
 			if len(args) > 0 {
-				name = args[0].String()
+				name = args[0].ToString()
 			}
-			return ctx.String(fmt.Sprintf("Hello, %s!", name))
+			return ctx.NewString(fmt.Sprintf("Hello, %s!", name))
 		})
 
 		module := NewModuleBuilder("greeting").
 			Export("greet", greetFunc).
-			Export("defaultName", ctx.String("World"))
+			Export("defaultName", ctx.NewString("World"))
 
 		err := module.Build(ctx)
 		require.NoError(t, err)
@@ -102,21 +102,21 @@ func TestModuleBuilder_Import(t *testing.T) {
 		defer result.Free()
 
 		require.False(t, result.IsException())
-		require.Equal(t, "Hello, QuickJS!", result.String())
+		require.Equal(t, "Hello, QuickJS!", result.ToString())
 	})
 
 	t.Run("FunctionImports", func(t *testing.T) {
-		calculateFunc := ctx.Function(func(ctx *Context, this *Value, args []*Value) *Value {
+		calculateFunc := ctx.NewFunction(func(ctx *Context, this *Value, args []*Value) *Value {
 			if len(args) >= 2 {
-				a, b := args[0].Float64(), args[1].Float64()
-				return ctx.Float64(a * b)
+				a, b := args[0].ToFloat64(), args[1].ToFloat64()
+				return ctx.NewFloat64(a * b)
 			}
-			return ctx.Float64(0)
+			return ctx.NewFloat64(0)
 		})
 
 		module := NewModuleBuilder("calculator").
 			Export("multiply", calculateFunc).
-			Export("PI", ctx.Float64(3.14159))
+			Export("PI", ctx.NewFloat64(3.14159))
 
 		err := module.Build(ctx)
 		require.NoError(t, err)
@@ -131,14 +131,14 @@ func TestModuleBuilder_Import(t *testing.T) {
 
 		require.False(t, result.IsException())
 		expected := 3.14159 * 2
-		require.InDelta(t, expected, result.Float64(), 0.0001)
+		require.InDelta(t, expected, result.ToFloat64(), 0.0001)
 	})
 
 	t.Run("MixedImports", func(t *testing.T) {
 		module := NewModuleBuilder("utils").
-			Export("version", ctx.String("1.0.0")).
-			Export("debug", ctx.Bool(true)).
-			Export("default", ctx.String("Utils Library"))
+			Export("version", ctx.NewString("1.0.0")).
+			Export("debug", ctx.NewBool(true)).
+			Export("default", ctx.NewString("Utils Library"))
 
 		err := module.Build(ctx)
 		require.NoError(t, err)
@@ -153,7 +153,7 @@ func TestModuleBuilder_Import(t *testing.T) {
 		defer result.Free()
 
 		require.False(t, result.IsException())
-		require.Equal(t, "1.0.0 - Utils Library", result.String())
+		require.Equal(t, "1.0.0 - Utils Library", result.ToString())
 	})
 }
 
@@ -181,7 +181,7 @@ func TestModuleBuilder_ErrorHandling(t *testing.T) {
 	})
 
 	t.Run("EmptyExportName", func(t *testing.T) {
-		module := NewModuleBuilder("test").Export("", ctx.String("invalid"))
+		module := NewModuleBuilder("test").Export("", ctx.NewString("invalid"))
 		err := module.Build(ctx)
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "export name cannot be empty")
@@ -189,8 +189,8 @@ func TestModuleBuilder_ErrorHandling(t *testing.T) {
 
 	t.Run("DuplicateExportNames", func(t *testing.T) {
 		module := NewModuleBuilder("test").
-			Export("value", ctx.String("first")).
-			Export("value", ctx.String("duplicate"))
+			Export("value", ctx.NewString("first")).
+			Export("value", ctx.NewString("duplicate"))
 		err := module.Build(ctx)
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "duplicate export name: value")
@@ -209,21 +209,21 @@ func TestModuleBuilder_Integration(t *testing.T) {
 
 	t.Run("MultipleModules", func(t *testing.T) {
 		// Create math module
-		addFunc := ctx.Function(func(ctx *Context, this *Value, args []*Value) *Value {
+		addFunc := ctx.NewFunction(func(ctx *Context, this *Value, args []*Value) *Value {
 			if len(args) >= 2 {
-				return ctx.Float64(args[0].Float64() + args[1].Float64())
+				return ctx.NewFloat64(args[0].ToFloat64() + args[1].ToFloat64())
 			}
-			return ctx.Float64(0)
+			return ctx.NewFloat64(0)
 		})
 
 		mathModule := NewModuleBuilder("math").
 			Export("add", addFunc).
-			Export("PI", ctx.Float64(3.14159))
+			Export("PI", ctx.NewFloat64(3.14159))
 
 		// Create utils module
 		utilsModule := NewModuleBuilder("utils").
-			Export("name", ctx.String("UtilsModule")).
-			Export("version", ctx.String("1.0.0"))
+			Export("name", ctx.NewString("UtilsModule")).
+			Export("version", ctx.NewString("1.0.0"))
 
 		err := mathModule.Build(ctx)
 		require.NoError(t, err)
@@ -239,7 +239,7 @@ func TestModuleBuilder_Integration(t *testing.T) {
         })()`, EvalAwait(true))
 		defer mathResult.Free()
 		require.False(t, mathResult.IsException())
-		require.InDelta(t, 4.14159, mathResult.Float64(), 0.0001)
+		require.InDelta(t, 4.14159, mathResult.ToFloat64(), 0.0001)
 
 		// Test utils module
 		utilsResult := ctx.Eval(`
@@ -249,18 +249,18 @@ func TestModuleBuilder_Integration(t *testing.T) {
         })()`, EvalAwait(true))
 		defer utilsResult.Free()
 		require.False(t, utilsResult.IsException())
-		require.Equal(t, "UtilsModule v1.0.0", utilsResult.String())
+		require.Equal(t, "UtilsModule v1.0.0", utilsResult.ToString())
 	})
 
 	t.Run("ComplexModuleWithObjects", func(t *testing.T) {
-		config := ctx.Object()
-		config.Set("name", ctx.String("TestApp"))
-		config.Set("version", ctx.String("2.0.0"))
-		config.Set("debug", ctx.Bool(true))
+		config := ctx.NewObject()
+		config.Set("name", ctx.NewString("TestApp"))
+		config.Set("version", ctx.NewString("2.0.0"))
+		config.Set("debug", ctx.NewBool(true))
 
 		module := NewModuleBuilder("config").
 			Export("config", config).
-			Export("default", ctx.String("Configuration Module"))
+			Export("default", ctx.NewString("Configuration Module"))
 
 		err := module.Build(ctx)
 		require.NoError(t, err)
@@ -274,18 +274,18 @@ func TestModuleBuilder_Integration(t *testing.T) {
 		defer result.Free()
 
 		require.False(t, result.IsException())
-		require.Equal(t, "TestApp v2.0.0", result.String())
+		require.Equal(t, "TestApp v2.0.0", result.ToString())
 	})
 
 	t.Run("ModuleWithErrorRecovery", func(t *testing.T) {
 		// Test that system can recover from errors
-		badModule := NewModuleBuilder("").Export("test", ctx.String("value"))
+		badModule := NewModuleBuilder("").Export("test", ctx.NewString("value"))
 		err := badModule.Build(ctx)
 		require.Error(t, err)
 
 		// Should be able to create good module after error
 		goodModule := NewModuleBuilder("recovery").
-			Export("message", ctx.String("Recovery successful"))
+			Export("message", ctx.NewString("Recovery successful"))
 		err = goodModule.Build(ctx)
 		require.NoError(t, err)
 
@@ -298,7 +298,7 @@ func TestModuleBuilder_Integration(t *testing.T) {
 		defer result.Free()
 
 		require.False(t, result.IsException())
-		require.Equal(t, "Recovery successful", result.String())
+		require.Equal(t, "Recovery successful", result.ToString())
 	})
 }
 
@@ -311,7 +311,7 @@ func TestModuleBuilder_ErrorBranches(t *testing.T) {
 	t.Run("ModuleInitContextError", func(t *testing.T) {
 		// Create module
 		module := NewModuleBuilder("error-test-1").
-			Export("value", ctx.String("test"))
+			Export("value", ctx.NewString("test"))
 		err := module.Build(ctx)
 		require.NoError(t, err)
 
@@ -334,7 +334,7 @@ func TestModuleBuilder_ErrorBranches(t *testing.T) {
 	t.Run("ModuleInitHandleStoreError", func(t *testing.T) {
 		// Create module
 		module := NewModuleBuilder("error-test-2").
-			Export("value", ctx.String("test"))
+			Export("value", ctx.NewString("test"))
 		err := module.Build(ctx)
 		require.NoError(t, err)
 

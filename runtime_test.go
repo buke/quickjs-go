@@ -40,7 +40,7 @@ func TestRuntimeBasics(t *testing.T) {
 	result2 := ctx2.Eval(`"Hello World"`)
 	defer result2.Free()
 	require.False(t, result2.IsException()) // Check for exceptions instead of error
-	require.Equal(t, "Hello World", result2.String())
+	require.Equal(t, "Hello World", result2.ToString())
 }
 
 // TestRuntimeLimitsAndErrors tests memory limits, timeouts, and stack limits
@@ -123,7 +123,7 @@ func TestRuntimeConfiguration(t *testing.T) {
 	result := ctx.Eval(`"configuration test"`)
 	defer result.Free()
 	require.False(t, result.IsException()) // Check for exceptions instead of error
-	require.Equal(t, "configuration test", result.String())
+	require.Equal(t, "configuration test", result.ToString())
 }
 
 // TestRuntimeInterruptHandler tests interrupt handler functionality and coverage
@@ -275,18 +275,18 @@ func TestRuntimeMultipleContexts(t *testing.T) {
 	result1 := ctx1.Eval(`var x = "ctx1"; x`)
 	defer result1.Free()
 	require.False(t, result1.IsException()) // Check for exceptions instead of error
-	require.Equal(t, "ctx1", result1.String())
+	require.Equal(t, "ctx1", result1.ToString())
 
 	result2 := ctx2.Eval(`var x = "ctx2"; x`)
 	defer result2.Free()
 	require.False(t, result2.IsException()) // Check for exceptions instead of error
-	require.Equal(t, "ctx2", result2.String())
+	require.Equal(t, "ctx2", result2.ToString())
 
 	// Verify isolation
 	result3 := ctx1.Eval(`x`)
 	defer result3.Free()
 	require.False(t, result3.IsException()) // Check for exceptions instead of error
-	require.Equal(t, "ctx1", result3.String())
+	require.Equal(t, "ctx1", result3.ToString())
 }
 
 // TestRuntimeConcurrency tests concurrent usage of runtime instances
@@ -342,7 +342,7 @@ func TestRuntimeAdvancedOptions(t *testing.T) {
 	result1 := ctx1.Eval(`"canBlock disabled"`)
 	defer result1.Free()
 	require.False(t, result1.IsException()) // Check for exceptions instead of error
-	require.Equal(t, "canBlock disabled", result1.String())
+	require.Equal(t, "canBlock disabled", result1.ToString())
 
 	// Test WithModuleImport(true)
 	rt2 := NewRuntime(WithModuleImport(true))
@@ -354,7 +354,7 @@ func TestRuntimeAdvancedOptions(t *testing.T) {
 	result2 := ctx2.Eval(`"module import enabled"`)
 	defer result2.Free()
 	require.False(t, result2.IsException()) // Check for exceptions instead of error
-	require.Equal(t, "module import enabled", result2.String())
+	require.Equal(t, "module import enabled", result2.ToString())
 
 	// Test WithStripInfo(0)
 	rt3 := NewRuntime(WithStripInfo(0))
@@ -366,7 +366,7 @@ func TestRuntimeAdvancedOptions(t *testing.T) {
 	result3 := ctx3.Eval(`"strip info test"`)
 	defer result3.Free()
 	require.False(t, result3.IsException()) // Check for exceptions instead of error
-	require.Equal(t, "strip info test", result3.String())
+	require.Equal(t, "strip info test", result3.ToString())
 
 	// Test GC options
 	rt4 := NewRuntime(WithGCThreshold(1024))
@@ -381,5 +381,5 @@ func TestRuntimeAdvancedOptions(t *testing.T) {
 	result4 := ctx4.Eval(`"GC test"`)
 	defer result4.Free()
 	require.False(t, result4.IsException()) // Check for exceptions instead of error
-	require.Equal(t, "GC test", result4.String())
+	require.Equal(t, "GC test", result4.ToString())
 }

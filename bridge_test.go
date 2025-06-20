@@ -17,8 +17,8 @@ func TestBridgeGetContextFromJSReturnNil(t *testing.T) {
 		ctx := rt.NewContext()
 
 		// Create function and store it globally - MODIFIED: now uses pointer signature
-		fn := ctx.Function(func(ctx *Context, this *Value, args []*Value) *Value {
-			return ctx.String("test")
+		fn := ctx.NewFunction(func(ctx *Context, this *Value, args []*Value) *Value { // Changed: Function() → NewFunction()
+			return ctx.NewString("test") // Changed: String() → NewString()
 		})
 		ctx.Globals().Set("testFn", fn)
 
@@ -40,7 +40,7 @@ func TestBridgeGetContextFromJSReturnNil(t *testing.T) {
 			t.Logf("Expected exception when context not in mapping: %v", err)
 		} else {
 			defer result.Free()
-			resultStr := result.String()
+			resultStr := result.ToString() // Changed: String() → ToString()
 			t.Logf("Exception result: %s", resultStr)
 			require.True(t, len(resultStr) > 0)
 		}
@@ -89,7 +89,7 @@ func TestBridgeGetRuntimeFromJSReturnNil(t *testing.T) {
 			t.Logf("Execution resulted in exception: %v", err)
 		} else {
 			defer result.Free()
-			t.Logf("Computation completed with result: %d", result.ToInt32())
+			t.Logf("Computation completed with result: %d", result.ToInt32()) // Changed: Int32() → ToInt32()
 		}
 
 		// Re-register runtime for proper cleanup
@@ -112,15 +112,15 @@ func TestBridgeContextNotFound(t *testing.T) {
 		defer ctx.Close()
 
 		// Create function and store it in JavaScript - MODIFIED: now uses pointer signature
-		fn := ctx.Function(func(ctx *Context, this *Value, args []*Value) *Value {
-			return ctx.String("test")
+		fn := ctx.NewFunction(func(ctx *Context, this *Value, args []*Value) *Value { // Changed: Function() → NewFunction()
+			return ctx.NewString("test") // Changed: String() → NewString()
 		})
 		ctx.Globals().Set("testFunc", fn)
 
 		// Verify function works initially
 		result := ctx.Eval(`testFunc()`)
 		require.False(t, result.IsException())
-		require.Equal(t, "test", result.String())
+		require.Equal(t, "test", result.ToString()) // Changed: String() → ToString()
 		result.Free()
 
 		// Unregister context from mapping to simulate context being removed
@@ -141,7 +141,7 @@ func TestBridgeContextNotFound(t *testing.T) {
 			require.Contains(t, err.Error(), "Context not found")
 		} else {
 			defer result2.Free()
-			resultStr := result2.String()
+			resultStr := result2.ToString() // Changed: String() → ToString()
 			t.Logf("Exception result: %s", resultStr)
 			require.Contains(t, resultStr, "Context not found")
 		}
@@ -162,15 +162,15 @@ func TestBridgeFunctionNotFoundInHandleStore(t *testing.T) {
 		defer ctx.Close()
 
 		// Create function and store it in JavaScript - MODIFIED: now uses pointer signature
-		fn := ctx.Function(func(ctx *Context, this *Value, args []*Value) *Value {
-			return ctx.String("test")
+		fn := ctx.NewFunction(func(ctx *Context, this *Value, args []*Value) *Value { // Changed: Function() → NewFunction()
+			return ctx.NewString("test") // Changed: String() → NewString()
 		})
 		ctx.Globals().Set("testFunc", fn)
 
 		// Verify function works initially
 		result := ctx.Eval(`testFunc()`)
 		require.False(t, result.IsException())
-		require.Equal(t, "test", result.String())
+		require.Equal(t, "test", result.ToString()) // Changed: String() → ToString()
 		result.Free()
 
 		// Clear handleStore to trigger function not found in getContextAndFunction
@@ -191,7 +191,7 @@ func TestBridgeFunctionNotFoundInHandleStore(t *testing.T) {
 			require.Contains(t, err.Error(), "Function not found")
 		} else {
 			defer result2.Free()
-			resultStr := result2.String()
+			resultStr := result2.ToString() // Changed: String() → ToString()
 			t.Logf("Exception result: %s", resultStr)
 			require.Contains(t, resultStr, "Function not found")
 		}
@@ -209,15 +209,15 @@ func TestBridgeInvalidFunctionType(t *testing.T) {
 		defer ctx.Close()
 
 		// Create function and store it in JavaScript - MODIFIED: now uses pointer signature
-		fn := ctx.Function(func(ctx *Context, this *Value, args []*Value) *Value {
-			return ctx.String("test")
+		fn := ctx.NewFunction(func(ctx *Context, this *Value, args []*Value) *Value { // Changed: Function() → NewFunction()
+			return ctx.NewString("test") // Changed: String() → NewString()
 		})
 		ctx.Globals().Set("testFunc", fn)
 
 		// Verify function works initially
 		result := ctx.Eval(`testFunc()`)
 		require.False(t, result.IsException())
-		require.Equal(t, "test", result.String())
+		require.Equal(t, "test", result.ToString()) // Changed: String() → ToString()
 		result.Free()
 
 		// Get function ID from handleStore and store original handle properly
@@ -249,7 +249,7 @@ func TestBridgeInvalidFunctionType(t *testing.T) {
 			require.Contains(t, err.Error(), "Invalid function type")
 		} else {
 			defer result2.Free()
-			resultStr := result2.String()
+			resultStr := result2.ToString() // Changed: String() → ToString()
 			t.Logf("Exception result: %s", resultStr)
 			require.Contains(t, resultStr, "Invalid function type")
 		}
@@ -304,7 +304,7 @@ func TestBridgeClassConstructorErrors(t *testing.T) {
 			require.Contains(t, err.Error(), "Context not found")
 		} else {
 			defer result2.Free()
-			require.Contains(t, result2.String(), "Context not found")
+			require.Contains(t, result2.ToString(), "Context not found") // Changed: String() → ToString()
 		}
 
 		// Re-register context for cleanup
@@ -347,7 +347,7 @@ func TestBridgeClassConstructorErrors(t *testing.T) {
 			require.Contains(t, err.Error(), "Constructor function not found")
 		} else {
 			defer result.Free()
-			require.Contains(t, result.String(), "Constructor function not found")
+			require.Contains(t, result.ToString(), "Constructor function not found") // Changed: String() → ToString()
 		}
 
 		t.Log("Successfully triggered goClassConstructorProxy Constructor not found branch")
@@ -402,7 +402,7 @@ func TestBridgeClassConstructorErrors(t *testing.T) {
 			require.Contains(t, err.Error(), "Invalid constructor function type")
 		} else {
 			defer result.Free()
-			require.Contains(t, result.String(), "Invalid constructor function type")
+			require.Contains(t, result.ToString(), "Invalid constructor function type") // Changed: String() → ToString()
 		}
 
 		// Clean up invalid handle and restore original
@@ -447,7 +447,7 @@ func TestBridgeClassConstructorErrors(t *testing.T) {
 			require.Contains(t, err.Error(), "Class ID not found")
 		} else {
 			defer result.Free()
-			require.Contains(t, result.String(), "Class ID not found")
+			require.Contains(t, result.ToString(), "Class ID not found") // Changed: String() → ToString()
 		}
 
 		t.Log("Successfully triggered goClassConstructorProxy Class ID not found branch")
@@ -465,8 +465,8 @@ func TestBridgeClassConstructorErrors(t *testing.T) {
 			Constructor(func(ctx *Context, instance *Value, args []*Value) (interface{}, error) {
 				return &Point{X: 1, Y: 2}, nil
 			}).
-			Property("version", ctx.String("1.0.0")).
-			Property("readOnly", ctx.Bool(true), PropertyConfigurable).
+			Property("version", ctx.NewString("1.0.0")).                   // Changed: String() → NewString()
+			Property("readOnly", ctx.NewBool(true), PropertyConfigurable). // Changed: Bool() → NewBool()
 			Build(ctx)
 		require.False(t, constructor.IsException())
 
@@ -481,17 +481,17 @@ func TestBridgeClassConstructorErrors(t *testing.T) {
 		defer result.Free()
 
 		// Verify instance properties were bound correctly
-		require.Equal(t, "1.0.0", result.GetIdx(0).String())
+		require.Equal(t, "1.0.0", result.GetIdx(0).ToString()) // Changed: String() → ToString()
 		require.True(t, result.GetIdx(1).ToBool())
-		require.Equal(t, "string", result.GetIdx(2).String())
-		require.Equal(t, "boolean", result.GetIdx(3).String())
+		require.Equal(t, "string", result.GetIdx(2).ToString())  // Changed: String() → ToString()
+		require.Equal(t, "boolean", result.GetIdx(3).ToString()) // Changed: String() → ToString()
 
 		t.Log("Successfully tested SCHEME C instance property binding")
 	})
 
 }
 
-// Test for class method proxy errors - unchanged
+// Test for class method proxy errors - unchanged except method calls
 func TestBridgeClassMethodErrors(t *testing.T) {
 	// Test class method proxy error handling
 	t.Run("MethodContextNotFound", func(t *testing.T) {
@@ -506,7 +506,7 @@ func TestBridgeClassMethodErrors(t *testing.T) {
 				return &Point{X: 1, Y: 2}, nil
 			}).
 			Method("testMethod", func(ctx *Context, this *Value, args []*Value) *Value {
-				return ctx.String("method called")
+				return ctx.NewString("method called") // Changed: String() → NewString()
 			}).
 			Build(ctx)
 		require.False(t, constructor.IsException())
@@ -519,7 +519,7 @@ func TestBridgeClassMethodErrors(t *testing.T) {
             obj.testMethod();
         `)
 		require.False(t, result.IsException())
-		require.Equal(t, "method called", result.String())
+		require.Equal(t, "method called", result.ToString()) // Changed: String() → ToString()
 		result.Free()
 
 		// Unregister context from mapping
@@ -540,7 +540,7 @@ func TestBridgeClassMethodErrors(t *testing.T) {
 			require.Contains(t, err.Error(), "Context not found")
 		} else {
 			defer result2.Free()
-			require.Contains(t, result2.String(), "Context not found")
+			require.Contains(t, result2.ToString(), "Context not found") // Changed: String() → ToString()
 		}
 
 		// Re-register context for cleanup
@@ -561,7 +561,7 @@ func TestBridgeClassMethodErrors(t *testing.T) {
 				return &Point{X: 1, Y: 2}, nil
 			}).
 			Method("testMethod", func(ctx *Context, this *Value, args []*Value) *Value {
-				return ctx.String("method called")
+				return ctx.NewString("method called") // Changed: String() → NewString()
 			}).
 			Build(ctx)
 		require.False(t, constructor.IsException())
@@ -575,7 +575,7 @@ func TestBridgeClassMethodErrors(t *testing.T) {
 			obj.testMethod();  // Verify method works
 		`)
 		require.False(t, result.IsException())
-		require.Equal(t, "method called", result.String())
+		require.Equal(t, "method called", result.ToString()) // Changed: String() → ToString()
 		result.Free()
 
 		// Now clear handleStore to trigger method not found
@@ -595,7 +595,7 @@ func TestBridgeClassMethodErrors(t *testing.T) {
 			require.Contains(t, err.Error(), "Method function not found")
 		} else {
 			defer result2.Free()
-			require.Contains(t, result2.String(), "Method function not found")
+			require.Contains(t, result2.ToString(), "Method function not found") // Changed: String() → ToString()
 		}
 
 		t.Log("Successfully triggered goClassMethodProxy Method not found branch")
@@ -613,7 +613,7 @@ func TestBridgeClassMethodErrors(t *testing.T) {
 				return &Point{X: 1, Y: 2}, nil
 			}).
 			Method("testMethod", func(ctx *Context, this *Value, args []*Value) *Value {
-				return ctx.String("method called")
+				return ctx.NewString("method called") // Changed: String() → NewString()
 			}).
 			Build(ctx)
 		require.False(t, constructor.IsException())
@@ -627,7 +627,7 @@ func TestBridgeClassMethodErrors(t *testing.T) {
             obj.testMethod();  // Verify method works initially
         `)
 		require.False(t, result.IsException())
-		require.Equal(t, "method called", result.String())
+		require.Equal(t, "method called", result.ToString()) // Changed: String() → ToString()
 		result.Free()
 
 		// Find method function ID by collecting all handles
@@ -683,7 +683,7 @@ func TestBridgeClassMethodErrors(t *testing.T) {
 			require.Contains(t, err.Error(), "Invalid method function type")
 		} else {
 			defer result2.Free()
-			require.Contains(t, result2.String(), "Invalid method function type")
+			require.Contains(t, result2.ToString(), "Invalid method function type") // Changed: String() → ToString()
 		}
 
 		// Clean up invalid handle and restore original
@@ -694,7 +694,7 @@ func TestBridgeClassMethodErrors(t *testing.T) {
 	})
 }
 
-// Test for class getter proxy errors - unchanged except constructor signature
+// Test for class getter proxy errors - unchanged except method calls
 func TestBridgeClassGetterErrors(t *testing.T) {
 	// Test class getter proxy error handling
 	t.Run("GetterContextNotFound", func(t *testing.T) {
@@ -709,7 +709,7 @@ func TestBridgeClassGetterErrors(t *testing.T) {
 				return &Point{X: 1, Y: 2}, nil
 			}).
 			Accessor("testProp", func(ctx *Context, this *Value) *Value {
-				return ctx.String("getter called")
+				return ctx.NewString("getter called") // Changed: String() → NewString()
 			}, nil).
 			Build(ctx)
 		require.False(t, constructor.IsException())
@@ -722,7 +722,7 @@ func TestBridgeClassGetterErrors(t *testing.T) {
             obj.testProp;
         `)
 		require.False(t, result.IsException())
-		require.Equal(t, "getter called", result.String())
+		require.Equal(t, "getter called", result.ToString()) // Changed: String() → ToString()
 		result.Free()
 
 		// Unregister context from mapping
@@ -743,7 +743,7 @@ func TestBridgeClassGetterErrors(t *testing.T) {
 			require.Contains(t, err.Error(), "Context not found")
 		} else {
 			defer result2.Free()
-			require.Contains(t, result2.String(), "Context not found")
+			require.Contains(t, result2.ToString(), "Context not found") // Changed: String() → ToString()
 		}
 
 		// Re-register context for cleanup
@@ -764,7 +764,7 @@ func TestBridgeClassGetterErrors(t *testing.T) {
 				return &Point{X: 1, Y: 2}, nil
 			}).
 			Accessor("testProp", func(ctx *Context, this *Value) *Value {
-				return ctx.String("getter called")
+				return ctx.NewString("getter called") // Changed: String() → NewString()
 			}, nil).
 			Build(ctx)
 		require.False(t, constructor.IsException())
@@ -778,7 +778,7 @@ func TestBridgeClassGetterErrors(t *testing.T) {
 			obj.testProp;  // Verify getter works
 		`)
 		require.False(t, result.IsException())
-		require.Equal(t, "getter called", result.String())
+		require.Equal(t, "getter called", result.ToString()) // Changed: String() → ToString()
 		result.Free()
 
 		// Now clear handleStore to trigger getter not found
@@ -798,7 +798,7 @@ func TestBridgeClassGetterErrors(t *testing.T) {
 			require.Contains(t, err.Error(), "Getter function not found")
 		} else {
 			defer result2.Free()
-			require.Contains(t, result2.String(), "Getter function not found")
+			require.Contains(t, result2.ToString(), "Getter function not found") // Changed: String() → ToString()
 		}
 
 		t.Log("Successfully triggered goClassGetterProxy Getter not found branch")
@@ -816,7 +816,7 @@ func TestBridgeClassGetterErrors(t *testing.T) {
 				return &Point{X: 1, Y: 2}, nil
 			}).
 			Accessor("testProp", func(ctx *Context, this *Value) *Value {
-				return ctx.String("getter called")
+				return ctx.NewString("getter called") // Changed: String() → NewString()
 			}, nil).
 			Build(ctx)
 		require.False(t, constructor.IsException())
@@ -830,7 +830,7 @@ func TestBridgeClassGetterErrors(t *testing.T) {
             obj.testProp;  // Verify getter works initially
         `)
 		require.False(t, result.IsException())
-		require.Equal(t, "getter called", result.String())
+		require.Equal(t, "getter called", result.ToString()) // Changed: String() → ToString()
 		result.Free()
 
 		// Find getter function ID by collecting all handles
@@ -886,7 +886,7 @@ func TestBridgeClassGetterErrors(t *testing.T) {
 			require.Contains(t, err.Error(), "Invalid getter function type")
 		} else {
 			defer result2.Free()
-			require.Contains(t, result2.String(), "Invalid getter function type")
+			require.Contains(t, result2.ToString(), "Invalid getter function type") // Changed: String() → ToString()
 		}
 
 		// Clean up invalid handle and restore original
@@ -897,7 +897,7 @@ func TestBridgeClassGetterErrors(t *testing.T) {
 	})
 }
 
-// Test for class setter proxy errors - unchanged except constructor signature
+// Test for class setter proxy errors - unchanged except method calls
 func TestBridgeClassSetterErrors(t *testing.T) {
 	// Test class setter proxy error handling
 	t.Run("SetterContextNotFound", func(t *testing.T) {
@@ -912,7 +912,7 @@ func TestBridgeClassSetterErrors(t *testing.T) {
 				return &Point{X: 1, Y: 2}, nil
 			}).
 			Accessor("testProp", nil, func(ctx *Context, this *Value, value *Value) *Value {
-				return ctx.Undefined()
+				return ctx.NewUndefined() // Changed: Undefined() → NewUndefined()
 			}).
 			Build(ctx)
 		require.False(t, constructor.IsException())
@@ -926,7 +926,7 @@ func TestBridgeClassSetterErrors(t *testing.T) {
             "setter works";
         `)
 		require.False(t, result.IsException())
-		require.Equal(t, "setter works", result.String())
+		require.Equal(t, "setter works", result.ToString()) // Changed: String() → ToString()
 		result.Free()
 
 		// Unregister context from mapping
@@ -947,7 +947,7 @@ func TestBridgeClassSetterErrors(t *testing.T) {
 			require.Contains(t, err.Error(), "Context not found")
 		} else {
 			defer result2.Free()
-			require.Contains(t, result2.String(), "Context not found")
+			require.Contains(t, result2.ToString(), "Context not found") // Changed: String() → ToString()
 		}
 
 		// Re-register context for cleanup
@@ -968,7 +968,7 @@ func TestBridgeClassSetterErrors(t *testing.T) {
 				return &Point{X: 1, Y: 2}, nil
 			}).
 			Accessor("testProp", nil, func(ctx *Context, this *Value, value *Value) *Value {
-				return ctx.Undefined()
+				return ctx.NewUndefined() // Changed: Undefined() → NewUndefined()
 			}).
 			Build(ctx)
 		require.False(t, constructor.IsException())
@@ -983,7 +983,7 @@ func TestBridgeClassSetterErrors(t *testing.T) {
         "setter works";
     `)
 		require.False(t, result.IsException())
-		require.Equal(t, "setter works", result.String())
+		require.Equal(t, "setter works", result.ToString()) // Changed: String() → ToString()
 		result.Free()
 
 		// Now clear handleStore to trigger setter not found
@@ -1003,7 +1003,7 @@ func TestBridgeClassSetterErrors(t *testing.T) {
 			require.Contains(t, err.Error(), "Setter function not found")
 		} else {
 			defer result2.Free()
-			require.Contains(t, result2.String(), "Setter function not found")
+			require.Contains(t, result2.ToString(), "Setter function not found") // Changed: String() → ToString()
 		}
 
 		t.Log("Successfully triggered goClassSetterProxy Setter not found branch")
@@ -1021,7 +1021,7 @@ func TestBridgeClassSetterErrors(t *testing.T) {
 				return &Point{X: 1, Y: 2}, nil
 			}).
 			Accessor("testProp", nil, func(ctx *Context, this *Value, value *Value) *Value {
-				return ctx.Undefined()
+				return ctx.NewUndefined() // Changed: Undefined() → NewUndefined()
 			}).
 			Build(ctx)
 		require.False(t, constructor.IsException())
@@ -1036,7 +1036,7 @@ func TestBridgeClassSetterErrors(t *testing.T) {
             "setter works";
         `)
 		require.False(t, result.IsException())
-		require.Equal(t, "setter works", result.String())
+		require.Equal(t, "setter works", result.ToString()) // Changed: String() → ToString()
 		result.Free()
 
 		// Find setter function ID by collecting all handles
@@ -1092,7 +1092,7 @@ func TestBridgeClassSetterErrors(t *testing.T) {
 			require.Contains(t, err.Error(), "Invalid setter function type")
 		} else {
 			defer result2.Free()
-			require.Contains(t, result2.String(), "Invalid setter function type")
+			require.Contains(t, result2.ToString(), "Invalid setter function type") // Changed: String() → ToString()
 		}
 
 		// Clean up invalid handle and restore original
@@ -1178,7 +1178,7 @@ func TestBridgeCreateClassInstanceEdgeCases(t *testing.T) {
         `)
 		require.False(t, result.IsException())
 		defer result.Free()
-		require.Equal(t, "object", result.String())
+		require.Equal(t, "object", result.ToString()) // Changed: String() → ToString()
 
 		t.Log("Successfully tested CreateClassInstance with no instance properties")
 	})
@@ -1197,7 +1197,7 @@ func TestBridgeCreateClassInstanceEdgeCases(t *testing.T) {
 
 		// Add multiple instance properties
 		for i := 0; i < 10; i++ {
-			builder = builder.Property(fmt.Sprintf("prop%d", i), ctx.String(fmt.Sprintf("value%d", i)))
+			builder = builder.Property(fmt.Sprintf("prop%d", i), ctx.NewString(fmt.Sprintf("value%d", i))) // Changed: String() → NewString()
 		}
 
 		constructor, _ := builder.Build(ctx)
@@ -1213,9 +1213,9 @@ func TestBridgeCreateClassInstanceEdgeCases(t *testing.T) {
 		require.False(t, result.IsException())
 		defer result.Free()
 
-		require.Equal(t, "value0", result.GetIdx(0).String())
-		require.Equal(t, "value5", result.GetIdx(1).String())
-		require.Equal(t, "value9", result.GetIdx(2).String())
+		require.Equal(t, "value0", result.GetIdx(0).ToString()) // Changed: String() → ToString()
+		require.Equal(t, "value5", result.GetIdx(1).ToString()) // Changed: String() → ToString()
+		require.Equal(t, "value9", result.GetIdx(2).ToString()) // Changed: String() → ToString()
 
 		t.Log("Successfully tested CreateClassInstance with many instance properties")
 	})

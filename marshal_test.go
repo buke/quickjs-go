@@ -18,7 +18,7 @@ type CustomMarshalType struct {
 }
 
 func (c CustomMarshalType) MarshalJS(ctx *Context) (*Value, error) {
-	return ctx.String("custom:" + c.Value), nil
+	return ctx.NewString("custom:" + c.Value), nil
 }
 
 type CustomUnmarshalType struct {
@@ -40,7 +40,7 @@ func (c *CustomUnmarshalType) UnmarshalJS(ctx *Context, val *Value) error {
 type ErrorMarshalType struct{}
 
 func (e ErrorMarshalType) MarshalJS(ctx *Context) (*Value, error) {
-	return ctx.Null(), errors.New("marshal error")
+	return ctx.NewNull(), errors.New("marshal error")
 }
 
 type ErrorUnmarshalType struct{}
@@ -106,7 +106,7 @@ type TimeWrapper struct {
 }
 
 func (t TimeWrapper) MarshalJS(ctx *Context) (*Value, error) {
-	return ctx.String(t.Format(time.RFC3339)), nil
+	return ctx.NewString(t.Format(time.RFC3339)), nil
 }
 
 func (t *TimeWrapper) UnmarshalJS(ctx *Context, val *Value) error {
@@ -216,7 +216,7 @@ func TestMarshalBasicTypes(t *testing.T) {
 		require.Equal(t, uint64(18446744073709551615), result2)
 
 		// Test positive number to uint64
-		jsVal3 := ctx.Float64(123456789.0)
+		jsVal3 := ctx.NewFloat64(123456789.0)
 		defer jsVal3.Free()
 
 		var result3 uint64
@@ -958,7 +958,7 @@ func TestStructsAndCustomTypes(t *testing.T) {
 		require.Equal(t, "custom:test", jsVal.ToString())
 
 		// Test custom unmarshal
-		jsVal2 := ctx.String("custom:unmarshal_test")
+		jsVal2 := ctx.NewString("custom:unmarshal_test")
 		defer jsVal2.Free()
 
 		var result CustomUnmarshalType
@@ -1006,7 +1006,7 @@ func TestUnmarshalInterface(t *testing.T) {
 			var jsVal *Value
 
 			if tt.jsCode == "undefined" {
-				jsVal = ctx.Undefined()
+				jsVal = ctx.NewUndefined()
 			} else {
 				jsVal = ctx.Eval(tt.jsCode)
 				require.False(t, jsVal.IsException())
@@ -1024,7 +1024,7 @@ func TestUnmarshalInterface(t *testing.T) {
 	t.Run("SpecialCases", func(t *testing.T) {
 		// BigInt
 		testValue := uint64(1 << 62)
-		jsVal := ctx.BigUint64(testValue)
+		jsVal := ctx.NewBigUint64(testValue)
 		defer jsVal.Free()
 
 		var result interface{}
@@ -1037,7 +1037,7 @@ func TestUnmarshalInterface(t *testing.T) {
 
 		// ArrayBuffer
 		data := []byte{1, 2, 3, 4, 5}
-		jsVal2 := ctx.ArrayBuffer(data)
+		jsVal2 := ctx.NewArrayBuffer(data)
 		defer jsVal2.Free()
 
 		var result2 interface{}
@@ -1169,7 +1169,7 @@ func TestErrorCases(t *testing.T) {
 		require.Contains(t, err.Error(), "BigInt value out of range for uint64")
 
 		// Negative number to uint64
-		jsVal4 := ctx.Float64(-1.0)
+		jsVal4 := ctx.NewFloat64(-1.0)
 		defer jsVal4.Free()
 
 		var result3 uint64

@@ -139,7 +139,7 @@ func isEmptyValue(v reflect.Value) bool {
 // Types implementing the Marshaler interface are marshaled using their MarshalJS method.
 func (ctx *Context) Marshal(v interface{}) (*Value, error) {
 	if v == nil {
-		return ctx.Null(), nil
+		return ctx.NewNull(), nil
 	}
 	return ctx.marshal(reflect.ValueOf(v))
 }
@@ -199,32 +199,32 @@ func (ctx *Context) marshal(rv reflect.Value) (*Value, error) {
 	// Handle pointer types
 	if rv.Kind() == reflect.Ptr {
 		if rv.IsNil() {
-			return ctx.Null(), nil
+			return ctx.NewNull(), nil
 		}
 		return ctx.marshal(rv.Elem())
 	}
 
 	switch rv.Kind() {
 	case reflect.Bool:
-		return ctx.Bool(rv.Bool()), nil
+		return ctx.NewBool(rv.Bool()), nil
 
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32:
-		return ctx.Int32(int32(rv.Int())), nil
+		return ctx.NewInt32(int32(rv.Int())), nil
 
 	case reflect.Int64:
-		return ctx.Int64(rv.Int()), nil
+		return ctx.NewInt64(rv.Int()), nil
 
 	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32:
-		return ctx.Uint32(uint32(rv.Uint())), nil
+		return ctx.NewUint32(uint32(rv.Uint())), nil
 
 	case reflect.Uint64:
-		return ctx.BigUint64(rv.Uint()), nil
+		return ctx.NewBigUint64(rv.Uint()), nil
 
 	case reflect.Float32, reflect.Float64:
-		return ctx.Float64(rv.Float()), nil
+		return ctx.NewFloat64(rv.Float()), nil
 
 	case reflect.String:
-		return ctx.String(rv.String()), nil
+		return ctx.NewString(rv.String()), nil
 
 	case reflect.Slice:
 		return ctx.marshalSlice(rv)
@@ -239,7 +239,7 @@ func (ctx *Context) marshal(rv reflect.Value) (*Value, error) {
 		return ctx.marshalStruct(rv)
 
 	default:
-		return ctx.Null(), fmt.Errorf("unsupported type: %v", rv.Type())
+		return ctx.NewNull(), fmt.Errorf("unsupported type: %v", rv.Type())
 	}
 }
 
@@ -251,7 +251,7 @@ func (ctx *Context) marshalSlice(rv reflect.Value) (*Value, error) {
 	case reflect.Uint8:
 		// []byte -> ArrayBuffer (maintain existing behavior)
 		bytes := rv.Bytes()
-		return ctx.ArrayBuffer(bytes), nil
+		return ctx.NewArrayBuffer(bytes), nil
 
 	case reflect.Int8:
 		// []int8 -> Int8Array
@@ -303,7 +303,7 @@ func (ctx *Context) marshalInt8Array(rv reflect.Value) (*Value, error) {
 		bytes[i] = byte(v)
 	}
 
-	buffer := ctx.ArrayBuffer(bytes)
+	buffer := ctx.NewArrayBuffer(bytes)
 	defer buffer.Free()
 
 	globals := ctx.Globals()
@@ -318,7 +318,7 @@ func (ctx *Context) marshalInt16Array(rv reflect.Value) (*Value, error) {
 	slice := rv.Interface().([]int16)
 	bytes := int16SliceToBytes(slice)
 
-	buffer := ctx.ArrayBuffer(bytes)
+	buffer := ctx.NewArrayBuffer(bytes)
 	defer buffer.Free()
 
 	globals := ctx.Globals()
@@ -333,7 +333,7 @@ func (ctx *Context) marshalUint16Array(rv reflect.Value) (*Value, error) {
 	slice := rv.Interface().([]uint16)
 	bytes := uint16SliceToBytes(slice)
 
-	buffer := ctx.ArrayBuffer(bytes)
+	buffer := ctx.NewArrayBuffer(bytes)
 	defer buffer.Free()
 
 	globals := ctx.Globals()
@@ -348,7 +348,7 @@ func (ctx *Context) marshalInt32Array(rv reflect.Value) (*Value, error) {
 	slice := rv.Interface().([]int32)
 	bytes := int32SliceToBytes(slice)
 
-	buffer := ctx.ArrayBuffer(bytes)
+	buffer := ctx.NewArrayBuffer(bytes)
 	defer buffer.Free()
 
 	globals := ctx.Globals()
@@ -363,7 +363,7 @@ func (ctx *Context) marshalUint32Array(rv reflect.Value) (*Value, error) {
 	slice := rv.Interface().([]uint32)
 	bytes := uint32SliceToBytes(slice)
 
-	buffer := ctx.ArrayBuffer(bytes)
+	buffer := ctx.NewArrayBuffer(bytes)
 	defer buffer.Free()
 
 	globals := ctx.Globals()
@@ -378,7 +378,7 @@ func (ctx *Context) marshalFloat32Array(rv reflect.Value) (*Value, error) {
 	slice := rv.Interface().([]float32)
 	bytes := float32SliceToBytes(slice)
 
-	buffer := ctx.ArrayBuffer(bytes)
+	buffer := ctx.NewArrayBuffer(bytes)
 	defer buffer.Free()
 
 	globals := ctx.Globals()
@@ -393,7 +393,7 @@ func (ctx *Context) marshalFloat64Array(rv reflect.Value) (*Value, error) {
 	slice := rv.Interface().([]float64)
 	bytes := float64SliceToBytes(slice)
 
-	buffer := ctx.ArrayBuffer(bytes)
+	buffer := ctx.NewArrayBuffer(bytes)
 	defer buffer.Free()
 
 	globals := ctx.Globals()
@@ -408,7 +408,7 @@ func (ctx *Context) marshalBigInt64Array(rv reflect.Value) (*Value, error) {
 	slice := rv.Interface().([]int64)
 	bytes := int64SliceToBytes(slice)
 
-	buffer := ctx.ArrayBuffer(bytes)
+	buffer := ctx.NewArrayBuffer(bytes)
 	defer buffer.Free()
 
 	globals := ctx.Globals()
@@ -423,7 +423,7 @@ func (ctx *Context) marshalBigUint64Array(rv reflect.Value) (*Value, error) {
 	slice := rv.Interface().([]uint64)
 	bytes := uint64SliceToBytes(slice)
 
-	buffer := ctx.ArrayBuffer(bytes)
+	buffer := ctx.NewArrayBuffer(bytes)
 	defer buffer.Free()
 
 	globals := ctx.Globals()
@@ -444,7 +444,7 @@ func (ctx *Context) marshalGenericArray(rv reflect.Value) (*Value, error) {
 		elem, err := ctx.marshal(rv.Index(i))
 		if err != nil {
 			arr.Free()
-			return ctx.Null(), err
+			return ctx.NewNull(), err
 		}
 		arr.SetIdx(int64(i), elem)
 		// Do NOT free elem here - ownership transferred to array
@@ -569,7 +569,7 @@ func (ctx *Context) marshalArray(rv reflect.Value) (*Value, error) {
 		elem, err := ctx.marshal(rv.Index(i))
 		if err != nil {
 			arr.Free()
-			return ctx.Null(), err
+			return ctx.NewNull(), err
 		}
 		arr.SetIdx(int64(i), elem)
 		// Do NOT free elem here - ownership transferred to array
@@ -579,13 +579,13 @@ func (ctx *Context) marshalArray(rv reflect.Value) (*Value, error) {
 
 // marshalMap marshals Go map to JavaScript Object
 func (ctx *Context) marshalMap(rv reflect.Value) (*Value, error) {
-	obj := ctx.Object()
+	obj := ctx.NewObject()
 	for _, key := range rv.MapKeys() {
 		keyStr := fmt.Sprintf("%v", key.Interface())
 		val, err := ctx.marshal(rv.MapIndex(key))
 		if err != nil {
 			obj.Free()
-			return ctx.Null(), err
+			return ctx.NewNull(), err
 		}
 		obj.Set(keyStr, val)
 		// Do NOT free val here - ownership transferred to object
@@ -596,7 +596,7 @@ func (ctx *Context) marshalMap(rv reflect.Value) (*Value, error) {
 // marshalStruct marshals Go struct to JavaScript Object
 func (ctx *Context) marshalStruct(rv reflect.Value) (*Value, error) {
 	rt := rv.Type()
-	obj := ctx.Object()
+	obj := ctx.NewObject()
 
 	for i := 0; i < rv.NumField(); i++ {
 		field := rt.Field(i)
@@ -621,7 +621,7 @@ func (ctx *Context) marshalStruct(rv reflect.Value) (*Value, error) {
 		val, err := ctx.marshal(fieldValue)
 		if err != nil {
 			obj.Free()
-			return ctx.Null(), err
+			return ctx.NewNull(), err
 		}
 		obj.Set(tagInfo.Name, val)
 		// Do NOT free val here - ownership transferred to object
@@ -655,19 +655,19 @@ func (ctx *Context) unmarshal(jsVal *Value, rv reflect.Value) error {
 	switch rv.Kind() {
 	case reflect.Bool:
 		if !jsVal.IsBool() {
-			return fmt.Errorf("cannot unmarshal JavaScript %s into Go bool", jsVal.String())
+			return fmt.Errorf("cannot unmarshal JavaScript %s into Go bool", jsVal.ToString())
 		}
 		rv.SetBool(jsVal.ToBool())
 
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32:
 		if !jsVal.IsNumber() {
-			return fmt.Errorf("cannot unmarshal JavaScript %s into Go int", jsVal.String())
+			return fmt.Errorf("cannot unmarshal JavaScript %s into Go int", jsVal.ToString())
 		}
 		rv.SetInt(int64(jsVal.ToInt32()))
 
 	case reflect.Int64:
 		if !jsVal.IsNumber() && !jsVal.IsBigInt() {
-			return fmt.Errorf("cannot unmarshal JavaScript %s into Go int64", jsVal.String())
+			return fmt.Errorf("cannot unmarshal JavaScript %s into Go int64", jsVal.ToString())
 		}
 		if jsVal.IsBigInt() {
 			bigInt := jsVal.ToBigInt()
@@ -682,14 +682,14 @@ func (ctx *Context) unmarshal(jsVal *Value, rv reflect.Value) error {
 
 	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32:
 		if !jsVal.IsNumber() {
-			return fmt.Errorf("cannot unmarshal JavaScript %s into Go uint", jsVal.String())
+			return fmt.Errorf("cannot unmarshal JavaScript %s into Go uint", jsVal.ToString())
 		}
 		val := jsVal.ToUint32()
 		rv.SetUint(uint64(val))
 
 	case reflect.Uint64:
 		if !jsVal.IsNumber() && !jsVal.IsBigInt() {
-			return fmt.Errorf("cannot unmarshal JavaScript %s into Go uint64", jsVal.String())
+			return fmt.Errorf("cannot unmarshal JavaScript %s into Go uint64", jsVal.ToString())
 		}
 		if jsVal.IsBigInt() {
 			bigInt := jsVal.ToBigInt()
@@ -708,13 +708,13 @@ func (ctx *Context) unmarshal(jsVal *Value, rv reflect.Value) error {
 
 	case reflect.Float32, reflect.Float64:
 		if !jsVal.IsNumber() {
-			return fmt.Errorf("cannot unmarshal JavaScript %s into Go float", jsVal.String())
+			return fmt.Errorf("cannot unmarshal JavaScript %s into Go float", jsVal.ToString())
 		}
 		rv.SetFloat(jsVal.ToFloat64())
 
 	case reflect.String:
 		if !jsVal.IsString() {
-			return fmt.Errorf("cannot unmarshal JavaScript %s into Go string", jsVal.String())
+			return fmt.Errorf("cannot unmarshal JavaScript %s into Go string", jsVal.ToString())
 		}
 		rv.SetString(jsVal.ToString())
 
@@ -869,7 +869,7 @@ func (ctx *Context) unmarshalSlice(jsVal *Value, rv reflect.Value) error {
 
 	// If not a corresponding TypedArray, handle as regular array
 	if !jsVal.IsArray() {
-		return fmt.Errorf("expected array, got JavaScript %s", jsVal.String())
+		return fmt.Errorf("expected array, got JavaScript %s", jsVal.ToString())
 	}
 
 	length := jsVal.Len()
@@ -891,7 +891,7 @@ func (ctx *Context) unmarshalSlice(jsVal *Value, rv reflect.Value) error {
 // unmarshalArray unmarshals JavaScript Array to Go array
 func (ctx *Context) unmarshalArray(jsVal *Value, rv reflect.Value) error {
 	if !jsVal.IsArray() {
-		return fmt.Errorf("expected array, got JavaScript %s", jsVal.String())
+		return fmt.Errorf("expected array, got JavaScript %s", jsVal.ToString())
 	}
 
 	length := jsVal.Len()
@@ -918,7 +918,7 @@ func (ctx *Context) unmarshalArray(jsVal *Value, rv reflect.Value) error {
 // unmarshalMap unmarshals JavaScript Object to Go map
 func (ctx *Context) unmarshalMap(jsVal *Value, rv reflect.Value) error {
 	if !jsVal.IsObject() {
-		return fmt.Errorf("expected object, got JavaScript %s", jsVal.String())
+		return fmt.Errorf("expected object, got JavaScript %s", jsVal.ToString())
 	}
 
 	if rv.IsNil() {
@@ -967,7 +967,7 @@ func (ctx *Context) unmarshalMap(jsVal *Value, rv reflect.Value) error {
 // unmarshalStruct unmarshals JavaScript Object to Go struct
 func (ctx *Context) unmarshalStruct(jsVal *Value, rv reflect.Value) error {
 	if !jsVal.IsObject() {
-		return fmt.Errorf("expected object, got JavaScript %s", jsVal.String())
+		return fmt.Errorf("expected object, got JavaScript %s", jsVal.ToString())
 	}
 
 	rt := rv.Type()

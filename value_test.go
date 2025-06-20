@@ -20,20 +20,20 @@ func TestValueBasics(t *testing.T) {
 	ctx := rt.NewContext()
 	defer ctx.Close()
 
-	// Test basic type creation and checking
+	// Test basic type creation and checking - Updated to use New* methods
 	testCases := []struct {
 		name      string
 		createVal func() *Value     // Changed to return pointer
 		checkFunc func(*Value) bool // Changed parameter to pointer
 	}{
-		{"Number", func() *Value { return ctx.Int32(42) }, func(v *Value) bool { return v.IsNumber() }},
-		{"String", func() *Value { return ctx.String("test") }, func(v *Value) bool { return v.IsString() }},
-		{"Boolean", func() *Value { return ctx.Bool(true) }, func(v *Value) bool { return v.IsBool() }},
-		{"Null", func() *Value { return ctx.Null() }, func(v *Value) bool { return v.IsNull() }},
-		{"Undefined", func() *Value { return ctx.Undefined() }, func(v *Value) bool { return v.IsUndefined() }},
-		{"Uninitialized", func() *Value { return ctx.Uninitialized() }, func(v *Value) bool { return v.IsUninitialized() }},
-		{"Object", func() *Value { return ctx.Object() }, func(v *Value) bool { return v.IsObject() }},
-		{"BigInt", func() *Value { return ctx.BigInt64(123456789) }, func(v *Value) bool { return v.IsBigInt() }},
+		{"Number", func() *Value { return ctx.NewInt32(42) }, func(v *Value) bool { return v.IsNumber() }},
+		{"String", func() *Value { return ctx.NewString("test") }, func(v *Value) bool { return v.IsString() }},
+		{"Boolean", func() *Value { return ctx.NewBool(true) }, func(v *Value) bool { return v.IsBool() }},
+		{"Null", func() *Value { return ctx.NewNull() }, func(v *Value) bool { return v.IsNull() }},
+		{"Undefined", func() *Value { return ctx.NewUndefined() }, func(v *Value) bool { return v.IsUndefined() }},
+		{"Uninitialized", func() *Value { return ctx.NewUninitialized() }, func(v *Value) bool { return v.IsUninitialized() }},
+		{"Object", func() *Value { return ctx.NewObject() }, func(v *Value) bool { return v.IsObject() }},
+		{"BigInt", func() *Value { return ctx.NewBigInt64(123456789) }, func(v *Value) bool { return v.IsBigInt() }},
 	}
 
 	for _, tc := range testCases {
@@ -65,7 +65,7 @@ func TestValueConversions(t *testing.T) {
 	ctx := rt.NewContext()
 	defer ctx.Close()
 
-	// Test basic conversions
+	// Test basic conversions - Updated to use New* methods
 	tests := []struct {
 		name           string
 		createVal      func() *Value // Changed to return pointer
@@ -74,13 +74,13 @@ func TestValueConversions(t *testing.T) {
 	}{
 		{
 			name:           "Bool",
-			createVal:      func() *Value { return ctx.Bool(true) },
+			createVal:      func() *Value { return ctx.NewBool(true) },
 			testFunc:       func(v *Value) { require.True(t, v.ToBool()) },
 			testDeprecated: func(v *Value) { require.True(t, v.Bool()) },
 		},
 		{
 			name:      "String",
-			createVal: func() *Value { return ctx.String("Hello") },
+			createVal: func() *Value { return ctx.NewString("Hello") },
 			testFunc: func(v *Value) {
 				require.Equal(t, "Hello", v.ToString())
 				require.Equal(t, "Hello", v.String()) // String() calls ToString()
@@ -88,25 +88,25 @@ func TestValueConversions(t *testing.T) {
 		},
 		{
 			name:           "Int32",
-			createVal:      func() *Value { return ctx.Int32(42) },
+			createVal:      func() *Value { return ctx.NewInt32(42) },
 			testFunc:       func(v *Value) { require.Equal(t, int32(42), v.ToInt32()) },
 			testDeprecated: func(v *Value) { require.Equal(t, int32(42), v.Int32()) },
 		},
 		{
 			name:           "Int64",
-			createVal:      func() *Value { return ctx.Int64(1234567890) },
+			createVal:      func() *Value { return ctx.NewInt64(1234567890) },
 			testFunc:       func(v *Value) { require.Equal(t, int64(1234567890), v.ToInt64()) },
 			testDeprecated: func(v *Value) { require.Equal(t, int64(1234567890), v.Int64()) },
 		},
 		{
 			name:           "Uint32",
-			createVal:      func() *Value { return ctx.Uint32(4294967295) },
+			createVal:      func() *Value { return ctx.NewUint32(4294967295) },
 			testFunc:       func(v *Value) { require.Equal(t, uint32(4294967295), v.ToUint32()) },
 			testDeprecated: func(v *Value) { require.Equal(t, uint32(4294967295), v.Uint32()) },
 		},
 		{
 			name:           "Float64",
-			createVal:      func() *Value { return ctx.Float64(3.14159) },
+			createVal:      func() *Value { return ctx.NewFloat64(3.14159) },
 			testFunc:       func(v *Value) { require.InDelta(t, 3.14159, v.ToFloat64(), 0.00001) },
 			testDeprecated: func(v *Value) { require.InDelta(t, 3.14159, v.Float64(), 0.00001) },
 		},
@@ -123,15 +123,15 @@ func TestValueConversions(t *testing.T) {
 		})
 	}
 
-	// Test BigInt conversion
-	bigIntVal := ctx.BigInt64(9223372036854775807)
+	// Test BigInt conversion - Updated to use New* methods
+	bigIntVal := ctx.NewBigInt64(9223372036854775807)
 	defer bigIntVal.Free()
 	expectedBigInt := big.NewInt(9223372036854775807)
 	require.Equal(t, expectedBigInt, bigIntVal.ToBigInt())
 	require.Equal(t, expectedBigInt, bigIntVal.BigInt()) // Deprecated method
 
 	// Test ToBigInt with non-BigInt value (should return nil)
-	normalIntVal := ctx.Int32(42)
+	normalIntVal := ctx.NewInt32(42)
 	defer normalIntVal.Free()
 	require.Nil(t, normalIntVal.ToBigInt())
 }
@@ -143,28 +143,28 @@ func TestValueJSON(t *testing.T) {
 	ctx := rt.NewContext()
 	defer ctx.Close()
 
-	// Test object JSON stringify
-	obj := ctx.Object()
+	// Test object JSON stringify - Updated to use New* methods
+	obj := ctx.NewObject()
 	defer obj.Free()
-	obj.Set("name", ctx.String("test"))
-	obj.Set("value", ctx.Int32(42))
+	obj.Set("name", ctx.NewString("test"))
+	obj.Set("value", ctx.NewInt32(42))
 
 	jsonStr := obj.JSONStringify()
 	require.Contains(t, jsonStr, "name")
 	require.Contains(t, jsonStr, "test")
 	require.Contains(t, jsonStr, "42")
 
-	// Test various value types
+	// Test various value types - Updated to use New* methods
 	testCases := []struct {
 		name      string
 		createVal func() *Value // Changed to return pointer
 		expected  string
 	}{
-		{"String", func() *Value { return ctx.String("hello") }, `"hello"`},
-		{"Null", func() *Value { return ctx.Null() }, "null"},
-		{"True", func() *Value { return ctx.Bool(true) }, "true"},
-		{"False", func() *Value { return ctx.Bool(false) }, "false"},
-		{"Number", func() *Value { return ctx.Int32(42) }, "42"},
+		{"String", func() *Value { return ctx.NewString("hello") }, `"hello"`},
+		{"Null", func() *Value { return ctx.NewNull() }, "null"},
+		{"True", func() *Value { return ctx.NewBool(true) }, "true"},
+		{"False", func() *Value { return ctx.NewBool(false) }, "false"},
+		{"Number", func() *Value { return ctx.NewInt32(42) }, "42"},
 	}
 
 	for _, tc := range testCases {
@@ -183,9 +183,9 @@ func TestValueArrayBuffer(t *testing.T) {
 	ctx := rt.NewContext()
 	defer ctx.Close()
 
-	// Test basic ArrayBuffer operations
+	// Test basic ArrayBuffer operations - Updated to use New* methods
 	data := []byte{1, 2, 3, 4, 5}
-	arrayBuffer := ctx.ArrayBuffer(data)
+	arrayBuffer := ctx.NewArrayBuffer(data)
 	defer arrayBuffer.Free()
 
 	require.True(t, arrayBuffer.IsByteArray())
@@ -209,15 +209,15 @@ func TestValueArrayBuffer(t *testing.T) {
 	require.False(t, arr.IsException()) // Check for exceptions instead of error
 	require.Equal(t, int64(5), arr.Len())
 
-	// Test error cases with non-ArrayBuffer types
+	// Test error cases with non-ArrayBuffer types - Updated to use New* methods
 	errorTests := []struct {
 		name      string
 		createVal func() *Value // Changed to return pointer
 	}{
-		{"Object", func() *Value { return ctx.Object() }},
-		{"String", func() *Value { return ctx.String("not an array buffer") }},
-		{"Number", func() *Value { return ctx.Int32(42) }},
-		{"Null", func() *Value { return ctx.Null() }},
+		{"Object", func() *Value { return ctx.NewObject() }},
+		{"String", func() *Value { return ctx.NewString("not an array buffer") }},
+		{"Number", func() *Value { return ctx.NewInt32(42) }},
+		{"Null", func() *Value { return ctx.NewNull() }},
 	}
 
 	for _, tt := range errorTests {
@@ -332,8 +332,8 @@ func TestValueTypedArrays(t *testing.T) {
 				require.Equal(t, tt.expected, result)
 			}
 
-			// Test error case with wrong type
-			wrongType := ctx.String("not a typed array")
+			// Test error case with wrong type - Updated to use New* methods
+			wrongType := ctx.NewString("not a typed array")
 			defer wrongType.Free()
 			_, err = tt.convertFunc(wrongType)
 			require.Error(t, err)
@@ -399,12 +399,13 @@ func TestValueProperties(t *testing.T) {
 	ctx := rt.NewContext()
 	defer ctx.Close()
 
-	obj := ctx.Object()
+	// Updated to use New* methods
+	obj := ctx.NewObject()
 	defer obj.Free()
 
 	// Test basic property operations
-	obj.Set("name", ctx.String("test"))
-	obj.Set("value", ctx.Int32(42))
+	obj.Set("name", ctx.NewString("test"))
+	obj.Set("value", ctx.NewInt32(42))
 
 	require.True(t, obj.Has("name"))
 	require.False(t, obj.Has("nonexistent"))
@@ -417,7 +418,7 @@ func TestValueProperties(t *testing.T) {
 	require.False(t, obj.Delete("nonexistent"))
 
 	// Test indexed operations
-	obj.SetIdx(0, ctx.String("index0"))
+	obj.SetIdx(0, ctx.NewString("index0"))
 	require.True(t, obj.HasIdx(0))
 	require.False(t, obj.HasIdx(99))
 
@@ -429,8 +430,8 @@ func TestValueProperties(t *testing.T) {
 	require.False(t, obj.DeleteIdx(99))
 
 	// Test PropertyNames
-	obj.Set("a", ctx.String("value_a"))
-	obj.Set("b", ctx.String("value_b"))
+	obj.Set("a", ctx.NewString("value_a"))
+	obj.Set("b", ctx.NewString("value_b"))
 
 	names, err := obj.PropertyNames()
 	require.NoError(t, err)
@@ -438,7 +439,7 @@ func TestValueProperties(t *testing.T) {
 	require.Contains(t, names, "b")
 
 	// Test PropertyNames error case
-	str := ctx.String("test")
+	str := ctx.NewString("test")
 	defer str.Free()
 	_, err = str.PropertyNames()
 	require.Error(t, err)
@@ -452,26 +453,27 @@ func TestValueFunctionCalls(t *testing.T) {
 	ctx := rt.NewContext()
 	defer ctx.Close()
 
-	obj := ctx.Object()
+	// Updated to use New* methods
+	obj := ctx.NewObject()
 	defer obj.Free()
 
-	// Test function calls - UPDATED: function signature now uses pointers
-	addFunc := ctx.Function(func(ctx *Context, this *Value, args []*Value) *Value {
+	// Test function calls - UPDATED: function signature now uses pointers and New* methods
+	addFunc := ctx.NewFunction(func(ctx *Context, this *Value, args []*Value) *Value {
 		if len(args) < 2 {
-			return ctx.Int32(0)
+			return ctx.NewInt32(0)
 		}
-		return ctx.Int32(args[0].ToInt32() + args[1].ToInt32())
+		return ctx.NewInt32(args[0].ToInt32() + args[1].ToInt32())
 	})
 	obj.Set("add", addFunc)
 
 	// Call with arguments
-	result := obj.Call("add", ctx.Int32(3), ctx.Int32(4))
+	result := obj.Call("add", ctx.NewInt32(3), ctx.NewInt32(4))
 	defer result.Free()
 	require.Equal(t, int32(7), result.ToInt32())
 
 	// Call without arguments (covers len(cargs) == 0 branch)
-	noArgsFunc := ctx.Function(func(ctx *Context, this *Value, args []*Value) *Value {
-		return ctx.String("no arguments")
+	noArgsFunc := ctx.NewFunction(func(ctx *Context, this *Value, args []*Value) *Value {
+		return ctx.NewString("no arguments")
 	})
 	obj.Set("noArgs", noArgsFunc)
 
@@ -480,7 +482,7 @@ func TestValueFunctionCalls(t *testing.T) {
 	require.Equal(t, "no arguments", noArgsResult.String())
 
 	// Execute method
-	execResult := addFunc.Execute(ctx.Null(), ctx.Int32(5), ctx.Int32(6))
+	execResult := addFunc.Execute(ctx.NewNull(), ctx.NewInt32(5), ctx.NewInt32(6))
 	defer execResult.Free()
 	require.Equal(t, int32(11), execResult.ToInt32())
 
@@ -495,7 +497,7 @@ func TestValueFunctionCalls(t *testing.T) {
 	require.False(t, constructorFunc.IsException()) // Check for exceptions instead of error
 
 	// CallConstructor with arguments
-	instance := constructorFunc.CallConstructor(ctx.String("test_value"))
+	instance := constructorFunc.CallConstructor(ctx.NewString("test_value"))
 	defer instance.Free()
 	require.True(t, instance.IsObject())
 
@@ -512,9 +514,9 @@ func TestValueError(t *testing.T) {
 	ctx := rt.NewContext()
 	defer ctx.Close()
 
-	// Test error creation and conversion
+	// Test error creation and conversion - Updated to use New* methods
 	testErr := errors.New("test error message")
-	errorVal := ctx.Error(testErr)
+	errorVal := ctx.NewError(testErr)
 	defer errorVal.Free()
 
 	require.True(t, errorVal.IsError())
@@ -529,7 +531,7 @@ func TestValueError(t *testing.T) {
 	require.NotNil(t, deprecatedErr)
 
 	// Test ToError on non-error value
-	str := ctx.String("not an error")
+	str := ctx.NewString("not an error")
 	defer str.Free()
 	require.Nil(t, str.ToError())
 
@@ -575,15 +577,15 @@ func TestValueInstanceof(t *testing.T) {
 	require.True(t, obj.GlobalInstanceof("Object"))
 	require.False(t, obj.GlobalInstanceof("Array"))
 
-	// Test false cases to ensure coverage
+	// Test false cases to ensure coverage - Updated to use New* methods
 	testVals := []struct {
 		name      string
 		createVal func() *Value // Changed to return pointer
 	}{
-		{"String", func() *Value { return ctx.String("test") }},
-		{"Number", func() *Value { return ctx.Int32(42) }},
-		{"Null", func() *Value { return ctx.Null() }},
-		{"Undefined", func() *Value { return ctx.Undefined() }},
+		{"String", func() *Value { return ctx.NewString("test") }},
+		{"Number", func() *Value { return ctx.NewInt32(42) }},
+		{"Null", func() *Value { return ctx.NewNull() }},
+		{"Undefined", func() *Value { return ctx.NewUndefined() }},
 	}
 
 	for _, tv := range testVals {
@@ -604,9 +606,9 @@ func TestValueSpecialTypes(t *testing.T) {
 	ctx := rt.NewContext()
 	defer ctx.Close()
 
-	// Test function - UPDATED: function signature now uses pointers
-	funcVal := ctx.Function(func(ctx *Context, this *Value, args []*Value) *Value {
-		return ctx.Null()
+	// Test function - UPDATED: function signature now uses pointers and New* methods
+	funcVal := ctx.NewFunction(func(ctx *Context, this *Value, args []*Value) *Value {
+		return ctx.NewNull()
 	})
 	defer funcVal.Free()
 	require.True(t, funcVal.IsFunction())
@@ -637,14 +639,14 @@ func TestValueSpecialTypes(t *testing.T) {
 		})
 	}
 
-	// Test non-Promise objects for IsPromise method (covers return false branch)
+	// Test non-Promise objects for IsPromise method (covers return false branch) - Updated to use New* methods
 	nonPromiseTests := []struct {
 		name      string
 		createVal func() *Value // Changed to return pointer
 	}{
-		{"Object", func() *Value { return ctx.Object() }},
-		{"String", func() *Value { return ctx.String("not a promise") }},
-		{"Number", func() *Value { return ctx.Int32(42) }},
+		{"Object", func() *Value { return ctx.NewObject() }},
+		{"String", func() *Value { return ctx.NewString("not a promise") }},
+		{"Number", func() *Value { return ctx.NewInt32(42) }},
 	}
 
 	for _, tt := range nonPromiseTests {
@@ -655,13 +657,13 @@ func TestValueSpecialTypes(t *testing.T) {
 		})
 	}
 
-	// Test edge cases
-	emptyStr := ctx.String("")
+	// Test edge cases - Updated to use New* methods
+	emptyStr := ctx.NewString("")
 	defer emptyStr.Free()
 	require.Equal(t, "", emptyStr.String())
 	require.Equal(t, `""`, emptyStr.JSONStringify())
 
-	zeroInt := ctx.Int32(0)
+	zeroInt := ctx.NewInt32(0)
 	defer zeroInt.Free()
 	require.False(t, zeroInt.ToBool()) // 0 is falsy
 
@@ -713,8 +715,8 @@ func TestPromiseState(t *testing.T) {
 		})
 	}
 
-	// Test non-promise value (covers first if branch)
-	nonPromise := ctx.String("not a promise")
+	// Test non-promise value (covers first if branch) - Updated to use New* methods
+	nonPromise := ctx.NewString("not a promise")
 	defer nonPromise.Free()
 	require.Equal(t, PromisePending, nonPromise.PromiseState())
 }
@@ -741,7 +743,7 @@ func TestValueAwait(t *testing.T) {
 	}
 
 	// Test awaiting non-promise value (should return as-is) - FIXED: removed error handling
-	normalValue := ctx.String("not a promise")
+	normalValue := ctx.NewString("not a promise")
 
 	result2 := normalValue.Await()
 	defer result2.Free()
@@ -769,15 +771,15 @@ func TestValueClassInstanceEdgeCases(t *testing.T) {
 	ctx := rt.NewContext()
 	defer ctx.Close()
 
-	// Test non-object values to cover !v.IsObject() branches
+	// Test non-object values to cover !v.IsObject() branches - Updated to use New* methods
 	nonObjects := []struct {
 		name      string
 		createVal func() *Value // Changed to return pointer
 	}{
-		{"String", func() *Value { return ctx.String("test") }},
-		{"Number", func() *Value { return ctx.Int32(42) }},
-		{"Null", func() *Value { return ctx.Null() }},
-		{"Undefined", func() *Value { return ctx.Undefined() }},
+		{"String", func() *Value { return ctx.NewString("test") }},
+		{"Number", func() *Value { return ctx.NewInt32(42) }},
+		{"Null", func() *Value { return ctx.NewNull() }},
+		{"Undefined", func() *Value { return ctx.NewUndefined() }},
 	}
 
 	for _, no := range nonObjects {
@@ -808,8 +810,8 @@ func TestValueClassInstanceEdgeCases(t *testing.T) {
 			val := no.createVal()
 			defer val.Free()
 
-			fn := ctx.Function(func(ctx *Context, this *Value, args []*Value) *Value {
-				return ctx.Null()
+			fn := ctx.NewFunction(func(ctx *Context, this *Value, args []*Value) *Value {
+				return ctx.NewNull()
 			})
 			defer fn.Free()
 
@@ -820,10 +822,10 @@ func TestValueClassInstanceEdgeCases(t *testing.T) {
 
 	// Test IsInstanceOfConstructor with non-function constructor
 	t.Run("IsInstanceOfConstructor_NonFunction", func(t *testing.T) {
-		obj := ctx.Object()
+		obj := ctx.NewObject()
 		defer obj.Free()
 
-		nonFunc := ctx.String("not a function")
+		nonFunc := ctx.NewString("not a function")
 		defer nonFunc.Free()
 
 		// Cover: !constructor.IsFunction() part of condition in IsInstanceOfConstructor
@@ -832,11 +834,11 @@ func TestValueClassInstanceEdgeCases(t *testing.T) {
 
 	// Test IsInstanceOfConstructor with valid object and function (no inheritance)
 	t.Run("IsInstanceOfConstructor_NoInheritance", func(t *testing.T) {
-		obj := ctx.Object()
+		obj := ctx.NewObject()
 		defer obj.Free()
 
-		fn := ctx.Function(func(ctx *Context, this *Value, args []*Value) *Value {
-			return ctx.Null()
+		fn := ctx.NewFunction(func(ctx *Context, this *Value, args []*Value) *Value {
+			return ctx.NewNull()
 		})
 		defer fn.Free()
 
@@ -847,8 +849,8 @@ func TestValueClassInstanceEdgeCases(t *testing.T) {
 	// Test GetGoObject "instance data not found in handle store" branch
 	t.Run("GetGoObject_HandleStoreManipulation", func(t *testing.T) {
 		// Create a function to get a valid object with opaque data
-		fn := ctx.Function(func(ctx *Context, this *Value, args []*Value) *Value {
-			return ctx.String("test")
+		fn := ctx.NewFunction(func(ctx *Context, this *Value, args []*Value) *Value {
+			return ctx.NewString("test")
 		})
 		defer fn.Free()
 
@@ -878,7 +880,7 @@ func TestValueClassInstanceEdgeCases(t *testing.T) {
 	// Alternative approach: Test with regular JS objects (no opaque data)
 	t.Run("GetGoObject_NoOpaqueData", func(t *testing.T) {
 		// Regular objects should have no opaque data, covering "no instance data found"
-		obj := ctx.Object()
+		obj := ctx.NewObject()
 		defer obj.Free()
 
 		_, err := obj.GetGoObject()
@@ -897,8 +899,8 @@ func TestValueCallConstructorEdgeCases(t *testing.T) {
 
 	// Test Case 1: CallConstructor called on non-constructor value
 	t.Run("CallConstructor_NonConstructor", func(t *testing.T) {
-		// Test with regular object (not a constructor)
-		obj := ctx.Object()
+		// Test with regular object (not a constructor) - Updated to use New* methods
+		obj := ctx.NewObject()
 		defer obj.Free()
 
 		// This should trigger a JavaScript TypeError since object is not a constructor
@@ -915,7 +917,7 @@ func TestValueCallConstructorEdgeCases(t *testing.T) {
 
 	// Test Case 2: CallConstructor called on string (definitely not a constructor)
 	t.Run("CallConstructor_String", func(t *testing.T) {
-		str := ctx.String("not a constructor")
+		str := ctx.NewString("not a constructor")
 		defer str.Free()
 
 		// This should trigger a JavaScript TypeError
@@ -926,16 +928,16 @@ func TestValueCallConstructorEdgeCases(t *testing.T) {
 		require.True(t, result.IsException())
 	})
 
-	// Test Case 3: CallConstructor with various non-constructor types
+	// Test Case 3: CallConstructor with various non-constructor types - Updated to use New* methods
 	t.Run("CallConstructor_VariousNonConstructors", func(t *testing.T) {
 		testCases := []struct {
 			name string
 			val  func() *Value // Changed to return pointer
 		}{
-			{"Number", func() *Value { return ctx.Int32(42) }},
-			{"Boolean", func() *Value { return ctx.Bool(true) }},
-			{"Null", func() *Value { return ctx.Null() }},
-			{"Undefined", func() *Value { return ctx.Undefined() }},
+			{"Number", func() *Value { return ctx.NewInt32(42) }},
+			{"Boolean", func() *Value { return ctx.NewBool(true) }},
+			{"Null", func() *Value { return ctx.NewNull() }},
+			{"Undefined", func() *Value { return ctx.NewUndefined() }},
 		}
 
 		for _, tc := range testCases {
@@ -965,7 +967,7 @@ func TestValueCallConstructorEdgeCases(t *testing.T) {
 		require.False(t, unregisteredConstructor.IsException()) // Check for exceptions instead of error
 
 		// This should work fine - JavaScript constructors don't need to be in our class registry
-		result := unregisteredConstructor.CallConstructor(ctx.String("test"))
+		result := unregisteredConstructor.CallConstructor(ctx.NewString("test"))
 		defer result.Free()
 
 		require.False(t, result.IsException())
@@ -997,7 +999,7 @@ func TestValueCallConstructorEdgeCases(t *testing.T) {
 		require.False(t, proxyConstructor.IsException()) // Check for exceptions instead of error
 
 		// This should work through the proxy
-		result := proxyConstructor.CallConstructor(ctx.String("proxy_test"))
+		result := proxyConstructor.CallConstructor(ctx.NewString("proxy_test"))
 		defer result.Free()
 
 		require.False(t, result.IsException())
@@ -1034,7 +1036,7 @@ func TestValueCallConstructorEdgeCases(t *testing.T) {
 		require.False(t, boundFunc.IsException()) // Check for exceptions instead of error
 
 		// Bound functions can be used as constructors
-		result := boundFunc.CallConstructor(ctx.String("bound_test"))
+		result := boundFunc.CallConstructor(ctx.NewString("bound_test"))
 		defer result.Free()
 
 		require.False(t, result.IsException())
@@ -1052,7 +1054,7 @@ func TestValueCallConstructorEdgeCases(t *testing.T) {
 			{
 				name:   "Array",
 				jsCode: "Array",
-				args:   []*Value{ctx.Int32(3)},
+				args:   []*Value{ctx.NewInt32(3)},
 				validate: func(v *Value) {
 					require.True(t, v.IsArray())
 					require.Equal(t, int64(3), v.Len())
@@ -1070,7 +1072,7 @@ func TestValueCallConstructorEdgeCases(t *testing.T) {
 			{
 				name:   "Date",
 				jsCode: "Date",
-				args:   []*Value{ctx.String("2023-01-01")},
+				args:   []*Value{ctx.NewString("2023-01-01")},
 				validate: func(v *Value) {
 					require.True(t, v.IsObject())
 					// Date objects have getTime method
@@ -1103,15 +1105,15 @@ func TestValueCallConstructorEdgeCases(t *testing.T) {
 
 	// Test Case 9: Successful CallConstructor with registered class (for comparison)
 	t.Run("CallConstructor_RegisteredClass", func(t *testing.T) {
-		// Create a Point class using our class system - UPDATED: constructor signature now uses pointers
+		// Create a Point class using our class system - UPDATED: constructor signature now uses pointers and New* methods
 		pointConstructor, _ := NewClassBuilder("Point").
 			Constructor(func(ctx *Context, instance *Value, args []*Value) (interface{}, error) {
 				x, y := 0.0, 0.0
 				if len(args) > 0 {
-					x = args[0].Float64()
+					x = args[0].ToFloat64()
 				}
 				if len(args) > 1 {
-					y = args[1].Float64()
+					y = args[1].ToFloat64()
 				}
 
 				// SCHEME C: Create Go object and return it for automatic association
@@ -1125,14 +1127,14 @@ func TestValueCallConstructorEdgeCases(t *testing.T) {
 				}
 				point := obj.(*Point)
 				norm := math.Sqrt(point.X*point.X + point.Y*point.Y)
-				return ctx.Float64(norm)
+				return ctx.NewFloat64(norm)
 			}).
 			Build(ctx)
 		defer pointConstructor.Free()
 		require.False(t, pointConstructor.IsException()) // Check for exceptions instead of error
 
 		// Test CallConstructor with arguments
-		instance := pointConstructor.CallConstructor(ctx.Float64(3.0), ctx.Float64(4.0))
+		instance := pointConstructor.CallConstructor(ctx.NewFloat64(3.0), ctx.NewFloat64(4.0))
 		defer instance.Free()
 
 		require.False(t, instance.IsException())
@@ -1141,7 +1143,7 @@ func TestValueCallConstructorEdgeCases(t *testing.T) {
 		// Verify we can call methods on the instance
 		norm := instance.Call("norm")
 		defer norm.Free()
-		require.InDelta(t, 5.0, norm.Float64(), 0.001)
+		require.InDelta(t, 5.0, norm.ToFloat64(), 0.001)
 
 		// Verify we can retrieve the Go object
 		goObj, err := instance.GetGoObject()
@@ -1184,7 +1186,7 @@ func TestValueCallConstructorComprehensive(t *testing.T) {
 		require.Equal(t, int32(0), argCount0.ToInt32())
 
 		// Test with one argument
-		instance1 := constructor.CallConstructor(ctx.String("arg1"))
+		instance1 := constructor.CallConstructor(ctx.NewString("arg1"))
 		defer instance1.Free()
 		require.False(t, instance1.IsException())
 
@@ -1194,9 +1196,9 @@ func TestValueCallConstructorComprehensive(t *testing.T) {
 
 		// Test with multiple arguments
 		instance3 := constructor.CallConstructor(
-			ctx.String("arg1"),
-			ctx.Int32(42),
-			ctx.Bool(true),
+			ctx.NewString("arg1"),
+			ctx.NewInt32(42),
+			ctx.NewBool(true),
 		)
 		defer instance3.Free()
 		require.False(t, instance3.IsException())
@@ -1236,8 +1238,8 @@ func TestValueCallConstructorComprehensive(t *testing.T) {
 
 		// Create instance using CallConstructor
 		instance := childConstructor.CallConstructor(
-			ctx.String("base_val"),
-			ctx.String("child_val"),
+			ctx.NewString("base_val"),
+			ctx.NewString("child_val"),
 		)
 		defer instance.Free()
 		require.False(t, instance.IsException())
@@ -1286,8 +1288,8 @@ func TestValueCallConstructorComprehensive(t *testing.T) {
 
 		// Test CallConstructor with ES6 class
 		instance := es6Constructor.CallConstructor(
-			ctx.String("test_name"),
-			ctx.Int32(123),
+			ctx.NewString("test_name"),
+			ctx.NewInt32(123),
 		)
 		defer instance.Free()
 		require.False(t, instance.IsException())
@@ -1356,7 +1358,7 @@ func TestValueCallConstructorComprehensive(t *testing.T) {
 		instances := make([]*Value, numInstances) // Changed to slice of pointers
 
 		for i := 0; i < numInstances; i++ {
-			instances[i] = constructor.CallConstructor(ctx.Int32(int32(i)))
+			instances[i] = constructor.CallConstructor(ctx.NewInt32(int32(i)))
 			require.False(t, instances[i].IsException())
 		}
 

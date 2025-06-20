@@ -41,10 +41,10 @@ func createPointClass(ctx *Context) (*Value, uint32) {
 		Constructor(func(ctx *Context, instance *Value, args []*Value) (interface{}, error) {
 			x, y := 0.0, 0.0
 			if len(args) > 0 {
-				x = args[0].Float64()
+				x = args[0].ToFloat64() // Updated: Use ToFloat64()
 			}
 			if len(args) > 1 {
-				y = args[1].Float64()
+				y = args[1].ToFloat64() // Updated: Use ToFloat64()
 			}
 
 			// SCHEME C: Create Go object and return it for automatic association
@@ -58,7 +58,7 @@ func createPointClass(ctx *Context) (*Value, uint32) {
 			}
 			point := obj.(*Point)
 			norm := math.Sqrt(point.X*point.X + point.Y*point.Y)
-			return ctx.Float64(norm)
+			return ctx.NewFloat64(norm) // Updated: Use NewFloat64()
 		}).
 		Method("toString", func(ctx *Context, this *Value, args []*Value) *Value {
 			obj, err := this.GetGoObject()
@@ -66,7 +66,7 @@ func createPointClass(ctx *Context) (*Value, uint32) {
 				return ctx.ThrowError(err)
 			}
 			point := obj.(*Point)
-			return ctx.String(point.String())
+			return ctx.NewString(point.String()) // Updated: Use NewString()
 		}).
 		Accessor("x",
 			func(ctx *Context, this *Value) *Value { // getter
@@ -75,7 +75,7 @@ func createPointClass(ctx *Context) (*Value, uint32) {
 					return ctx.ThrowError(err)
 				}
 				point := obj.(*Point)
-				return ctx.Float64(point.X)
+				return ctx.NewFloat64(point.X) // Updated: Use NewFloat64()
 			},
 			func(ctx *Context, this *Value, value *Value) *Value { // setter
 				obj, err := this.GetGoObject()
@@ -83,8 +83,8 @@ func createPointClass(ctx *Context) (*Value, uint32) {
 					return ctx.ThrowError(err)
 				}
 				point := obj.(*Point)
-				point.X = value.Float64()
-				return ctx.Undefined()
+				point.X = value.ToFloat64() // Updated: Use ToFloat64()
+				return ctx.NewUndefined()   // Updated: Use NewUndefined()
 			}).
 		Accessor("y",
 			func(ctx *Context, this *Value) *Value { // getter
@@ -93,7 +93,7 @@ func createPointClass(ctx *Context) (*Value, uint32) {
 					return ctx.ThrowError(err)
 				}
 				point := obj.(*Point)
-				return ctx.Float64(point.Y)
+				return ctx.NewFloat64(point.Y) // Updated: Use NewFloat64()
 			},
 			func(ctx *Context, this *Value, value *Value) *Value { // setter
 				obj, err := this.GetGoObject()
@@ -101,8 +101,8 @@ func createPointClass(ctx *Context) (*Value, uint32) {
 					return ctx.ThrowError(err)
 				}
 				point := obj.(*Point)
-				point.Y = value.Float64()
-				return ctx.Undefined()
+				point.Y = value.ToFloat64() // Updated: Use ToFloat64()
+				return ctx.NewUndefined()   // Updated: Use NewUndefined()
 			}).
 		StaticMethod("zero", func(ctx *Context, this *Value, args []*Value) *Value {
 			// SCHEME C: Use CallConstructor for static method
@@ -110,14 +110,14 @@ func createPointClass(ctx *Context) (*Value, uint32) {
 		}).
 		StaticAccessor("PI",
 			func(ctx *Context, this *Value) *Value { // static getter
-				return ctx.Float64(math.Pi)
+				return ctx.NewFloat64(math.Pi) // Updated: Use NewFloat64()
 			},
 			nil). // no setter, read-only
 		// NEW: Add Properties for testing
-		Property("version", ctx.String("1.0.0")).                               // Instance property (default flags)
-		Property("readOnlyFlag", ctx.Bool(true), PropertyConfigurable).         // Read-only instance property
-		StaticProperty("PI_CONST", ctx.Float64(math.Pi)).                       // Static property (default flags)
-		StaticProperty("AUTHOR", ctx.String("QuickJS-Go"), PropertyEnumerable). // Enumerable-only static property
+		Property("version", ctx.NewString("1.0.0")).                               // Updated: Use NewString()
+		Property("readOnlyFlag", ctx.NewBool(true), PropertyConfigurable).         // Updated: Use NewBool()
+		StaticProperty("PI_CONST", ctx.NewFloat64(math.Pi)).                       // Updated: Use NewFloat64()
+		StaticProperty("AUTHOR", ctx.NewString("QuickJS-Go"), PropertyEnumerable). // Updated: Use NewString()
 		Build(ctx)
 }
 
@@ -152,9 +152,9 @@ func TestBasicClassCreation(t *testing.T) {
 		t.Fatalf("Failed to evaluate basic constructor test: %v", err)
 	}
 
-	expected := 5.0 // sqrt(3^2 + 4^2) = 5
-	if math.Abs(result.Float64()-expected) > 0.001 {
-		t.Errorf("Expected norm to be %f, got %f", expected, result.Float64())
+	expected := 5.0                                    // sqrt(3^2 + 4^2) = 5
+	if math.Abs(result.ToFloat64()-expected) > 0.001 { // Updated: Use ToFloat64()
+		t.Errorf("Expected norm to be %f, got %f", expected, result.ToFloat64())
 	}
 }
 
@@ -189,9 +189,9 @@ func TestConstructorFunctionality(t *testing.T) {
 		t.Fatalf("Failed to evaluate no-args constructor: %v", err)
 	}
 
-	if result.GetIdx(0).Float64() != 0.0 || result.GetIdx(1).Float64() != 0.0 {
+	if result.GetIdx(0).ToFloat64() != 0.0 || result.GetIdx(1).ToFloat64() != 0.0 { // Updated: Use ToFloat64()
 		t.Errorf("Expected Point(0, 0), got Point(%f, %f)",
-			result.GetIdx(0).Float64(), result.GetIdx(1).Float64())
+			result.GetIdx(0).ToFloat64(), result.GetIdx(1).ToFloat64())
 	}
 
 	// Test constructor with partial arguments
@@ -205,9 +205,9 @@ func TestConstructorFunctionality(t *testing.T) {
 		t.Fatalf("Failed to evaluate partial-args constructor: %v", err)
 	}
 
-	if result2.GetIdx(0).Float64() != 5.0 || result2.GetIdx(1).Float64() != 0.0 {
+	if result2.GetIdx(0).ToFloat64() != 5.0 || result2.GetIdx(1).ToFloat64() != 0.0 { // Updated: Use ToFloat64()
 		t.Errorf("Expected Point(5, 0), got Point(%f, %f)",
-			result2.GetIdx(0).Float64(), result2.GetIdx(1).Float64())
+			result2.GetIdx(0).ToFloat64(), result2.GetIdx(1).ToFloat64())
 	}
 }
 
@@ -242,8 +242,8 @@ func TestInstanceMethods(t *testing.T) {
 		t.Fatalf("Failed to evaluate norm method: %v", err)
 	}
 
-	if math.Abs(result.Float64()-5.0) > 0.001 {
-		t.Errorf("Expected norm 5.0, got %f", result.Float64())
+	if math.Abs(result.ToFloat64()-5.0) > 0.001 { // Updated: Use ToFloat64()
+		t.Errorf("Expected norm 5.0, got %f", result.ToFloat64())
 	}
 
 	// Test toString method
@@ -258,8 +258,8 @@ func TestInstanceMethods(t *testing.T) {
 	}
 
 	expected := "Point(1.50, 2.50)"
-	if result2.String() != expected {
-		t.Errorf("Expected toString '%s', got '%s'", expected, result2.String())
+	if result2.ToString() != expected { // Updated: Use ToString()
+		t.Errorf("Expected toString '%s', got '%s'", expected, result2.ToString())
 	}
 }
 
@@ -294,9 +294,9 @@ func TestAccessors(t *testing.T) {
 		t.Fatalf("Failed to evaluate accessor getters: %v", err)
 	}
 
-	if result.GetIdx(0).Float64() != 3.0 || result.GetIdx(1).Float64() != 4.0 {
+	if result.GetIdx(0).ToFloat64() != 3.0 || result.GetIdx(1).ToFloat64() != 4.0 { // Updated: Use ToFloat64()
 		t.Errorf("Expected [3, 4], got [%f, %f]",
-			result.GetIdx(0).Float64(), result.GetIdx(1).Float64())
+			result.GetIdx(0).ToFloat64(), result.GetIdx(1).ToFloat64())
 	}
 
 	// Test accessor setters
@@ -312,9 +312,9 @@ func TestAccessors(t *testing.T) {
 		t.Fatalf("Failed to evaluate accessor setters: %v", err)
 	}
 
-	if result2.GetIdx(0).Float64() != 10.0 || result2.GetIdx(1).Float64() != 20.0 {
+	if result2.GetIdx(0).ToFloat64() != 10.0 || result2.GetIdx(1).ToFloat64() != 20.0 { // Updated: Use ToFloat64()
 		t.Errorf("Expected [10, 20], got [%f, %f]",
-			result2.GetIdx(0).Float64(), result2.GetIdx(1).Float64())
+			result2.GetIdx(0).ToFloat64(), result2.GetIdx(1).ToFloat64())
 	}
 }
 
@@ -349,9 +349,9 @@ func TestStaticMethods(t *testing.T) {
 		t.Fatalf("Failed to evaluate static method: %v", err)
 	}
 
-	if result.GetIdx(0).Float64() != 0.0 || result.GetIdx(1).Float64() != 0.0 {
+	if result.GetIdx(0).ToFloat64() != 0.0 || result.GetIdx(1).ToFloat64() != 0.0 { // Updated: Use ToFloat64()
 		t.Errorf("Expected [0, 0], got [%f, %f]",
-			result.GetIdx(0).Float64(), result.GetIdx(1).Float64())
+			result.GetIdx(0).ToFloat64(), result.GetIdx(1).ToFloat64())
 	}
 }
 
@@ -383,8 +383,8 @@ func TestStaticAccessors(t *testing.T) {
 		t.Fatalf("Failed to evaluate static accessor: %v", err)
 	}
 
-	if math.Abs(result.Float64()-math.Pi) > 0.001 {
-		t.Errorf("Expected PI %f, got %f", math.Pi, result.Float64())
+	if math.Abs(result.ToFloat64()-math.Pi) > 0.001 { // Updated: Use ToFloat64()
+		t.Errorf("Expected PI %f, got %f", math.Pi, result.ToFloat64())
 	}
 }
 
@@ -423,17 +423,17 @@ func TestProperties(t *testing.T) {
 		t.Fatalf("Failed to evaluate instance properties: %v", err)
 	}
 
-	if result.GetIdx(0).String() != "1.0.0" {
-		t.Errorf("Expected version '1.0.0', got '%s'", result.GetIdx(0).String())
+	if result.GetIdx(0).ToString() != "1.0.0" { // Updated: Use ToString()
+		t.Errorf("Expected version '1.0.0', got '%s'", result.GetIdx(0).ToString())
 	}
-	if !result.GetIdx(1).ToBool() {
+	if !result.GetIdx(1).ToBool() { // Updated: Use ToBool()
 		t.Errorf("Expected readOnlyFlag true, got %t", result.GetIdx(1).ToBool())
 	}
-	if result.GetIdx(2).String() != "string" {
-		t.Errorf("Expected version type 'string', got '%s'", result.GetIdx(2).String())
+	if result.GetIdx(2).ToString() != "string" { // Updated: Use ToString()
+		t.Errorf("Expected version type 'string', got '%s'", result.GetIdx(2).ToString())
 	}
-	if result.GetIdx(3).String() != "boolean" {
-		t.Errorf("Expected readOnlyFlag type 'boolean', got '%s'", result.GetIdx(3).String())
+	if result.GetIdx(3).ToString() != "boolean" { // Updated: Use ToString()
+		t.Errorf("Expected readOnlyFlag type 'boolean', got '%s'", result.GetIdx(3).ToString())
 	}
 }
 
@@ -471,17 +471,17 @@ func TestStaticProperties(t *testing.T) {
 		t.Fatalf("Failed to evaluate static properties: %v", err)
 	}
 
-	if math.Abs(result.GetIdx(0).Float64()-math.Pi) > 0.001 {
-		t.Errorf("Expected PI_CONST %f, got %f", math.Pi, result.GetIdx(0).Float64())
+	if math.Abs(result.GetIdx(0).ToFloat64()-math.Pi) > 0.001 { // Updated: Use ToFloat64()
+		t.Errorf("Expected PI_CONST %f, got %f", math.Pi, result.GetIdx(0).ToFloat64())
 	}
-	if result.GetIdx(1).String() != "QuickJS-Go" {
-		t.Errorf("Expected AUTHOR 'QuickJS-Go', got '%s'", result.GetIdx(1).String())
+	if result.GetIdx(1).ToString() != "QuickJS-Go" { // Updated: Use ToString()
+		t.Errorf("Expected AUTHOR 'QuickJS-Go', got '%s'", result.GetIdx(1).ToString())
 	}
-	if result.GetIdx(2).String() != "number" {
-		t.Errorf("Expected PI_CONST type 'number', got '%s'", result.GetIdx(2).String())
+	if result.GetIdx(2).ToString() != "number" { // Updated: Use ToString()
+		t.Errorf("Expected PI_CONST type 'number', got '%s'", result.GetIdx(2).ToString())
 	}
-	if result.GetIdx(3).String() != "string" {
-		t.Errorf("Expected AUTHOR type 'string', got '%s'", result.GetIdx(3).String())
+	if result.GetIdx(3).ToString() != "string" { // Updated: Use ToString()
+		t.Errorf("Expected AUTHOR type 'string', got '%s'", result.GetIdx(3).ToString())
 	}
 }
 
@@ -547,46 +547,46 @@ func TestPropertyFlags(t *testing.T) {
 	}
 
 	// Check version property flags (default: writable, enumerable, configurable)
-	if !result.GetIdx(0).ToBool() {
+	if !result.GetIdx(0).ToBool() { // Updated: Use ToBool()
 		t.Errorf("Expected version.writable to be true")
 	}
-	if !result.GetIdx(1).ToBool() {
+	if !result.GetIdx(1).ToBool() { // Updated: Use ToBool()
 		t.Errorf("Expected version.enumerable to be true")
 	}
-	if !result.GetIdx(2).ToBool() {
+	if !result.GetIdx(2).ToBool() { // Updated: Use ToBool()
 		t.Errorf("Expected version.configurable to be true")
 	}
 
 	// Check readOnlyFlag property flags (configurable only)
-	if result.GetIdx(3).ToBool() {
+	if result.GetIdx(3).ToBool() { // Updated: Use ToBool()
 		t.Errorf("Expected readOnlyFlag.writable to be false")
 	}
-	if result.GetIdx(4).ToBool() {
+	if result.GetIdx(4).ToBool() { // Updated: Use ToBool()
 		t.Errorf("Expected readOnlyFlag.enumerable to be false")
 	}
-	if !result.GetIdx(5).ToBool() {
+	if !result.GetIdx(5).ToBool() { // Updated: Use ToBool()
 		t.Errorf("Expected readOnlyFlag.configurable to be true")
 	}
 
 	// Check PI_CONST property flags (default: writable, enumerable, configurable)
-	if !result.GetIdx(6).ToBool() {
+	if !result.GetIdx(6).ToBool() { // Updated: Use ToBool()
 		t.Errorf("Expected PI_CONST.writable to be true")
 	}
-	if !result.GetIdx(7).ToBool() {
+	if !result.GetIdx(7).ToBool() { // Updated: Use ToBool()
 		t.Errorf("Expected PI_CONST.enumerable to be true")
 	}
-	if !result.GetIdx(8).ToBool() {
+	if !result.GetIdx(8).ToBool() { // Updated: Use ToBool()
 		t.Errorf("Expected PI_CONST.configurable to be true")
 	}
 
 	// Check AUTHOR property flags (enumerable only)
-	if result.GetIdx(9).ToBool() {
+	if result.GetIdx(9).ToBool() { // Updated: Use ToBool()
 		t.Errorf("Expected AUTHOR.writable to be false")
 	}
-	if !result.GetIdx(10).ToBool() {
+	if !result.GetIdx(10).ToBool() { // Updated: Use ToBool()
 		t.Errorf("Expected AUTHOR.enumerable to be true")
 	}
-	if result.GetIdx(11).ToBool() {
+	if result.GetIdx(11).ToBool() { // Updated: Use ToBool()
 		t.Errorf("Expected AUTHOR.configurable to be false")
 	}
 }
@@ -646,33 +646,33 @@ func TestPropertyVsAccessorBehavior(t *testing.T) {
 	}
 
 	// Check property behavior (direct data storage)
-	if result.GetIdx(0).String() != "1.0.0" {
-		t.Errorf("Expected original version '1.0.0', got '%s'", result.GetIdx(0).String())
+	if result.GetIdx(0).ToString() != "1.0.0" { // Updated: Use ToString()
+		t.Errorf("Expected original version '1.0.0', got '%s'", result.GetIdx(0).ToString())
 	}
-	if result.GetIdx(1).String() != "2.0.0" {
-		t.Errorf("Expected new version '2.0.0', got '%s'", result.GetIdx(1).String())
+	if result.GetIdx(1).ToString() != "2.0.0" { // Updated: Use ToString()
+		t.Errorf("Expected new version '2.0.0', got '%s'", result.GetIdx(1).ToString())
 	}
 
 	// Check accessor behavior (function calls)
-	if result.GetIdx(2).Float64() != 5.0 {
-		t.Errorf("Expected original x 5.0, got %f", result.GetIdx(2).Float64())
+	if result.GetIdx(2).ToFloat64() != 5.0 { // Updated: Use ToFloat64()
+		t.Errorf("Expected original x 5.0, got %f", result.GetIdx(2).ToFloat64())
 	}
-	if result.GetIdx(3).Float64() != 15.0 {
-		t.Errorf("Expected new x 15.0, got %f", result.GetIdx(3).Float64())
+	if result.GetIdx(3).ToFloat64() != 15.0 { // Updated: Use ToFloat64()
+		t.Errorf("Expected new x 15.0, got %f", result.GetIdx(3).ToFloat64())
 	}
 
 	// Check property descriptor differences
-	if result.GetIdx(4).String() != "string" {
-		t.Errorf("Expected version property to have value, got %s", result.GetIdx(4).String())
+	if result.GetIdx(4).ToString() != "string" { // Updated: Use ToString()
+		t.Errorf("Expected version property to have value, got %s", result.GetIdx(4).ToString())
 	}
-	if result.GetIdx(5).String() != "undefined" {
-		t.Errorf("Expected version property to have no getter, got %s", result.GetIdx(5).String())
+	if result.GetIdx(5).ToString() != "undefined" { // Updated: Use ToString()
+		t.Errorf("Expected version property to have no getter, got %s", result.GetIdx(5).ToString())
 	}
-	if result.GetIdx(6).String() != "undefined" {
-		t.Errorf("Expected x accessor to have no value, got %s", result.GetIdx(6).String())
+	if result.GetIdx(6).ToString() != "undefined" { // Updated: Use ToString()
+		t.Errorf("Expected x accessor to have no value, got %s", result.GetIdx(6).ToString())
 	}
-	if result.GetIdx(7).String() != "function" {
-		t.Errorf("Expected x accessor to have getter function, got %s", result.GetIdx(7).String())
+	if result.GetIdx(7).ToString() != "function" { // Updated: Use ToString()
+		t.Errorf("Expected x accessor to have getter function, got %s", result.GetIdx(7).ToString())
 	}
 }
 
@@ -718,9 +718,9 @@ func TestInheritanceAndNewTarget(t *testing.T) {
 		t.Fatalf("Failed to evaluate inheritance test: %v", err)
 	}
 
-	expected := 13.0 // sqrt(9 + 16 + 144) = 13
-	if math.Abs(result.Float64()-expected) > 0.001 {
-		t.Errorf("Expected 3D norm 13.0, got %f", result.Float64())
+	expected := 13.0                                   // sqrt(9 + 16 + 144) = 13
+	if math.Abs(result.ToFloat64()-expected) > 0.001 { // Updated: Use ToFloat64()
+		t.Errorf("Expected 3D norm 13.0, got %f", result.ToFloat64())
 	}
 
 	// Test that inherited object is still instance of Point
@@ -734,7 +734,7 @@ func TestInheritanceAndNewTarget(t *testing.T) {
 		t.Fatalf("Failed to evaluate instanceof test: %v", err)
 	}
 
-	if !result2.ToBool() {
+	if !result2.ToBool() { // Updated: Use ToBool()
 		t.Errorf("Expected Point3D instance to be instanceof Point")
 	}
 }
@@ -942,7 +942,7 @@ func TestErrorHandling(t *testing.T) {
 			return nil, nil
 		}).
 		Method("getValue", func(ctx *Context, this *Value, args []*Value) *Value {
-			return ctx.Float64(0)
+			return ctx.NewFloat64(0) // Updated: Use NewFloat64()
 		}).
 		Accessor("y",
 			func(ctx *Context, this *Value) *Value { // getter
@@ -951,7 +951,7 @@ func TestErrorHandling(t *testing.T) {
 					return ctx.ThrowError(err)
 				}
 				point := obj.(*Point)
-				return ctx.Float64(point.Y)
+				return ctx.NewFloat64(point.Y) // Updated: Use NewFloat64()
 			},
 			func(ctx *Context, this *Value, value *Value) *Value { // setter
 				obj, err := this.GetGoObject()
@@ -959,8 +959,8 @@ func TestErrorHandling(t *testing.T) {
 					return ctx.ThrowError(err)
 				}
 				point := obj.(*Point)
-				point.Y = value.Float64()
-				return ctx.Undefined()
+				point.Y = value.ToFloat64() // Updated: Use ToFloat64()
+				return ctx.NewUndefined()   // Updated: Use NewUndefined()
 			}).
 		Build(context)
 	defer ctor.Free()
@@ -994,7 +994,7 @@ func TestErrorHandling(t *testing.T) {
 	}
 
 	// Test GetGoObject on non-object
-	numberValue := context.Float64(42.0)
+	numberValue := context.NewFloat64(42.0) // Updated: Use NewFloat64()
 	defer numberValue.Free()
 
 	// Use GetGoObject to test error handling
@@ -1025,7 +1025,7 @@ func TestMemoryManagement(t *testing.T) {
 				return point, nil
 			}).
 			Method("getValue", func(ctx *Context, this *Value, args []*Value) *Value {
-				return ctx.Float64(float64(i))
+				return ctx.NewFloat64(float64(i)) // Updated: Use NewFloat64()
 			}).
 			Build(context)
 
@@ -1123,31 +1123,31 @@ func TestComplexClassHierarchy(t *testing.T) {
 	}
 
 	// Check all instanceof relationships
-	if !result.GetIdx(0).ToBool() {
+	if !result.GetIdx(0).ToBool() { // Updated: Use ToBool()
 		t.Errorf("Expected NamedColoredPoint to be instanceof Point")
 	}
-	if !result.GetIdx(1).ToBool() {
+	if !result.GetIdx(1).ToBool() { // Updated: Use ToBool()
 		t.Errorf("Expected NamedColoredPoint to be instanceof ColoredPoint")
 	}
-	if !result.GetIdx(2).ToBool() {
+	if !result.GetIdx(2).ToBool() { // Updated: Use ToBool()
 		t.Errorf("Expected NamedColoredPoint to be instanceof NamedColoredPoint")
 	}
 
 	// Check inherited accessors and methods
-	if result.GetIdx(3).Float64() != 3.0 {
-		t.Errorf("Expected x=3, got %f", result.GetIdx(3).Float64())
+	if result.GetIdx(3).ToFloat64() != 3.0 { // Updated: Use ToFloat64()
+		t.Errorf("Expected x=3, got %f", result.GetIdx(3).ToFloat64())
 	}
-	if result.GetIdx(4).Float64() != 4.0 {
-		t.Errorf("Expected y=4, got %f", result.GetIdx(4).Float64())
+	if result.GetIdx(4).ToFloat64() != 4.0 { // Updated: Use ToFloat64()
+		t.Errorf("Expected y=4, got %f", result.GetIdx(4).ToFloat64())
 	}
-	if result.GetIdx(5).String() != "red" {
-		t.Errorf("Expected color=red, got %s", result.GetIdx(5).String())
+	if result.GetIdx(5).ToString() != "red" { // Updated: Use ToString()
+		t.Errorf("Expected color=red, got %s", result.GetIdx(5).ToString())
 	}
-	if result.GetIdx(6).String() != "MyPoint" {
-		t.Errorf("Expected name=MyPoint, got %s", result.GetIdx(6).String())
+	if result.GetIdx(6).ToString() != "MyPoint" { // Updated: Use ToString()
+		t.Errorf("Expected name=MyPoint, got %s", result.GetIdx(6).ToString())
 	}
-	if math.Abs(result.GetIdx(7).Float64()-5.0) > 0.001 {
-		t.Errorf("Expected norm=5, got %f", result.GetIdx(7).Float64())
+	if math.Abs(result.GetIdx(7).ToFloat64()-5.0) > 0.001 { // Updated: Use ToFloat64()
+		t.Errorf("Expected norm=5, got %f", result.GetIdx(7).ToFloat64())
 	}
 }
 
@@ -1242,13 +1242,13 @@ func TestUnifiedConstructorMapping(t *testing.T) {
 		t.Fatalf("Failed to test unified mapping: %v", err)
 	}
 
-	if result.GetIdx(0).Float64() != 1.0 || result.GetIdx(1).Float64() != 2.0 {
+	if result.GetIdx(0).ToFloat64() != 1.0 || result.GetIdx(1).ToFloat64() != 2.0 { // Updated: Use ToFloat64()
 		t.Errorf("Manual constructor instance incorrect: got (%f, %f)",
-			result.GetIdx(0).Float64(), result.GetIdx(1).Float64())
+			result.GetIdx(0).ToFloat64(), result.GetIdx(1).ToFloat64())
 	}
-	if result.GetIdx(2).Float64() != 3.0 || result.GetIdx(3).Float64() != 4.0 {
+	if result.GetIdx(2).ToFloat64() != 3.0 || result.GetIdx(3).ToFloat64() != 4.0 { // Updated: Use ToFloat64()
 		t.Errorf("Reflection constructor instance incorrect: got (%f, %f)",
-			result.GetIdx(2).Float64(), result.GetIdx(3).Float64())
+			result.GetIdx(2).ToFloat64(), result.GetIdx(3).ToFloat64())
 	}
 }
 
@@ -1267,7 +1267,7 @@ func TestReadOnlyAndWriteOnlyAccessors(t *testing.T) {
 		Accessor("readOnlyX", func(ctx *Context, this *Value) *Value {
 			obj, _ := this.GetGoObject()
 			point := obj.(*Point)
-			return ctx.Float64(point.X)
+			return ctx.NewFloat64(point.X) // Updated: Use NewFloat64()
 		}, nil).
 		Build(ctx)
 
@@ -1291,9 +1291,9 @@ func TestReadOnlyAndWriteOnlyAccessors(t *testing.T) {
 		t.Fatalf("ReadOnly accessor test failed: %v", err)
 	}
 
-	if result.GetIdx(0).Float64() != 10.0 || result.GetIdx(1).Float64() != 10.0 {
+	if result.GetIdx(0).ToFloat64() != 10.0 || result.GetIdx(1).ToFloat64() != 10.0 { // Updated: Use ToFloat64()
 		t.Errorf("ReadOnly accessor failed: expected [10, 10], got [%f, %f]",
-			result.GetIdx(0).Float64(), result.GetIdx(1).Float64())
+			result.GetIdx(0).ToFloat64(), result.GetIdx(1).ToFloat64())
 	}
 
 	// Test WriteOnlyAccessor
@@ -1304,13 +1304,13 @@ func TestReadOnlyAndWriteOnlyAccessors(t *testing.T) {
 		Accessor("writeOnlyX", nil, func(ctx *Context, this *Value, value *Value) *Value {
 			obj, _ := this.GetGoObject()
 			point := obj.(*Point)
-			point.X = value.Float64()
-			return ctx.Undefined()
+			point.X = value.ToFloat64() // Updated: Use ToFloat64()
+			return ctx.NewUndefined()   // Updated: Use NewUndefined()
 		}).
 		Accessor("getX", func(ctx *Context, this *Value) *Value {
 			obj, _ := this.GetGoObject()
 			point := obj.(*Point)
-			return ctx.Float64(point.X)
+			return ctx.NewFloat64(point.X) // Updated: Use NewFloat64()
 		}, nil).
 		Build(ctx)
 
@@ -1333,9 +1333,9 @@ func TestReadOnlyAndWriteOnlyAccessors(t *testing.T) {
 		t.Fatalf("WriteOnly accessor test failed: %v", err)
 	}
 
-	if result2.GetIdx(0).Float64() != 42.0 || !result2.GetIdx(1).IsUndefined() {
+	if result2.GetIdx(0).ToFloat64() != 42.0 || !result2.GetIdx(1).IsUndefined() { // Updated: Use ToFloat64()
 		t.Errorf("WriteOnly accessor failed: expected [42, undefined], got [%f, %v]",
-			result2.GetIdx(0).Float64(), result2.GetIdx(1).String())
+			result2.GetIdx(0).ToFloat64(), result2.GetIdx(1).ToString())
 	}
 
 	// Test StaticReadOnlyAccessor
@@ -1344,7 +1344,7 @@ func TestReadOnlyAndWriteOnlyAccessors(t *testing.T) {
 			return &Point{X: 0, Y: 0}, nil
 		}).
 		StaticAccessor("VERSION", func(ctx *Context, this *Value) *Value {
-			return ctx.String("1.0.0")
+			return ctx.NewString("1.0.0") // Updated: Use NewString()
 		}, nil).
 		Build(ctx)
 
@@ -1367,9 +1367,9 @@ func TestReadOnlyAndWriteOnlyAccessors(t *testing.T) {
 		t.Fatalf("StaticReadOnly accessor test failed: %v", err)
 	}
 
-	if result3.GetIdx(0).String() != "1.0.0" || result3.GetIdx(1).String() != "1.0.0" {
+	if result3.GetIdx(0).ToString() != "1.0.0" || result3.GetIdx(1).ToString() != "1.0.0" { // Updated: Use ToString()
 		t.Errorf("StaticReadOnly accessor failed: expected ['1.0.0', '1.0.0'], got ['%s', '%s']",
-			result3.GetIdx(0).String(), result3.GetIdx(1).String())
+			result3.GetIdx(0).ToString(), result3.GetIdx(1).ToString())
 	}
 }
 
@@ -1407,8 +1407,8 @@ func TestCallConstructorAPI(t *testing.T) {
 	}
 
 	// Test CallConstructor with arguments
-	arg1 := ctx.Float64(10.5)
-	arg2 := ctx.Float64(20.5)
+	arg1 := ctx.NewFloat64(10.5) // Updated: Use NewFloat64()
+	arg2 := ctx.NewFloat64(20.5) // Updated: Use NewFloat64()
 	defer arg1.Free()
 	defer arg2.Free()
 
@@ -1426,11 +1426,11 @@ func TestCallConstructorAPI(t *testing.T) {
 	defer x.Free()
 	defer y.Free()
 
-	if math.Abs(x.Float64()-10.5) > 0.001 {
-		t.Errorf("Expected x=10.5, got %f", x.Float64())
+	if math.Abs(x.ToFloat64()-10.5) > 0.001 { // Updated: Use ToFloat64()
+		t.Errorf("Expected x=10.5, got %f", x.ToFloat64())
 	}
-	if math.Abs(y.Float64()-20.5) > 0.001 {
-		t.Errorf("Expected y=20.5, got %f", y.Float64())
+	if math.Abs(y.ToFloat64()-20.5) > 0.001 { // Updated: Use ToFloat64()
+		t.Errorf("Expected y=20.5, got %f", y.ToFloat64())
 	}
 
 	// Verify instance properties are present
@@ -1439,10 +1439,10 @@ func TestCallConstructorAPI(t *testing.T) {
 	defer version.Free()
 	defer readOnlyFlag.Free()
 
-	if version.String() != "1.0.0" {
-		t.Errorf("Expected version '1.0.0', got '%s'", version.String())
+	if version.ToString() != "1.0.0" { // Updated: Use ToString()
+		t.Errorf("Expected version '1.0.0', got '%s'", version.ToString())
 	}
-	if !readOnlyFlag.ToBool() {
+	if !readOnlyFlag.ToBool() { // Updated: Use ToBool()
 		t.Errorf("Expected readOnlyFlag true, got %t", readOnlyFlag.ToBool())
 	}
 }
@@ -1480,9 +1480,9 @@ func TestSchemeCSynchronization(t *testing.T) {
 		t.Fatalf("Failed to evaluate synchronization test: %v", err)
 	}
 
-	if result.GetIdx(0).Float64() != 100.0 || result.GetIdx(1).Float64() != 200.0 {
+	if result.GetIdx(0).ToFloat64() != 100.0 || result.GetIdx(1).ToFloat64() != 200.0 { // Updated: Use ToFloat64()
 		t.Errorf("Accessor synchronization failed: expected [100, 200], got [%f, %f]",
-			result.GetIdx(0).Float64(), result.GetIdx(1).Float64())
+			result.GetIdx(0).ToFloat64(), result.GetIdx(1).ToFloat64())
 	}
 
 	// Test that we can retrieve the Go object and verify synchronization

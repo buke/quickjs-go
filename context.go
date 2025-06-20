@@ -42,30 +42,54 @@ func (ctx *Context) Close() {
 	C.JS_FreeContext(ctx.ref)
 }
 
-// Null return a null value.
-func (ctx *Context) Null() *Value {
+// NewNull returns a null value.
+func (ctx *Context) NewNull() *Value {
 	return &Value{ctx: ctx, ref: C.JS_NewNull()}
 }
 
-// Undefined return a undefined value.
-func (ctx *Context) Undefined() *Value {
+// Null return a null value.
+// Deprecated: Use NewNull() instead.
+func (ctx *Context) Null() *Value {
+	return ctx.NewNull()
+}
+
+// NewUndefined returns a undefined value.
+func (ctx *Context) NewUndefined() *Value {
 	return &Value{ctx: ctx, ref: C.JS_NewUndefined()}
 }
 
-// Uninitialized returns a uninitialized value.
-func (ctx *Context) Uninitialized() *Value {
+// Undefined return a undefined value.
+// Deprecated: Use NewUndefined() instead.
+func (ctx *Context) Undefined() *Value {
+	return ctx.NewUndefined()
+}
+
+// NewUninitialized returns a uninitialized value.
+func (ctx *Context) NewUninitialized() *Value {
 	return &Value{ctx: ctx, ref: C.JS_NewUninitialized()}
 }
 
-// Error returns a new exception value with given message.
-func (ctx *Context) Error(err error) *Value {
+// Uninitialized returns a uninitialized value.
+// Deprecated: Use NewUninitialized() instead.
+func (ctx *Context) Uninitialized() *Value {
+	return ctx.NewUninitialized()
+}
+
+// NewError returns a new exception value with given message.
+func (ctx *Context) NewError(err error) *Value {
 	val := &Value{ctx: ctx, ref: C.JS_NewError(ctx.ref)}
-	val.Set("message", ctx.String(err.Error()))
+	val.Set("message", ctx.NewString(err.Error()))
 	return val
 }
 
-// Bool returns a bool value with given bool.
-func (ctx *Context) Bool(b bool) *Value {
+// Error returns a new exception value with given message.
+// Deprecated: Use NewError() instead.
+func (ctx *Context) Error(err error) *Value {
+	return ctx.NewError(err)
+}
+
+// NewBool returns a bool value with given bool.
+func (ctx *Context) NewBool(b bool) *Value {
 	bv := 0
 	if b {
 		bv = 1
@@ -73,49 +97,103 @@ func (ctx *Context) Bool(b bool) *Value {
 	return &Value{ctx: ctx, ref: C.JS_NewBool(ctx.ref, C.int(bv))}
 }
 
-// Int32 returns a int32 value with given int32.
-func (ctx *Context) Int32(v int32) *Value {
+// Bool returns a bool value with given bool.
+// Deprecated: Use NewBool() instead.
+func (ctx *Context) Bool(b bool) *Value {
+	return ctx.NewBool(b)
+}
+
+// NewInt32 returns a int32 value with given int32.
+func (ctx *Context) NewInt32(v int32) *Value {
 	return &Value{ctx: ctx, ref: C.JS_NewInt32(ctx.ref, C.int32_t(v))}
 }
 
-// Int64 returns a int64 value with given int64.
-func (ctx *Context) Int64(v int64) *Value {
+// Int32 returns a int32 value with given int32.
+// Deprecated: Use NewInt32() instead.
+func (ctx *Context) Int32(v int32) *Value {
+	return ctx.NewInt32(v)
+}
+
+// NewInt64 returns a int64 value with given int64.
+func (ctx *Context) NewInt64(v int64) *Value {
 	return &Value{ctx: ctx, ref: C.JS_NewInt64(ctx.ref, C.int64_t(v))}
 }
 
-// Uint32 returns a uint32 value with given uint32.
-func (ctx *Context) Uint32(v uint32) *Value {
+// Int64 returns a int64 value with given int64.
+// Deprecated: Use NewInt64() instead.
+func (ctx *Context) Int64(v int64) *Value {
+	return ctx.NewInt64(v)
+}
+
+// NewUint32 returns a uint32 value with given uint32.
+func (ctx *Context) NewUint32(v uint32) *Value {
 	return &Value{ctx: ctx, ref: C.JS_NewUint32(ctx.ref, C.uint32_t(v))}
 }
 
-// BigInt64 returns a int64 value with given uint64.
-func (ctx *Context) BigInt64(v int64) *Value {
+// Uint32 returns a uint32 value with given uint32.
+// Deprecated: Use NewUint32() instead.
+func (ctx *Context) Uint32(v uint32) *Value {
+	return ctx.NewUint32(v)
+}
+
+// NewBigInt64 returns a int64 value with given uint64.
+func (ctx *Context) NewBigInt64(v int64) *Value {
 	return &Value{ctx: ctx, ref: C.JS_NewBigInt64(ctx.ref, C.int64_t(v))}
 }
 
-// BigUint64 returns a uint64 value with given uint64.
-func (ctx *Context) BigUint64(v uint64) *Value {
+// BigInt64 returns a int64 value with given uint64.
+// Deprecated: Use NewBigInt64() instead.
+func (ctx *Context) BigInt64(v int64) *Value {
+	return ctx.NewBigInt64(v)
+}
+
+// NewBigUint64 returns a uint64 value with given uint64.
+func (ctx *Context) NewBigUint64(v uint64) *Value {
 	return &Value{ctx: ctx, ref: C.JS_NewBigUint64(ctx.ref, C.uint64_t(v))}
 }
 
-// Float64 returns a float64 value with given float64.
-func (ctx *Context) Float64(v float64) *Value {
+// BigUint64 returns a uint64 value with given uint64.
+// Deprecated: Use NewBigUint64() instead.
+func (ctx *Context) BigUint64(v uint64) *Value {
+	return ctx.NewBigUint64(v)
+}
+
+// NewFloat64 returns a float64 value with given float64.
+func (ctx *Context) NewFloat64(v float64) *Value {
 	return &Value{ctx: ctx, ref: C.JS_NewFloat64(ctx.ref, C.double(v))}
 }
 
-// String returns a string value with given string.
-func (ctx *Context) String(v string) *Value {
+// Float64 returns a float64 value with given float64.
+// Deprecated: Use NewFloat64() instead.
+func (ctx *Context) Float64(v float64) *Value {
+	return ctx.NewFloat64(v)
+}
+
+// NewString returns a string value with given string.
+func (ctx *Context) NewString(v string) *Value {
 	ptr := C.CString(v)
 	defer C.free(unsafe.Pointer(ptr))
 	return &Value{ctx: ctx, ref: C.JS_NewString(ctx.ref, ptr)}
 }
 
-// ArrayBuffer returns a ArrayBuffer value with given binary data.
-func (ctx *Context) ArrayBuffer(binaryData []byte) *Value {
+// String returns a string value with given string.
+// Deprecated: Use NewString() instead.
+func (ctx *Context) String(v string) *Value {
+	return ctx.NewString(v)
+}
+
+// NewArrayBuffer returns a ArrayBuffer value with given binary data.
+func (ctx *Context) NewArrayBuffer(binaryData []byte) *Value {
 	if len(binaryData) == 0 {
 		return &Value{ctx: ctx, ref: C.JS_NewArrayBufferCopy(ctx.ref, nil, 0)}
 	}
 	return &Value{ctx: ctx, ref: C.JS_NewArrayBufferCopy(ctx.ref, (*C.uchar)(&binaryData[0]), C.size_t(len(binaryData)))}
+}
+
+// ArrayBuffer returns a ArrayBuffer value with given binary data.
+// Deprecated: Use NewArrayBuffer() instead.
+func (ctx *Context) ArrayBuffer(binaryData []byte) *Value {
+	return ctx.NewArrayBuffer(binaryData)
 }
 
 // createTypedArray is a helper function to create TypedArray with given data and type.
@@ -131,7 +209,7 @@ func (ctx *Context) createTypedArray(data unsafe.Pointer, elementCount int, elem
 	}
 
 	// Create ArrayBuffer from the byte data
-	buffer := ctx.ArrayBuffer(bytes)
+	buffer := ctx.NewArrayBuffer(bytes)
 	defer buffer.Free()
 
 	// Create TypedArray from ArrayBuffer: new TypedArray(buffer, offset, length)
@@ -146,97 +224,169 @@ func (ctx *Context) createTypedArray(data unsafe.Pointer, elementCount int, elem
 	}
 }
 
-// Int8Array returns a Int8Array value with given int8 slice.
-func (ctx *Context) Int8Array(data []int8) *Value {
+// NewInt8Array returns a Int8Array value with given int8 slice.
+func (ctx *Context) NewInt8Array(data []int8) *Value {
 	if len(data) == 0 {
 		return ctx.createTypedArray(nil, 0, 1, C.JSTypedArrayEnum(C.GetTypedArrayInt8()))
 	}
 	return ctx.createTypedArray(unsafe.Pointer(&data[0]), len(data), 1, C.JSTypedArrayEnum(C.GetTypedArrayInt8()))
 }
 
-// Uint8Array returns a Uint8Array value with given uint8 slice.
-func (ctx *Context) Uint8Array(data []uint8) *Value {
+// Int8Array returns a Int8Array value with given int8 slice.
+// Deprecated: Use NewInt8Array() instead.
+func (ctx *Context) Int8Array(data []int8) *Value {
+	return ctx.NewInt8Array(data)
+}
+
+// NewUint8Array returns a Uint8Array value with given uint8 slice.
+func (ctx *Context) NewUint8Array(data []uint8) *Value {
 	if len(data) == 0 {
 		return ctx.createTypedArray(nil, 0, 1, C.JSTypedArrayEnum(C.GetTypedArrayUint8()))
 	}
 	return ctx.createTypedArray(unsafe.Pointer(&data[0]), len(data), 1, C.JSTypedArrayEnum(C.GetTypedArrayUint8()))
 }
 
-// Uint8ClampedArray returns a Uint8ClampedArray value with given uint8 slice.
-func (ctx *Context) Uint8ClampedArray(data []uint8) *Value {
+// Uint8Array returns a Uint8Array value with given uint8 slice.
+// Deprecated: Use NewUint8Array() instead.
+func (ctx *Context) Uint8Array(data []uint8) *Value {
+	return ctx.NewUint8Array(data)
+}
+
+// NewUint8ClampedArray returns a Uint8ClampedArray value with given uint8 slice.
+func (ctx *Context) NewUint8ClampedArray(data []uint8) *Value {
 	if len(data) == 0 {
 		return ctx.createTypedArray(nil, 0, 1, C.JSTypedArrayEnum(C.GetTypedArrayUint8C()))
 	}
 	return ctx.createTypedArray(unsafe.Pointer(&data[0]), len(data), 1, C.JSTypedArrayEnum(C.GetTypedArrayUint8C()))
 }
 
-// Int16Array returns a Int16Array value with given int16 slice.
-func (ctx *Context) Int16Array(data []int16) *Value {
+// Uint8ClampedArray returns a Uint8ClampedArray value with given uint8 slice.
+// Deprecated: Use NewUint8ClampedArray() instead.
+func (ctx *Context) Uint8ClampedArray(data []uint8) *Value {
+	return ctx.NewUint8ClampedArray(data)
+}
+
+// NewInt16Array returns a Int16Array value with given int16 slice.
+func (ctx *Context) NewInt16Array(data []int16) *Value {
 	if len(data) == 0 {
 		return ctx.createTypedArray(nil, 0, 2, C.JSTypedArrayEnum(C.GetTypedArrayInt16()))
 	}
 	return ctx.createTypedArray(unsafe.Pointer(&data[0]), len(data), 2, C.JSTypedArrayEnum(C.GetTypedArrayInt16()))
 }
 
-// Uint16Array returns a Uint16Array value with given uint16 slice.
-func (ctx *Context) Uint16Array(data []uint16) *Value {
+// Int16Array returns a Int16Array value with given int16 slice.
+// Deprecated: Use NewInt16Array() instead.
+func (ctx *Context) Int16Array(data []int16) *Value {
+	return ctx.NewInt16Array(data)
+}
+
+// NewUint16Array returns a Uint16Array value with given uint16 slice.
+func (ctx *Context) NewUint16Array(data []uint16) *Value {
 	if len(data) == 0 {
 		return ctx.createTypedArray(nil, 0, 2, C.JSTypedArrayEnum(C.GetTypedArrayUint16()))
 	}
 	return ctx.createTypedArray(unsafe.Pointer(&data[0]), len(data), 2, C.JSTypedArrayEnum(C.GetTypedArrayUint16()))
 }
 
-// Int32Array returns a Int32Array value with given int32 slice.
-func (ctx *Context) Int32Array(data []int32) *Value {
+// Uint16Array returns a Uint16Array value with given uint16 slice.
+// Deprecated: Use NewUint16Array() instead.
+func (ctx *Context) Uint16Array(data []uint16) *Value {
+	return ctx.NewUint16Array(data)
+}
+
+// NewInt32Array returns a Int32Array value with given int32 slice.
+func (ctx *Context) NewInt32Array(data []int32) *Value {
 	if len(data) == 0 {
 		return ctx.createTypedArray(nil, 0, 4, C.JSTypedArrayEnum(C.GetTypedArrayInt32()))
 	}
 	return ctx.createTypedArray(unsafe.Pointer(&data[0]), len(data), 4, C.JSTypedArrayEnum(C.GetTypedArrayInt32()))
 }
 
-// Uint32Array returns a Uint32Array value with given uint32 slice.
-func (ctx *Context) Uint32Array(data []uint32) *Value {
+// Int32Array returns a Int32Array value with given int32 slice.
+// Deprecated: Use NewInt32Array() instead.
+func (ctx *Context) Int32Array(data []int32) *Value {
+	return ctx.NewInt32Array(data)
+}
+
+// NewUint32Array returns a Uint32Array value with given uint32 slice.
+func (ctx *Context) NewUint32Array(data []uint32) *Value {
 	if len(data) == 0 {
 		return ctx.createTypedArray(nil, 0, 4, C.JSTypedArrayEnum(C.GetTypedArrayUint32()))
 	}
 	return ctx.createTypedArray(unsafe.Pointer(&data[0]), len(data), 4, C.JSTypedArrayEnum(C.GetTypedArrayUint32()))
 }
 
-// Float32Array returns a Float32Array value with given float32 slice.
-func (ctx *Context) Float32Array(data []float32) *Value {
+// Uint32Array returns a Uint32Array value with given uint32 slice.
+// Deprecated: Use NewUint32Array() instead.
+func (ctx *Context) Uint32Array(data []uint32) *Value {
+	return ctx.NewUint32Array(data)
+}
+
+// NewFloat32Array returns a Float32Array value with given float32 slice.
+func (ctx *Context) NewFloat32Array(data []float32) *Value {
 	if len(data) == 0 {
 		return ctx.createTypedArray(nil, 0, 4, C.JSTypedArrayEnum(C.GetTypedArrayFloat32()))
 	}
 	return ctx.createTypedArray(unsafe.Pointer(&data[0]), len(data), 4, C.JSTypedArrayEnum(C.GetTypedArrayFloat32()))
 }
 
-// Float64Array returns a Float64Array value with given float64 slice.
-func (ctx *Context) Float64Array(data []float64) *Value {
+// Float32Array returns a Float32Array value with given float32 slice.
+// Deprecated: Use NewFloat32Array() instead.
+func (ctx *Context) Float32Array(data []float32) *Value {
+	return ctx.NewFloat32Array(data)
+}
+
+// NewFloat64Array returns a Float64Array value with given float64 slice.
+func (ctx *Context) NewFloat64Array(data []float64) *Value {
 	if len(data) == 0 {
 		return ctx.createTypedArray(nil, 0, 8, C.JSTypedArrayEnum(C.GetTypedArrayFloat64()))
 	}
 	return ctx.createTypedArray(unsafe.Pointer(&data[0]), len(data), 8, C.JSTypedArrayEnum(C.GetTypedArrayFloat64()))
 }
 
-// BigInt64Array returns a BigInt64Array value with given int64 slice.
-func (ctx *Context) BigInt64Array(data []int64) *Value {
+// Float64Array returns a Float64Array value with given float64 slice.
+// Deprecated: Use NewFloat64Array() instead.
+func (ctx *Context) Float64Array(data []float64) *Value {
+	return ctx.NewFloat64Array(data)
+}
+
+// NewBigInt64Array returns a BigInt64Array value with given int64 slice.
+func (ctx *Context) NewBigInt64Array(data []int64) *Value {
 	if len(data) == 0 {
 		return ctx.createTypedArray(nil, 0, 8, C.JSTypedArrayEnum(C.GetTypedArrayBigInt64()))
 	}
 	return ctx.createTypedArray(unsafe.Pointer(&data[0]), len(data), 8, C.JSTypedArrayEnum(C.GetTypedArrayBigInt64()))
 }
 
-// BigUint64Array returns a BigUint64Array value with given uint64 slice.
-func (ctx *Context) BigUint64Array(data []uint64) *Value {
+// BigInt64Array returns a BigInt64Array value with given int64 slice.
+// Deprecated: Use NewBigInt64Array() instead.
+func (ctx *Context) BigInt64Array(data []int64) *Value {
+	return ctx.NewBigInt64Array(data)
+}
+
+// NewBigUint64Array returns a BigUint64Array value with given uint64 slice.
+func (ctx *Context) NewBigUint64Array(data []uint64) *Value {
 	if len(data) == 0 {
 		return ctx.createTypedArray(nil, 0, 8, C.JSTypedArrayEnum(C.GetTypedArrayBigUint64()))
 	}
 	return ctx.createTypedArray(unsafe.Pointer(&data[0]), len(data), 8, C.JSTypedArrayEnum(C.GetTypedArrayBigUint64()))
 }
 
-// Object returns a new object value.
-func (ctx *Context) Object() *Value {
+// BigUint64Array returns a BigUint64Array value with given uint64 slice.
+// Deprecated: Use NewBigUint64Array() instead.
+func (ctx *Context) BigUint64Array(data []uint64) *Value {
+	return ctx.NewBigUint64Array(data)
+}
+
+// NewObject returns a new object value.
+func (ctx *Context) NewObject() *Value {
 	return &Value{ctx: ctx, ref: C.JS_NewObject(ctx.ref)}
+}
+
+// Object returns a new object value.
+// Deprecated: Use NewObject() instead.
+func (ctx *Context) Object() *Value {
+	return ctx.NewObject()
 }
 
 // ParseJson parses given json string and returns a object value.
@@ -250,9 +400,9 @@ func (ctx *Context) ParseJSON(v string) *Value {
 	return &Value{ctx: ctx, ref: C.JS_ParseJSON(ctx.ref, ptr, C.size_t(len(v)), filenamePtr)}
 }
 
-// Function returns a js function value with given function template
+// NewFunction returns a js function value with given function template
 // New implementation using HandleStore and JS_NewCFunction2 with magic parameter
-func (ctx *Context) Function(fn func(*Context, *Value, []*Value) *Value) *Value {
+func (ctx *Context) NewFunction(fn func(*Context, *Value, []*Value) *Value) *Value {
 	// Store function in HandleStore and get int32 ID
 	fnID := ctx.handleStore.Store(fn)
 
@@ -269,40 +419,47 @@ func (ctx *Context) Function(fn func(*Context, *Value, []*Value) *Value) *Value 
 	}
 }
 
-// AsyncFunction returns a js async function value with given function template
+// Function returns a js function value with given function template
+// New implementation using HandleStore and JS_NewCFunction2 with magic parameter
+// Deprecated: Use NewFunction() instead.
+func (ctx *Context) Function(fn func(*Context, *Value, []*Value) *Value) *Value {
+	return ctx.NewFunction(fn)
+}
+
+// NewAsyncFunction returns a js async function value with given function template
 //
-// Deprecated: Use Context.Function + Context.Promise instead for better memory management and thread safety.
+// Deprecated: Use Context.NewFunction + Context.NewPromise instead for better memory management and thread safety.
 // Example:
 //
-//	asyncFn := ctx.Function(func(ctx *quickjs.Context, this *quickjs.Value, args []*quickjs.Value) *quickjs.Value {
-//	    return ctx.Promise(func(resolve, reject func(*quickjs.Value)) {
+//	asyncFn := ctx.NewFunction(func(ctx *quickjs.Context, this *quickjs.Value, args []*quickjs.Value) *quickjs.Value {
+//	    return ctx.NewPromise(func(resolve, reject func(*quickjs.Value)) {
 //	        // async work here
-//	        resolve(ctx.String("result"))
+//	        resolve(ctx.NewString("result"))
 //	    })
 //	})
-func (ctx *Context) AsyncFunction(asyncFn func(ctx *Context, this *Value, promise *Value, args []*Value) *Value) *Value {
+func (ctx *Context) NewAsyncFunction(asyncFn func(ctx *Context, this *Value, promise *Value, args []*Value) *Value) *Value {
 	// New implementation using Function + Promise
-	return ctx.Function(func(ctx *Context, this *Value, args []*Value) *Value {
-		return ctx.Promise(func(resolve, reject func(*Value)) {
+	return ctx.NewFunction(func(ctx *Context, this *Value, args []*Value) *Value {
+		return ctx.NewPromise(func(resolve, reject func(*Value)) {
 			// Create a promise object that has resolve/reject methods
-			promiseObj := ctx.Object()
-			promiseObj.Set("resolve", ctx.Function(func(ctx *Context, this *Value, args []*Value) *Value {
+			promiseObj := ctx.NewObject()
+			promiseObj.Set("resolve", ctx.NewFunction(func(ctx *Context, this *Value, args []*Value) *Value {
 				if len(args) > 0 {
 					resolve(args[0])
 				} else {
-					resolve(ctx.Undefined())
+					resolve(ctx.NewUndefined())
 				}
-				return ctx.Undefined()
+				return ctx.NewUndefined()
 			}))
-			promiseObj.Set("reject", ctx.Function(func(ctx *Context, this *Value, args []*Value) *Value {
+			promiseObj.Set("reject", ctx.NewFunction(func(ctx *Context, this *Value, args []*Value) *Value {
 				if len(args) > 0 {
 					reject(args[0])
 				} else {
-					errObj := ctx.Error(fmt.Errorf("Promise rejected without reason"))
+					errObj := ctx.NewError(fmt.Errorf("Promise rejected without reason"))
 					defer errObj.Free() // Free the error object
 					reject(errObj)
 				}
-				return ctx.Undefined()
+				return ctx.NewUndefined()
 			}))
 			defer promiseObj.Free()
 
@@ -320,6 +477,21 @@ func (ctx *Context) AsyncFunction(asyncFn func(ctx *Context, this *Value, promis
 	})
 }
 
+// AsyncFunction returns a js async function value with given function template
+//
+// Deprecated: Use Context.NewFunction + Context.NewPromise instead for better memory management and thread safety.
+// Example:
+//
+//	asyncFn := ctx.NewFunction(func(ctx *quickjs.Context, this *quickjs.Value, args []*quickjs.Value) *quickjs.Value {
+//	    return ctx.NewPromise(func(resolve, reject func(*quickjs.Value)) {
+//	        // async work here
+//	        resolve(ctx.NewString("result"))
+//	    })
+//	})
+func (ctx *Context) AsyncFunction(asyncFn func(ctx *Context, this *Value, promise *Value, args []*Value) *Value) *Value {
+	return ctx.NewAsyncFunction(asyncFn)
+}
+
 // getFunction gets function from HandleStore (internal use)
 func (ctx *Context) loadFunctionFromHandleID(id int32) interface{} {
 	fn, _ := ctx.handleStore.Load(id)
@@ -333,16 +505,28 @@ func (ctx *Context) SetInterruptHandler(handler InterruptHandler) {
 	ctx.runtime.SetInterruptHandler(handler)
 }
 
-// Atom returns a new Atom value with given string.
-func (ctx *Context) Atom(v string) *Atom {
+// NewAtom returns a new Atom value with given string.
+func (ctx *Context) NewAtom(v string) *Atom {
 	ptr := C.CString(v)
 	defer C.free(unsafe.Pointer(ptr))
 	return &Atom{ctx: ctx, ref: C.JS_NewAtom(ctx.ref, ptr)}
 }
 
-// AtomIdx returns a new Atom value with given idx.
-func (ctx *Context) AtomIdx(idx uint32) *Atom {
+// Atom returns a new Atom value with given string.
+// Deprecated: Use NewAtom() instead.
+func (ctx *Context) Atom(v string) *Atom {
+	return ctx.NewAtom(v)
+}
+
+// NewAtomIdx returns a new Atom value with given idx.
+func (ctx *Context) NewAtomIdx(idx uint32) *Atom {
 	return &Atom{ctx: ctx, ref: C.JS_NewAtomUInt32(ctx.ref, C.uint32_t(idx))}
+}
+
+// AtomIdx returns a new Atom value with given idx.
+// Deprecated: Use NewAtomIdx() instead.
+func (ctx *Context) AtomIdx(idx uint32) *Atom {
+	return ctx.NewAtomIdx(idx)
 }
 
 // Invoke invokes a function with given this value and arguments.
@@ -607,7 +791,7 @@ func (ctx *Context) Throw(v *Value) *Value {
 
 // ThrowError returns a context's exception value with given error message.
 func (ctx *Context) ThrowError(err error) *Value {
-	return ctx.Throw(ctx.Error(err))
+	return ctx.Throw(ctx.NewError(err))
 }
 
 // ThrowSyntaxError returns a context's exception value with given error message.
@@ -677,9 +861,9 @@ func (ctx *Context) Await(v *Value) *Value {
 	return &Value{ctx: ctx, ref: C.js_std_await(ctx.ref, v.ref)}
 }
 
-// Promise creates a new Promise with executor function
+// NewPromise creates a new Promise with executor function
 // Executor runs synchronously in current thread for thread safety
-func (ctx *Context) Promise(executor func(resolve, reject func(*Value))) *Value {
+func (ctx *Context) NewPromise(executor func(resolve, reject func(*Value))) *Value {
 	// Create Promise using JavaScript code to avoid complex C API reference management
 	promiseSetup := ctx.Eval(`
         (() => {
@@ -702,15 +886,22 @@ func (ctx *Context) Promise(executor func(resolve, reject func(*Value))) *Value 
 
 	// Create wrapper functions that call JavaScript resolve/reject
 	resolve := func(result *Value) {
-		resolveFunc.Execute(ctx.Undefined(), result)
+		resolveFunc.Execute(ctx.NewUndefined(), result)
 	}
 
 	reject := func(reason *Value) {
-		rejectFunc.Execute(ctx.Undefined(), reason)
+		rejectFunc.Execute(ctx.NewUndefined(), reason)
 	}
 
 	// Execute user function synchronously
 	executor(resolve, reject)
 
 	return promise
+}
+
+// Promise creates a new Promise with executor function
+// Executor runs synchronously in current thread for thread safety
+// Deprecated: Use NewPromise() instead.
+func (ctx *Context) Promise(executor func(resolve, reject func(*Value))) *Value {
+	return ctx.NewPromise(executor)
 }

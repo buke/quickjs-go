@@ -18,16 +18,29 @@ func (a *Atom) Free() {
 	C.JS_FreeAtom(a.ctx.ref, a.ref)
 }
 
-// String returns the string representation of the atom.
-func (a *Atom) String() string {
+// ToString returns the string representation of the atom.
+func (a *Atom) ToString() string {
 	ptr := C.JS_AtomToCString(a.ctx.ref, a.ref)
 	defer C.JS_FreeCString(a.ctx.ref, ptr)
 	return C.GoString(ptr)
 }
 
-// Value returns the value representation of the atom.
-func (a *Atom) Value() *Value {
+// String returns the string representation of the atom.
+// This method implements the fmt.Stringer interface.
+// Deprecated: Use ToString() instead.
+func (a *Atom) String() string {
+	return a.ToString()
+}
+
+// ToValue returns the value representation of the atom.
+func (a *Atom) ToValue() *Value {
 	return &Value{ctx: a.ctx, ref: C.JS_AtomToValue(a.ctx.ref, a.ref)}
+}
+
+// Value returns the value representation of the atom.
+// Deprecated: Use ToValue() instead.
+func (a *Atom) Value() *Value {
+	return a.ToValue()
 }
 
 // propertyEnum is a wrapper around JSAtom for property enumeration.
@@ -36,7 +49,7 @@ type propertyEnum struct {
 	atom         *Atom
 }
 
-// String returns the atom string representation of the property.
-func (p *propertyEnum) String() string {
-	return p.atom.String()
+// ToString returns the atom string representation of the property.
+func (p *propertyEnum) ToString() string {
+	return p.atom.ToString()
 }
