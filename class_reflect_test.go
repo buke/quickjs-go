@@ -176,14 +176,14 @@ func TestReflectionBasicBinding(t *testing.T) {
 
 	require.False(t, result.IsException())
 
-	require.Equal(t, "object", result.GetIdx(0).String())
-	require.Equal(t, "John", result.GetIdx(1).String())
-	require.Equal(t, "Doe", result.GetIdx(2).String())
-	require.Equal(t, int32(30), result.GetIdx(3).Int32())
-	require.Equal(t, 50000.0, result.GetIdx(4).Float64())
+	require.Equal(t, "object", result.GetIdx(0).ToString())
+	require.Equal(t, "John", result.GetIdx(1).ToString())
+	require.Equal(t, "Doe", result.GetIdx(2).ToString())
+	require.Equal(t, int32(30), result.GetIdx(3).ToInt32())
+	require.Equal(t, 50000.0, result.GetIdx(4).ToFloat64())
 	require.True(t, result.GetIdx(5).ToBool())
-	require.Equal(t, "undefined", result.GetIdx(6).String()) // js:"-" tag
-	require.Equal(t, "undefined", result.GetIdx(7).String()) // private field
+	require.Equal(t, "undefined", result.GetIdx(6).ToString()) // Changed: String() → ToString()
+	require.Equal(t, "undefined", result.GetIdx(7).ToString()) // Changed: String() → ToString()
 }
 
 func TestReflectionMethodCalls(t *testing.T) {
@@ -216,10 +216,10 @@ func TestReflectionMethodCalls(t *testing.T) {
 
 	require.False(t, result.IsException())
 
-	require.Equal(t, "Alice Johnson", result.GetIdx(0).String())
-	require.Equal(t, int32(30), result.GetIdx(1).Int32())
-	require.Equal(t, int32(30), result.GetIdx(2).Int32())
-	require.Equal(t, "undefined", result.GetIdx(3).String()) // private method not accessible
+	require.Equal(t, "Alice Johnson", result.GetIdx(0).ToString()) // Changed: String() → ToString()
+	require.Equal(t, int32(30), result.GetIdx(1).ToInt32())        // Changed: Int32() → ToInt32()
+	require.Equal(t, int32(30), result.GetIdx(2).ToInt32())        // Changed: Int32() → ToInt32()
+	require.Equal(t, "undefined", result.GetIdx(3).ToString())     // Changed: String() → ToString()
 }
 
 func TestReflectionMultipleReturnValues(t *testing.T) {
@@ -248,9 +248,9 @@ func TestReflectionMultipleReturnValues(t *testing.T) {
 
 	require.False(t, result.IsException())
 
-	require.Equal(t, "Bob Wilson", result.GetIdx(0).String())
-	require.Equal(t, int32(35), result.GetIdx(1).Int32())
-	require.True(t, result.GetIdx(2).ToBool())
+	require.Equal(t, "Bob Wilson", result.GetIdx(0).ToString()) // Changed: String() → ToString()
+	require.Equal(t, int32(35), result.GetIdx(1).ToInt32())     // Changed: Int32() → ToInt32()
+	require.True(t, result.GetIdx(2).ToBool())                  // Function already exists, no change
 }
 
 // =============================================================================
@@ -309,13 +309,13 @@ func TestReflectionConstructorModes(t *testing.T) {
 			for i, expected := range tc.want {
 				switch exp := expected.(type) {
 				case string:
-					require.Equal(t, exp, result.GetIdx(int64(i)).String())
+					require.Equal(t, exp, result.GetIdx(int64(i)).ToString()) // Changed: String() → ToString()
 				case int32:
-					require.Equal(t, exp, result.GetIdx(int64(i)).Int32())
+					require.Equal(t, exp, result.GetIdx(int64(i)).ToInt32()) // Changed: Int32() → ToInt32()
 				case float64:
-					require.Equal(t, exp, result.GetIdx(int64(i)).Float64())
+					require.Equal(t, exp, result.GetIdx(int64(i)).ToFloat64()) // Changed: Float64() → ToFloat64()
 				case bool:
-					require.Equal(t, exp, result.GetIdx(int64(i)).ToBool())
+					require.Equal(t, exp, result.GetIdx(int64(i)).ToBool()) // Function already exists, no change
 				}
 			}
 		})
@@ -351,10 +351,10 @@ func TestReflectionWithIgnoredFields(t *testing.T) {
 
 	require.False(t, result.IsException())
 
-	require.Equal(t, "string", result.GetIdx(0).String())
-	require.Equal(t, "string", result.GetIdx(1).String())
-	require.Equal(t, "undefined", result.GetIdx(2).String()) // Ignored field
-	require.Equal(t, "undefined", result.GetIdx(3).String()) // Ignored field
+	require.Equal(t, "string", result.GetIdx(0).ToString())    // Changed: String() → ToString()
+	require.Equal(t, "string", result.GetIdx(1).ToString())    // Changed: String() → ToString()
+	require.Equal(t, "undefined", result.GetIdx(2).ToString()) // Changed: String() → ToString()
+	require.Equal(t, "undefined", result.GetIdx(3).ToString()) // Changed: String() → ToString()
 }
 
 func TestReflectionWithMethodPrefix(t *testing.T) {
@@ -385,10 +385,10 @@ func TestReflectionWithMethodPrefix(t *testing.T) {
 
 	require.False(t, result.IsException())
 
-	require.Equal(t, "function", result.GetIdx(0).String())
-	require.Equal(t, "function", result.GetIdx(1).String())
-	require.Equal(t, "undefined", result.GetIdx(2).String())
-	require.Equal(t, "undefined", result.GetIdx(3).String())
+	require.Equal(t, "function", result.GetIdx(0).ToString())  // Changed: String() → ToString()
+	require.Equal(t, "function", result.GetIdx(1).ToString())  // Changed: String() → ToString()
+	require.Equal(t, "undefined", result.GetIdx(2).ToString()) // Changed: String() → ToString()
+	require.Equal(t, "undefined", result.GetIdx(3).ToString()) // Changed: String() → ToString()
 }
 
 func TestReflectionWithIgnoredMethods(t *testing.T) {
@@ -419,10 +419,10 @@ func TestReflectionWithIgnoredMethods(t *testing.T) {
 
 	require.False(t, result.IsException())
 
-	require.Equal(t, "function", result.GetIdx(0).String())
-	require.Equal(t, "undefined", result.GetIdx(1).String())
-	require.Equal(t, "function", result.GetIdx(2).String())
-	require.Equal(t, "undefined", result.GetIdx(3).String())
+	require.Equal(t, "function", result.GetIdx(0).ToString())  // Changed: String() → ToString()
+	require.Equal(t, "undefined", result.GetIdx(1).ToString()) // Changed: String() → ToString()
+	require.Equal(t, "function", result.GetIdx(2).ToString())  // Changed: String() → ToString()
+	require.Equal(t, "undefined", result.GetIdx(3).ToString()) // Changed: String() → ToString()
 }
 
 // =============================================================================
@@ -546,7 +546,7 @@ func TestReflectionMethodArgumentErrors(t *testing.T) {
         `)
 		defer result.Free()
 		require.False(t, result.IsException())
-		require.Contains(t, result.String(), "too many arguments")
+		require.Contains(t, result.ToString(), "too many arguments") // Changed: String() → ToString()
 	})
 
 	// Test argument conversion errors
@@ -564,7 +564,7 @@ func TestReflectionMethodArgumentErrors(t *testing.T) {
         `)
 		defer result.Free()
 		require.False(t, result.IsException())
-		require.Contains(t, result.String(), "failed to convert argument")
+		require.Contains(t, result.ToString(), "failed to convert argument") // Changed: String() → ToString()
 	})
 
 	// Test missing arguments (zero value filling)
@@ -578,7 +578,7 @@ func TestReflectionMethodArgumentErrors(t *testing.T) {
         `)
 		defer result.Free()
 		require.False(t, result.IsException())
-		require.Equal(t, "42--false", result.String())
+		require.Equal(t, "42--false", result.ToString()) // Changed: String() → ToString()
 	})
 }
 
@@ -658,12 +658,12 @@ func TestReflectionConstructorErrors(t *testing.T) {
 		defer result.Free()
 		require.False(t, result.IsException())
 
-		require.Equal(t, "Alice", result.GetIdx(0).String())
-		require.Equal(t, "Smith", result.GetIdx(1).String())
-		require.Equal(t, int32(30), result.GetIdx(2).Int32())
-		require.Equal(t, 75000.0, result.GetIdx(3).Float64())
-		require.True(t, result.GetIdx(4).ToBool())
-		require.Equal(t, "undefined", result.GetIdx(5).String()) // private field not accessible
+		require.Equal(t, "Alice", result.GetIdx(0).ToString())     // Changed: String() → ToString()
+		require.Equal(t, "Smith", result.GetIdx(1).ToString())     // Changed: String() → ToString()
+		require.Equal(t, int32(30), result.GetIdx(2).ToInt32())    // Changed: Int32() → ToInt32()
+		require.Equal(t, 75000.0, result.GetIdx(3).ToFloat64())    // Changed: Float64() → ToFloat64()
+		require.True(t, result.GetIdx(4).ToBool())                 // Function already exists, no change
+		require.Equal(t, "undefined", result.GetIdx(5).ToString()) // Changed: String() → ToString()
 	})
 }
 
@@ -692,7 +692,7 @@ func TestReflectionAccessorSetterErrors(t *testing.T) {
     `)
 	defer result.Free()
 	require.False(t, result.IsException())
-	require.Contains(t, result.String(), "failed to unmarshal value for field")
+	require.Contains(t, result.ToString(), "failed to unmarshal value for field") // Changed: String() → ToString()
 }
 
 func TestReflectionMarshalErrors(t *testing.T) {
@@ -719,7 +719,7 @@ func TestReflectionMarshalErrors(t *testing.T) {
     `)
 	defer result.Free()
 	require.False(t, result.IsException())
-	require.Contains(t, result.String(), "failed to marshal field")
+	require.Contains(t, result.ToString(), "failed to marshal field") // Changed: String() → ToString()
 
 	// Test method return value marshal error
 	result2 := ctx.Eval(`
@@ -735,7 +735,7 @@ func TestReflectionMarshalErrors(t *testing.T) {
     `)
 	defer result2.Free()
 	require.False(t, result2.IsException())
-	require.Contains(t, result2.String(), "failed to marshal return value")
+	require.Contains(t, result2.ToString(), "failed to marshal return value") // Changed: String() → ToString()
 
 	// Test multiple return values marshal error
 	result3 := ctx.Eval(`
@@ -751,7 +751,7 @@ func TestReflectionMarshalErrors(t *testing.T) {
     `)
 	defer result3.Free()
 	require.False(t, result3.IsException())
-	require.Contains(t, result3.String(), "failed to marshal return values")
+	require.Contains(t, result3.ToString(), "failed to marshal return values") // Changed: String() → ToString()
 }
 
 func TestReflectionFieldTagEdgeCases(t *testing.T) {
@@ -779,10 +779,10 @@ func TestReflectionFieldTagEdgeCases(t *testing.T) {
 	defer result.Free()
 	require.False(t, result.IsException())
 
-	require.Equal(t, "test1", result.GetIdx(0).String())
-	require.Equal(t, "test2", result.GetIdx(1).String())
-	require.Equal(t, "test3", result.GetIdx(2).String())
-	require.Equal(t, "test4", result.GetIdx(3).String())
+	require.Equal(t, "test1", result.GetIdx(0).ToString()) // Changed: String() → ToString()
+	require.Equal(t, "test2", result.GetIdx(1).ToString()) // Changed: String() → ToString()
+	require.Equal(t, "test3", result.GetIdx(2).ToString()) // Changed: String() → ToString()
+	require.Equal(t, "test4", result.GetIdx(3).ToString()) // Changed: String() → ToString()
 }
 
 // =============================================================================
@@ -825,14 +825,14 @@ func TestReflectionComplexTypes(t *testing.T) {
 	defer result.Free()
 	require.False(t, result.IsException())
 
-	require.Equal(t, "Toyota", result.GetIdx(0).String())
-	require.Equal(t, "Camry", result.GetIdx(1).String())
-	require.Equal(t, int32(2023), result.GetIdx(2).Int32())
-	require.True(t, result.GetIdx(3).ToBool())
-	require.Equal(t, int32(2), result.GetIdx(4).Int32())
-	require.Equal(t, "V6", result.GetIdx(5).String())
-	require.Equal(t, int32(300), result.GetIdx(6).Int32())
-	require.Equal(t, "2023 Toyota Camry", result.GetIdx(7).String())
+	require.Equal(t, "Toyota", result.GetIdx(0).ToString())            // Changed: String() → ToString()
+	require.Equal(t, "Camry", result.GetIdx(1).ToString())             // Changed: String() → ToString()
+	require.Equal(t, int32(2023), result.GetIdx(2).ToInt32())          // Changed: Int32() → ToInt32()
+	require.True(t, result.GetIdx(3).ToBool())                         // Function already exists, no change
+	require.Equal(t, int32(2), result.GetIdx(4).ToInt32())             // Changed: Int32() → ToInt32()
+	require.Equal(t, "V6", result.GetIdx(5).ToString())                // Changed: String() → ToString()
+	require.Equal(t, int32(300), result.GetIdx(6).ToInt32())           // Changed: Int32() → ToInt32()
+	require.Equal(t, "2023 Toyota Camry", result.GetIdx(7).ToString()) // Changed: String() → ToString()
 }
 
 func TestReflectionEdgeCases(t *testing.T) {
@@ -856,7 +856,7 @@ func TestReflectionEdgeCases(t *testing.T) {
         `)
 		defer result.Free()
 		require.False(t, result.IsException())
-		require.Equal(t, "object", result.String())
+		require.Equal(t, "object", result.ToString()) // Changed: String() → ToString()
 	})
 
 	// Test struct with only private fields
@@ -874,7 +874,7 @@ func TestReflectionEdgeCases(t *testing.T) {
         `)
 		defer result.Free()
 		require.False(t, result.IsException())
-		require.Equal(t, int32(0), result.Int32())
+		require.Equal(t, int32(0), result.ToInt32()) // Changed: Int32() → ToInt32()
 	})
 
 	// Test method with zero return values
@@ -893,7 +893,7 @@ func TestReflectionEdgeCases(t *testing.T) {
         `)
 		defer result.Free()
 		require.False(t, result.IsException())
-		require.Equal(t, "undefined", result.String())
+		require.Equal(t, "undefined", result.ToString()) // Changed: String() → ToString()
 	})
 
 	// Test valid reflect.Type input
@@ -912,7 +912,7 @@ func TestReflectionEdgeCases(t *testing.T) {
         `)
 		defer result.Free()
 		require.False(t, result.IsException())
-		require.Equal(t, "object", result.String())
+		require.Equal(t, "object", result.ToString()) // Changed: String() → ToString()
 	})
 }
 
@@ -943,7 +943,7 @@ func TestReflectionMethodOnNonClassInstance(t *testing.T) {
     `)
 	defer result.Free()
 	require.False(t, result.IsException())
-	require.Contains(t, result.String(), "failed to get instance data")
+	require.Contains(t, result.ToString(), "failed to get instance data") // Changed: String() → ToString()
 }
 
 func TestReflectionAccessorGetterOnNonClassInstance(t *testing.T) {
@@ -974,7 +974,7 @@ func TestReflectionAccessorGetterOnNonClassInstance(t *testing.T) {
     `)
 	defer result.Free()
 	require.False(t, result.IsException())
-	require.Contains(t, result.String(), "failed to get instance data")
+	require.Contains(t, result.ToString(), "failed to get instance data") // Changed: String() → ToString()
 }
 
 func TestReflectionAccessorSetterOnNonClassInstance(t *testing.T) {
@@ -1005,5 +1005,5 @@ func TestReflectionAccessorSetterOnNonClassInstance(t *testing.T) {
     `)
 	defer result.Free()
 	require.False(t, result.IsException())
-	require.Contains(t, result.String(), "failed to get instance data")
+	require.Contains(t, result.ToString(), "failed to get instance data") // Changed: String() → ToString()
 }

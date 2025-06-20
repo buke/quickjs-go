@@ -25,18 +25,18 @@ func TestContextBasics(t *testing.T) {
 			createVal func() *Value     // Changed to return pointer
 			checkFunc func(*Value) bool // Changed parameter to pointer
 		}{
-			{"Null", func() *Value { return ctx.Null() }, func(v *Value) bool { return v.IsNull() }},
-			{"Undefined", func() *Value { return ctx.Undefined() }, func(v *Value) bool { return v.IsUndefined() }},
-			{"Uninitialized", func() *Value { return ctx.Uninitialized() }, func(v *Value) bool { return v.IsUninitialized() }},
-			{"Bool", func() *Value { return ctx.Bool(true) }, func(v *Value) bool { return v.IsBool() }},
-			{"Int32", func() *Value { return ctx.Int32(-42) }, func(v *Value) bool { return v.IsNumber() }},
-			{"Int64", func() *Value { return ctx.Int64(1234567890) }, func(v *Value) bool { return v.IsNumber() }},
-			{"Uint32", func() *Value { return ctx.Uint32(42) }, func(v *Value) bool { return v.IsNumber() }},
-			{"BigInt64", func() *Value { return ctx.BigInt64(9223372036854775807) }, func(v *Value) bool { return v.IsBigInt() }},
-			{"BigUint64", func() *Value { return ctx.BigUint64(18446744073709551615) }, func(v *Value) bool { return v.IsBigInt() }},
-			{"Float64", func() *Value { return ctx.Float64(3.14159) }, func(v *Value) bool { return v.IsNumber() }},
-			{"String", func() *Value { return ctx.String("test") }, func(v *Value) bool { return v.IsString() }},
-			{"Object", func() *Value { return ctx.Object() }, func(v *Value) bool { return v.IsObject() }},
+			{"Null", func() *Value { return ctx.NewNull() }, func(v *Value) bool { return v.IsNull() }},
+			{"Undefined", func() *Value { return ctx.NewUndefined() }, func(v *Value) bool { return v.IsUndefined() }},
+			{"Uninitialized", func() *Value { return ctx.NewUninitialized() }, func(v *Value) bool { return v.IsUninitialized() }},
+			{"Bool", func() *Value { return ctx.NewBool(true) }, func(v *Value) bool { return v.IsBool() }},
+			{"Int32", func() *Value { return ctx.NewInt32(-42) }, func(v *Value) bool { return v.IsNumber() }},
+			{"Int64", func() *Value { return ctx.NewInt64(1234567890) }, func(v *Value) bool { return v.IsNumber() }},
+			{"Uint32", func() *Value { return ctx.NewUint32(42) }, func(v *Value) bool { return v.IsNumber() }},
+			{"BigInt64", func() *Value { return ctx.NewBigInt64(9223372036854775807) }, func(v *Value) bool { return v.IsBigInt() }},
+			{"BigUint64", func() *Value { return ctx.NewBigUint64(18446744073709551615) }, func(v *Value) bool { return v.IsBigInt() }},
+			{"Float64", func() *Value { return ctx.NewFloat64(3.14159) }, func(v *Value) bool { return v.IsNumber() }},
+			{"String", func() *Value { return ctx.NewString("test") }, func(v *Value) bool { return v.IsString() }},
+			{"Object", func() *Value { return ctx.NewObject() }, func(v *Value) bool { return v.IsObject() }},
 		}
 
 		for _, tc := range values {
@@ -58,7 +58,7 @@ func TestContextBasics(t *testing.T) {
 
 		for i, data := range testCases {
 			t.Run(fmt.Sprintf("Case%d", i), func(t *testing.T) {
-				ab := ctx.ArrayBuffer(data)
+				ab := ctx.NewArrayBuffer(data)
 				defer ab.Free()
 				require.True(t, ab.IsByteArray())
 				require.EqualValues(t, len(data), ab.ByteLen())
@@ -348,39 +348,39 @@ func TestContextFunctions(t *testing.T) {
 	defer ctx.Close()
 
 	t.Run("RegularFunctions", func(t *testing.T) {
-		fn := ctx.Function(func(ctx *Context, this *Value, args []*Value) *Value {
+		fn := ctx.NewFunction(func(ctx *Context, this *Value, args []*Value) *Value {
 			if len(args) == 0 {
-				return ctx.String("no args")
+				return ctx.NewString("no args")
 			}
-			return ctx.String("Hello " + args[0].String())
+			return ctx.NewString("Hello " + args[0].ToString())
 		})
 		defer fn.Free()
 
 		// Test function execution
-		result := fn.Execute(ctx.Null())
+		result := fn.Execute(ctx.NewNull())
 		defer result.Free()
-		require.EqualValues(t, "no args", result.String())
+		require.EqualValues(t, "no args", result.ToString())
 
-		result2 := fn.Execute(ctx.Null(), ctx.String("World"))
+		result2 := fn.Execute(ctx.NewNull(), ctx.NewString("World"))
 		defer result2.Free()
-		require.EqualValues(t, "Hello World", result2.String())
+		require.EqualValues(t, "Hello World", result2.ToString())
 
 		// Test Invoke method with different argument counts
-		result3 := ctx.Invoke(fn, ctx.Null())
+		result3 := ctx.Invoke(fn, ctx.NewNull())
 		defer result3.Free()
-		require.EqualValues(t, "no args", result3.String())
+		require.EqualValues(t, "no args", result3.ToString())
 
-		result4 := ctx.Invoke(fn, ctx.Null(), ctx.String("Test"))
+		result4 := ctx.Invoke(fn, ctx.NewNull(), ctx.NewString("Test"))
 		defer result4.Free()
-		require.EqualValues(t, "Hello Test", result4.String())
+		require.EqualValues(t, "Hello Test", result4.ToString())
 	})
 
 	// Updated: Use Function + Promise instead of AsyncFunction
 	t.Run("AsyncFunctions", func(t *testing.T) {
 		// New approach using Function + Promise
-		asyncFn := ctx.Function(func(ctx *Context, this *Value, args []*Value) *Value {
-			return ctx.Promise(func(resolve, reject func(*Value)) {
-				resolve(ctx.String("async result"))
+		asyncFn := ctx.NewFunction(func(ctx *Context, this *Value, args []*Value) *Value {
+			return ctx.NewPromise(func(resolve, reject func(*Value)) {
+				resolve(ctx.NewString("async result"))
 			})
 		})
 
@@ -388,7 +388,7 @@ func TestContextFunctions(t *testing.T) {
 		result := ctx.Eval(`testAsync()`, EvalAwait(true))
 		defer result.Free()
 		require.False(t, result.IsException())
-		require.EqualValues(t, "async result", result.String())
+		require.EqualValues(t, "async result", result.ToString())
 	})
 }
 
@@ -400,7 +400,7 @@ func TestContextErrorHandling(t *testing.T) {
 
 	t.Run("ErrorCreation", func(t *testing.T) {
 		testErr := errors.New("test error message")
-		errorVal := ctx.Error(testErr)
+		errorVal := ctx.NewError(testErr)
 		defer errorVal.Free()
 		require.True(t, errorVal.IsError())
 	})
@@ -421,12 +421,12 @@ func TestContextErrorHandling(t *testing.T) {
 
 		for _, tt := range throwTests {
 			t.Run(tt.name, func(t *testing.T) {
-				throwingFunc := ctx.Function(func(ctx *Context, this *Value, args []*Value) *Value {
+				throwingFunc := ctx.NewFunction(func(ctx *Context, this *Value, args []*Value) *Value {
 					return tt.throwFn()
 				})
 				defer throwingFunc.Free()
 
-				result := throwingFunc.Execute(ctx.Null())
+				result := throwingFunc.Execute(ctx.NewNull())
 				defer result.Free()
 				require.True(t, result.IsException())
 				require.True(t, ctx.HasException())
@@ -461,10 +461,10 @@ func TestContextUtilities(t *testing.T) {
 		require.True(t, globals2.IsObject())
 
 		// Test global variable operations
-		globals1.Set("testGlobal", ctx.String("global value"))
+		globals1.Set("testGlobal", ctx.NewString("global value"))
 		retrieved := globals2.Get("testGlobal")
 		defer retrieved.Free()
-		require.EqualValues(t, "global value", retrieved.String())
+		require.EqualValues(t, "global value", retrieved.ToString())
 	})
 
 	t.Run("JSONParsing", func(t *testing.T) {
@@ -475,7 +475,7 @@ func TestContextUtilities(t *testing.T) {
 
 		nameVal := jsonObj.Get("name")
 		defer nameVal.Free()
-		require.EqualValues(t, "test", nameVal.String())
+		require.EqualValues(t, "test", nameVal.ToString())
 
 		// Invalid JSON
 		invalidJSON := ctx.ParseJSON(`{invalid}`)
@@ -526,9 +526,9 @@ func TestContextAsync(t *testing.T) {
 	// Updated: Use Function + Promise instead of AsyncFunction
 	t.Run("AwaitPromises", func(t *testing.T) {
 		// Test successful promise using new Promise API
-		asyncTestFn := ctx.Function(func(ctx *Context, this *Value, args []*Value) *Value {
-			return ctx.Promise(func(resolve, reject func(*Value)) {
-				resolve(ctx.String("awaited result"))
+		asyncTestFn := ctx.NewFunction(func(ctx *Context, this *Value, args []*Value) *Value {
+			return ctx.NewPromise(func(resolve, reject func(*Value)) {
+				resolve(ctx.NewString("awaited result"))
 			})
 		})
 		ctx.Globals().Set("asyncTest", asyncTestFn)
@@ -540,12 +540,12 @@ func TestContextAsync(t *testing.T) {
 		awaitedResult := ctx.Await(promiseResult)
 		defer awaitedResult.Free()
 		require.False(t, awaitedResult.IsException())
-		require.EqualValues(t, "awaited result", awaitedResult.String())
+		require.EqualValues(t, "awaited result", awaitedResult.ToString())
 
 		// Test rejected promise using new Promise API
-		asyncRejectFn := ctx.Function(func(ctx *Context, this *Value, args []*Value) *Value {
-			return ctx.Promise(func(resolve, reject func(*Value)) {
-				errorObj := ctx.Error(errors.New("rejection reason"))
+		asyncRejectFn := ctx.NewFunction(func(ctx *Context, this *Value, args []*Value) *Value {
+			return ctx.NewPromise(func(resolve, reject func(*Value)) {
+				errorObj := ctx.NewError(errors.New("rejection reason"))
 				defer errorObj.Free()
 				reject(errorObj)
 			})
@@ -570,8 +570,8 @@ func TestContextPromise(t *testing.T) {
 
 	t.Run("BasicPromise", func(t *testing.T) {
 		// Test immediate resolve
-		promise := ctx.Promise(func(resolve, reject func(*Value)) {
-			resolve(ctx.String("success"))
+		promise := ctx.NewPromise(func(resolve, reject func(*Value)) {
+			resolve(ctx.NewString("success"))
 		})
 
 		require.True(t, promise.IsPromise())
@@ -580,12 +580,12 @@ func TestContextPromise(t *testing.T) {
 		result := promise.Await()
 		defer result.Free()
 		require.False(t, result.IsException())
-		require.Equal(t, "success", result.String())
+		require.Equal(t, "success", result.ToString())
 	})
 
 	t.Run("RejectedPromise", func(t *testing.T) {
-		promise := ctx.Promise(func(resolve, reject func(*Value)) {
-			errorObj := ctx.Error(errors.New("error"))
+		promise := ctx.NewPromise(func(resolve, reject func(*Value)) {
+			errorObj := ctx.NewError(errors.New("error"))
 			defer errorObj.Free()
 			reject(errorObj)
 		})
@@ -602,15 +602,15 @@ func TestContextPromise(t *testing.T) {
 
 	t.Run("PromiseFunction", func(t *testing.T) {
 		// Create function that returns Promise
-		asyncFn := ctx.Function(func(ctx *Context, this *Value, args []*Value) *Value {
-			return ctx.Promise(func(resolve, reject func(*Value)) {
+		asyncFn := ctx.NewFunction(func(ctx *Context, this *Value, args []*Value) *Value {
+			return ctx.NewPromise(func(resolve, reject func(*Value)) {
 				if len(args) == 0 {
-					errObj := ctx.Error(errors.New("no arguments provided"))
+					errObj := ctx.NewError(errors.New("no arguments provided"))
 					defer errObj.Free()
 					reject(errObj)
 					return
 				}
-				resolve(ctx.String("Hello " + args[0].String()))
+				resolve(ctx.NewString("Hello " + args[0].ToString()))
 			})
 		})
 
@@ -625,7 +625,7 @@ func TestContextPromise(t *testing.T) {
 		final1 := result1.Await()
 		defer final1.Free()
 		require.False(t, final1.IsException())
-		require.Equal(t, "Hello World", final1.String())
+		require.Equal(t, "Hello World", final1.ToString())
 
 		// Test without argument (should reject)
 		result2 := ctx.Eval(`asyncGreet()`)
@@ -638,16 +638,16 @@ func TestContextPromise(t *testing.T) {
 
 	t.Run("PromiseChaining", func(t *testing.T) {
 		// Create async function for chaining
-		asyncDouble := ctx.Function(func(ctx *Context, this *Value, args []*Value) *Value {
-			return ctx.Promise(func(resolve, reject func(*Value)) {
+		asyncDouble := ctx.NewFunction(func(ctx *Context, this *Value, args []*Value) *Value {
+			return ctx.NewPromise(func(resolve, reject func(*Value)) {
 				if len(args) == 0 {
-					errObj := ctx.Error(errors.New("no number provided"))
+					errObj := ctx.NewError(errors.New("no number provided"))
 					defer errObj.Free()
 					reject(errObj)
 					return
 				}
 				value := args[0].ToInt32()
-				resolve(ctx.Int32(value * 2))
+				resolve(ctx.NewInt32(value * 2))
 			})
 		})
 
@@ -686,32 +686,32 @@ func TestContextPromise(t *testing.T) {
 		require.Equal(t, PromiseRejected, rejectedPromise.PromiseState())
 
 		// Test PromiseState on non-Promise
-		nonPromise := ctx.String("not a promise")
+		nonPromise := ctx.NewString("not a promise")
 		defer nonPromise.Free()
 		require.Equal(t, PromisePending, nonPromise.PromiseState()) // Should return default
 	})
 
 	t.Run("ValueAwait", func(t *testing.T) {
 		// Test Value.Await() method
-		promise := ctx.Promise(func(resolve, reject func(*Value)) {
-			resolve(ctx.String("awaited via Value.Await"))
+		promise := ctx.NewPromise(func(resolve, reject func(*Value)) {
+			resolve(ctx.NewString("awaited via Value.Await"))
 		})
 
 		result := promise.Await()
 		defer result.Free()
 		require.False(t, result.IsException())
-		require.Equal(t, "awaited via Value.Await", result.String())
+		require.Equal(t, "awaited via Value.Await", result.ToString())
 
 		// Test Await on non-Promise (should return equivalent value)
-		nonPromise := ctx.String("not a promise")
+		nonPromise := ctx.NewString("not a promise")
 
 		result2 := nonPromise.Await()
 		defer result2.Free()
 		require.False(t, result2.IsException())
 
 		// Verify the content is the same
-		require.Equal(t, nonPromise.String(), result2.String())
-		require.Equal(t, "not a promise", result2.String())
+		require.Equal(t, nonPromise.ToString(), result2.ToString())
+		require.Equal(t, "not a promise", result2.ToString())
 
 		// Verify it's still a string
 		require.True(t, result2.IsString())
@@ -719,25 +719,25 @@ func TestContextPromise(t *testing.T) {
 
 	t.Run("ComplexAsync", func(t *testing.T) {
 		// Test more complex async scenario
-		asyncProcessor := ctx.Function(func(ctx *Context, this *Value, args []*Value) *Value {
-			return ctx.Promise(func(resolve, reject func(*Value)) {
+		asyncProcessor := ctx.NewFunction(func(ctx *Context, this *Value, args []*Value) *Value {
+			return ctx.NewPromise(func(resolve, reject func(*Value)) {
 				if len(args) == 0 {
-					errObj := ctx.Error(errors.New("no data to process"))
+					errObj := ctx.NewError(errors.New("no data to process"))
 					defer errObj.Free()
 					reject(errObj)
 					return
 				}
 
 				// Simulate processing
-				input := args[0].String()
+				input := args[0].ToString()
 				if input == "error" {
-					errObj := ctx.Error(errors.New("processing failed"))
+					errObj := ctx.NewError(errors.New("processing failed"))
 					defer errObj.Free()
 					reject(errObj)
 					return
 				}
 
-				result := ctx.String("processed: " + input)
+				result := ctx.NewString("processed: " + input)
 				resolve(result)
 			})
 		})
@@ -752,7 +752,7 @@ func TestContextPromise(t *testing.T) {
 		successResult := success.Await()
 		defer successResult.Free()
 		require.False(t, successResult.IsException())
-		require.Equal(t, "Success: processed: data", successResult.String())
+		require.Equal(t, "Success: processed: data", successResult.ToString())
 
 		// Test error handling
 		errorCase := ctx.Eval(`process("error").catch(err =>  err)`)
@@ -761,7 +761,7 @@ func TestContextPromise(t *testing.T) {
 		errorResult := errorCase.Await()
 		defer errorResult.Free()
 		require.False(t, errorResult.IsException())
-		require.Equal(t, "Error: processing failed", errorResult.String())
+		require.Equal(t, "Error: processing failed", errorResult.ToString())
 	})
 }
 
@@ -782,86 +782,86 @@ func TestContextTypedArrays(t *testing.T) {
 		}{
 			{
 				"Int8Array",
-				func() *Value { return ctx.Int8Array([]int8{-128, -1, 0, 1, 127}) },
+				func() *Value { return ctx.NewInt8Array([]int8{-128, -1, 0, 1, 127}) },
 				func(v *Value) bool { return v.IsInt8Array() },
-				func() *Value { return ctx.Int8Array([]int8{}) },
-				func() *Value { return ctx.Int8Array(nil) },
+				func() *Value { return ctx.NewInt8Array([]int8{}) },
+				func() *Value { return ctx.NewInt8Array(nil) },
 			},
 			{
 				"Uint8Array",
-				func() *Value { return ctx.Uint8Array([]uint8{0, 1, 128, 255}) },
+				func() *Value { return ctx.NewUint8Array([]uint8{0, 1, 128, 255}) },
 				func(v *Value) bool { return v.IsUint8Array() },
-				func() *Value { return ctx.Uint8Array([]uint8{}) },
-				func() *Value { return ctx.Uint8Array(nil) },
+				func() *Value { return ctx.NewUint8Array([]uint8{}) },
+				func() *Value { return ctx.NewUint8Array(nil) },
 			},
 			{
 				"Uint8ClampedArray",
-				func() *Value { return ctx.Uint8ClampedArray([]uint8{0, 127, 255}) },
+				func() *Value { return ctx.NewUint8ClampedArray([]uint8{0, 127, 255}) },
 				func(v *Value) bool { return v.IsUint8ClampedArray() },
-				func() *Value { return ctx.Uint8ClampedArray([]uint8{}) },
-				func() *Value { return ctx.Uint8ClampedArray(nil) },
+				func() *Value { return ctx.NewUint8ClampedArray([]uint8{}) },
+				func() *Value { return ctx.NewUint8ClampedArray(nil) },
 			},
 			{
 				"Int16Array",
-				func() *Value { return ctx.Int16Array([]int16{-32768, -1, 0, 1, 32767}) },
+				func() *Value { return ctx.NewInt16Array([]int16{-32768, -1, 0, 1, 32767}) },
 				func(v *Value) bool { return v.IsInt16Array() },
-				func() *Value { return ctx.Int16Array([]int16{}) },
-				func() *Value { return ctx.Int16Array(nil) },
+				func() *Value { return ctx.NewInt16Array([]int16{}) },
+				func() *Value { return ctx.NewInt16Array(nil) },
 			},
 			{
 				"Uint16Array",
-				func() *Value { return ctx.Uint16Array([]uint16{0, 1, 32768, 65535}) },
+				func() *Value { return ctx.NewUint16Array([]uint16{0, 1, 32768, 65535}) },
 				func(v *Value) bool { return v.IsUint16Array() },
-				func() *Value { return ctx.Uint16Array([]uint16{}) },
-				func() *Value { return ctx.Uint16Array(nil) },
+				func() *Value { return ctx.NewUint16Array([]uint16{}) },
+				func() *Value { return ctx.NewUint16Array(nil) },
 			},
 			{
 				"Int32Array",
-				func() *Value { return ctx.Int32Array([]int32{-2147483648, -1, 0, 1, 2147483647}) },
+				func() *Value { return ctx.NewInt32Array([]int32{-2147483648, -1, 0, 1, 2147483647}) },
 				func(v *Value) bool { return v.IsInt32Array() },
-				func() *Value { return ctx.Int32Array([]int32{}) },
-				func() *Value { return ctx.Int32Array(nil) },
+				func() *Value { return ctx.NewInt32Array([]int32{}) },
+				func() *Value { return ctx.NewInt32Array(nil) },
 			},
 			{
 				"Uint32Array",
-				func() *Value { return ctx.Uint32Array([]uint32{0, 1, 2147483648, 4294967295}) },
+				func() *Value { return ctx.NewUint32Array([]uint32{0, 1, 2147483648, 4294967295}) },
 				func(v *Value) bool { return v.IsUint32Array() },
-				func() *Value { return ctx.Uint32Array([]uint32{}) },
-				func() *Value { return ctx.Uint32Array(nil) },
+				func() *Value { return ctx.NewUint32Array([]uint32{}) },
+				func() *Value { return ctx.NewUint32Array(nil) },
 			},
 			{
 				"Float32Array",
-				func() *Value { return ctx.Float32Array([]float32{-3.14, 0.0, 1.5, 3.14159}) },
+				func() *Value { return ctx.NewFloat32Array([]float32{-3.14, 0.0, 1.5, 3.14159}) },
 				func(v *Value) bool { return v.IsFloat32Array() },
-				func() *Value { return ctx.Float32Array([]float32{}) },
-				func() *Value { return ctx.Float32Array(nil) },
+				func() *Value { return ctx.NewFloat32Array([]float32{}) },
+				func() *Value { return ctx.NewFloat32Array(nil) },
 			},
 			{
 				"Float64Array",
 				func() *Value {
-					return ctx.Float64Array([]float64{-3.141592653589793, 0.0, 1.5, 3.141592653589793})
+					return ctx.NewFloat64Array([]float64{-3.141592653589793, 0.0, 1.5, 3.141592653589793})
 				},
 				func(v *Value) bool { return v.IsFloat64Array() },
-				func() *Value { return ctx.Float64Array([]float64{}) },
-				func() *Value { return ctx.Float64Array(nil) },
+				func() *Value { return ctx.NewFloat64Array([]float64{}) },
+				func() *Value { return ctx.NewFloat64Array(nil) },
 			},
 			{
 				"BigInt64Array",
 				func() *Value {
-					return ctx.BigInt64Array([]int64{-9223372036854775808, -1, 0, 1, 9223372036854775807})
+					return ctx.NewBigInt64Array([]int64{-9223372036854775808, -1, 0, 1, 9223372036854775807})
 				},
 				func(v *Value) bool { return v.IsBigInt64Array() },
-				func() *Value { return ctx.BigInt64Array([]int64{}) },
-				func() *Value { return ctx.BigInt64Array(nil) },
+				func() *Value { return ctx.NewBigInt64Array([]int64{}) },
+				func() *Value { return ctx.NewBigInt64Array(nil) },
 			},
 			{
 				"BigUint64Array",
 				func() *Value {
-					return ctx.BigUint64Array([]uint64{0, 1, 9223372036854775808, 18446744073709551615})
+					return ctx.NewBigUint64Array([]uint64{0, 1, 9223372036854775808, 18446744073709551615})
 				},
 				func(v *Value) bool { return v.IsBigUint64Array() },
-				func() *Value { return ctx.BigUint64Array([]uint64{}) },
-				func() *Value { return ctx.BigUint64Array(nil) },
+				func() *Value { return ctx.NewBigUint64Array([]uint64{}) },
+				func() *Value { return ctx.NewBigUint64Array(nil) },
 			},
 		}
 
@@ -891,7 +891,7 @@ func TestContextTypedArrays(t *testing.T) {
 	t.Run("TypedArrayInterop", func(t *testing.T) {
 		// Go to JavaScript
 		goData := []int32{1, 2, 3, 4, 5}
-		goArray := ctx.Int32Array(goData)
+		goArray := ctx.NewInt32Array(goData)
 		ctx.Globals().Set("goArray", goArray)
 
 		result := ctx.Eval(`
@@ -921,7 +921,7 @@ func TestContextTypedArrays(t *testing.T) {
 	t.Run("TypedArrayPrecision", func(t *testing.T) {
 		// Test Float32 precision
 		float32Data := []float32{3.14159265359, -2.718281828, 0.0, 1.23456789}
-		float32Array := ctx.Float32Array(float32Data)
+		float32Array := ctx.NewFloat32Array(float32Data)
 		defer float32Array.Free()
 
 		converted32, err := float32Array.ToFloat32Array()
@@ -934,7 +934,7 @@ func TestContextTypedArrays(t *testing.T) {
 
 		// Test Float64 precision
 		float64Data := []float64{3.141592653589793, -2.718281828459045, 0.0, 1.2345678901234567}
-		float64Array := ctx.Float64Array(float64Data)
+		float64Array := ctx.NewFloat64Array(float64Data)
 		defer float64Array.Free()
 
 		converted64, err := float64Array.ToFloat64Array()
@@ -948,7 +948,7 @@ func TestContextTypedArrays(t *testing.T) {
 
 	t.Run("TypedArrayErrors", func(t *testing.T) {
 		// Test conversion errors for wrong types
-		wrongTypeVal := ctx.String("not a typed array")
+		wrongTypeVal := ctx.NewString("not a typed array")
 		defer wrongTypeVal.Free()
 
 		conversionTests := []func() error{
@@ -971,7 +971,7 @@ func TestContextTypedArrays(t *testing.T) {
 		}
 
 		// Test type mismatch conversion
-		int8Array := ctx.Int8Array([]int8{1, 2, 3})
+		int8Array := ctx.NewInt8Array([]int8{1, 2, 3})
 		defer int8Array.Free()
 
 		_, err := int8Array.ToUint8Array()
@@ -982,7 +982,7 @@ func TestContextTypedArrays(t *testing.T) {
 	t.Run("SharedMemoryTest", func(t *testing.T) {
 		// Test that TypedArrays share memory with their underlying ArrayBuffer
 		data := []uint8{1, 2, 3, 4, 5, 6, 7, 8}
-		arrayBuffer := ctx.ArrayBuffer(data)
+		arrayBuffer := ctx.NewArrayBuffer(data)
 		ctx.Globals().Set("sharedBuffer", arrayBuffer)
 
 		// Create different views on the same buffer
@@ -1066,14 +1066,14 @@ func TestContextAsyncFunction(t *testing.T) {
 	defer ctx.Close()
 
 	t.Run("AsyncFunctionResolveNoArgs", func(t *testing.T) {
-		// Test the resolve(ctx.Undefined()) branch when no arguments are passed
-		asyncFn := ctx.AsyncFunction(func(ctx *Context, this *Value, promise *Value, args []*Value) *Value {
+		// Test the resolve(ctx.NewUndefined()) branch when no arguments are passed
+		asyncFn := ctx.NewAsyncFunction(func(ctx *Context, this *Value, promise *Value, args []*Value) *Value {
 			resolve := promise.Get("resolve")
 			defer resolve.Free()
 
-			// Call resolve without passing any arguments to cover resolve(ctx.Undefined()) branch
-			resolve.Execute(ctx.Undefined()) // No arguments passed
-			return ctx.Undefined()
+			// Call resolve without passing any arguments to cover resolve(ctx.NewUndefined()) branch
+			resolve.Execute(ctx.NewUndefined()) // No arguments passed
+			return ctx.NewUndefined()
 		})
 
 		ctx.Globals().Set("testAsyncResolveNoArgs", asyncFn)
@@ -1085,15 +1085,15 @@ func TestContextAsyncFunction(t *testing.T) {
 
 	t.Run("AsyncFunctionRejectWithArgs", func(t *testing.T) {
 		// Test the reject(args[0]) branch when arguments are passed to reject
-		asyncFn := ctx.AsyncFunction(func(ctx *Context, this *Value, promise *Value, args []*Value) *Value {
+		asyncFn := ctx.NewAsyncFunction(func(ctx *Context, this *Value, promise *Value, args []*Value) *Value {
 			reject := promise.Get("reject")
 			defer reject.Free()
 
 			// Call reject with an error argument to cover reject(args[0]) branch
-			errorVal := ctx.Error(errors.New("specific error message"))
+			errorVal := ctx.NewError(errors.New("specific error message"))
 			defer errorVal.Free()
-			reject.Execute(ctx.Undefined(), errorVal) // Pass argument
-			return ctx.Undefined()
+			reject.Execute(ctx.NewUndefined(), errorVal) // Pass argument
+			return ctx.NewUndefined()
 		})
 
 		ctx.Globals().Set("testAsyncRejectWithArgs", asyncFn)
@@ -1108,14 +1108,14 @@ func TestContextAsyncFunction(t *testing.T) {
 
 	t.Run("AsyncFunctionRejectNoArgs", func(t *testing.T) {
 		// Test the reject without arguments branch (else clause in reject function)
-		asyncFn := ctx.AsyncFunction(func(ctx *Context, this *Value, promise *Value, args []*Value) *Value {
+		asyncFn := ctx.NewAsyncFunction(func(ctx *Context, this *Value, promise *Value, args []*Value) *Value {
 			reject := promise.Get("reject")
 			defer reject.Free()
 
 			// Call reject without passing any arguments to cover the else branch
-			// This will trigger: errObj := ctx.Error(fmt.Errorf("Promise rejected without reason"))
-			reject.Execute(ctx.Undefined()) // No arguments passed
-			return ctx.Undefined()
+			// This will trigger: errObj := ctx.NewError(fmt.Errorf("Promise rejected without reason"))
+			reject.Execute(ctx.NewUndefined()) // No arguments passed
+			return ctx.NewUndefined()
 		})
 
 		ctx.Globals().Set("testAsyncRejectNoArgs", asyncFn)
@@ -1130,33 +1130,33 @@ func TestContextAsyncFunction(t *testing.T) {
 
 	t.Run("AsyncFunctionDirectReturnValue", func(t *testing.T) {
 		// Test the resolve(result) branch when function returns a non-undefined value
-		asyncFn := ctx.AsyncFunction(func(ctx *Context, this *Value, promise *Value, args []*Value) *Value {
+		asyncFn := ctx.NewAsyncFunction(func(ctx *Context, this *Value, promise *Value, args []*Value) *Value {
 			// Don't call promise.resolve or promise.reject, return a value directly
 			// This covers the resolve(result) and result.Free() branches
-			return ctx.String("direct return value")
+			return ctx.NewString("direct return value")
 		})
 
 		ctx.Globals().Set("testAsyncDirectReturn", asyncFn)
 		result := ctx.Eval(`testAsyncDirectReturn()`, EvalAwait(true))
 		defer result.Free()
 		require.False(t, result.IsException())
-		require.Equal(t, "direct return value", result.String())
+		require.Equal(t, "direct return value", result.ToString())
 	})
 
 	t.Run("AsyncFunctionReturnUndefined", func(t *testing.T) {
 		// Test that returning undefined doesn't trigger the resolve(result) branch
 		resolvedByPromise := false
 
-		asyncFn := ctx.AsyncFunction(func(ctx *Context, this *Value, promise *Value, args []*Value) *Value {
+		asyncFn := ctx.NewAsyncFunction(func(ctx *Context, this *Value, promise *Value, args []*Value) *Value {
 			resolve := promise.Get("resolve")
 			defer resolve.Free()
 
 			// Manually call resolve, then return undefined
-			resolve.Execute(ctx.Undefined(), ctx.String("resolved by promise"))
+			resolve.Execute(ctx.NewUndefined(), ctx.NewString("resolved by promise"))
 			resolvedByPromise = true
 
 			// Return undefined so the if !result.IsUndefined() branch is not executed
-			return ctx.Undefined() // ADD missing 'return' keyword here
+			return ctx.NewUndefined() // ADD missing 'return' keyword here
 		})
 
 		ctx.Globals().Set("testAsyncReturnUndefined", asyncFn)
@@ -1164,12 +1164,12 @@ func TestContextAsyncFunction(t *testing.T) {
 		defer result.Free()
 		require.False(t, result.IsException())
 		require.True(t, resolvedByPromise)
-		require.Equal(t, "resolved by promise", result.String())
+		require.Equal(t, "resolved by promise", result.ToString())
 	})
 
 	t.Run("AsyncFunctionComplexScenario", func(t *testing.T) {
 		// Test complex async function scenario to ensure complete coverage
-		asyncFn := ctx.AsyncFunction(func(ctx *Context, this *Value, promise *Value, args []*Value) *Value {
+		asyncFn := ctx.NewAsyncFunction(func(ctx *Context, this *Value, promise *Value, args []*Value) *Value {
 			resolve := promise.Get("resolve")
 			reject := promise.Get("reject")
 			defer resolve.Free()
@@ -1177,29 +1177,29 @@ func TestContextAsyncFunction(t *testing.T) {
 
 			if len(args) == 0 {
 				// Test reject without arguments (already covered in other tests)
-				reject.Execute(ctx.Undefined())
-				return ctx.Undefined()
+				reject.Execute(ctx.NewUndefined())
+				return ctx.NewUndefined()
 			}
 
-			command := args[0].String()
+			command := args[0].ToString()
 			switch command {
 			case "resolve_no_args":
 				// Cover resolve without arguments branch
-				resolve.Execute(ctx.Undefined())
+				resolve.Execute(ctx.NewUndefined())
 			case "reject_with_args":
 				// Cover reject with arguments branch
-				errObj := ctx.Error(errors.New("custom rejection"))
+				errObj := ctx.NewError(errors.New("custom rejection"))
 				defer errObj.Free()
-				reject.Execute(ctx.Undefined(), errObj)
+				reject.Execute(ctx.NewUndefined(), errObj)
 			case "direct_return":
 				// Cover direct return value branch
-				return ctx.String("returned directly")
+				return ctx.NewString("returned directly")
 			default:
 				// Default case
-				resolve.Execute(ctx.Undefined(), ctx.String("default case"))
+				resolve.Execute(ctx.NewUndefined(), ctx.NewString("default case"))
 			}
 
-			return ctx.Undefined()
+			return ctx.NewUndefined()
 		})
 
 		ctx.Globals().Set("testAsyncComplex", asyncFn)
@@ -1222,6 +1222,170 @@ func TestContextAsyncFunction(t *testing.T) {
 		result3 := ctx.Eval(`testAsyncComplex("direct_return")`, EvalAwait(true))
 		defer result3.Free()
 		require.False(t, result3.IsException())
-		require.Equal(t, "returned directly", result3.String())
+		require.Equal(t, "returned directly", result3.ToString())
+	})
+}
+
+// TestDeprecatedAPIs tests all deprecated methods to ensure they still work
+// Each deprecated method is called once for test coverage
+func TestDeprecatedAPIs(t *testing.T) {
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	t.Run("DeprecatedValueCreation", func(t *testing.T) {
+		// Test all deprecated value creation methods
+		val1 := ctx.Null()
+		defer val1.Free()
+		require.True(t, val1.IsNull())
+
+		val2 := ctx.Undefined()
+		defer val2.Free()
+		require.True(t, val2.IsUndefined())
+
+		val3 := ctx.Uninitialized()
+		defer val3.Free()
+		require.True(t, val3.IsUninitialized())
+
+		val4 := ctx.Bool(true)
+		defer val4.Free()
+		require.True(t, val4.IsBool())
+
+		val5 := ctx.Int32(42)
+		defer val5.Free()
+		require.True(t, val5.IsNumber())
+
+		val6 := ctx.Int64(1234567890)
+		defer val6.Free()
+		require.True(t, val6.IsNumber())
+
+		val7 := ctx.Uint32(42)
+		defer val7.Free()
+		require.True(t, val7.IsNumber())
+
+		val8 := ctx.BigInt64(9223372036854775807)
+		defer val8.Free()
+		require.True(t, val8.IsBigInt())
+
+		val9 := ctx.BigUint64(18446744073709551615)
+		defer val9.Free()
+		require.True(t, val9.IsBigInt())
+
+		val10 := ctx.Float64(3.14159)
+		defer val10.Free()
+		require.True(t, val10.IsNumber())
+
+		val11 := ctx.String("test")
+		defer val11.Free()
+		require.True(t, val11.IsString())
+
+		val12 := ctx.Object()
+		defer val12.Free()
+		require.True(t, val12.IsObject())
+
+		val13 := ctx.ArrayBuffer([]byte{1, 2, 3})
+		defer val13.Free()
+		require.True(t, val13.IsByteArray())
+
+		val14 := ctx.Error(errors.New("test error"))
+		defer val14.Free()
+		require.True(t, val14.IsError())
+	})
+
+	t.Run("DeprecatedTypedArrays", func(t *testing.T) {
+		// Test all deprecated TypedArray creation methods
+		val1 := ctx.Int8Array([]int8{1, 2, 3})
+		defer val1.Free()
+		require.True(t, val1.IsInt8Array())
+
+		val2 := ctx.Uint8Array([]uint8{1, 2, 3})
+		defer val2.Free()
+		require.True(t, val2.IsUint8Array())
+
+		val3 := ctx.Uint8ClampedArray([]uint8{1, 2, 3})
+		defer val3.Free()
+		require.True(t, val3.IsUint8ClampedArray())
+
+		val4 := ctx.Int16Array([]int16{1, 2, 3})
+		defer val4.Free()
+		require.True(t, val4.IsInt16Array())
+
+		val5 := ctx.Uint16Array([]uint16{1, 2, 3})
+		defer val5.Free()
+		require.True(t, val5.IsUint16Array())
+
+		val6 := ctx.Int32Array([]int32{1, 2, 3})
+		defer val6.Free()
+		require.True(t, val6.IsInt32Array())
+
+		val7 := ctx.Uint32Array([]uint32{1, 2, 3})
+		defer val7.Free()
+		require.True(t, val7.IsUint32Array())
+
+		val8 := ctx.Float32Array([]float32{1.0, 2.0, 3.0})
+		defer val8.Free()
+		require.True(t, val8.IsFloat32Array())
+
+		val9 := ctx.Float64Array([]float64{1.0, 2.0, 3.0})
+		defer val9.Free()
+		require.True(t, val9.IsFloat64Array())
+
+		val10 := ctx.BigInt64Array([]int64{1, 2, 3})
+		defer val10.Free()
+		require.True(t, val10.IsBigInt64Array())
+
+		val11 := ctx.BigUint64Array([]uint64{1, 2, 3})
+		defer val11.Free()
+		require.True(t, val11.IsBigUint64Array())
+	})
+
+	t.Run("DeprecatedFunctions", func(t *testing.T) {
+		// Test deprecated Function method
+		fn := ctx.Function(func(ctx *Context, this *Value, args []*Value) *Value {
+			return ctx.NewString("hello")
+		})
+		defer fn.Free()
+		require.True(t, fn.IsFunction())
+
+		// Test deprecated AsyncFunction method
+		asyncFn := ctx.AsyncFunction(func(ctx *Context, this *Value, promise *Value, args []*Value) *Value {
+			resolve := promise.Get("resolve")
+			defer resolve.Free()
+			resolve.Execute(ctx.NewUndefined(), ctx.NewString("async hello"))
+			return ctx.NewUndefined()
+		})
+		defer asyncFn.Free()
+		require.True(t, asyncFn.IsFunction())
+
+		// Test deprecated Promise method
+		promise := ctx.Promise(func(resolve, reject func(*Value)) {
+			resolve(ctx.NewString("promise result"))
+		})
+		defer promise.Free()
+		require.True(t, promise.IsPromise())
+	})
+
+	t.Run("DeprecatedAtoms", func(t *testing.T) {
+		// Test deprecated Atom methods
+		atom1 := ctx.Atom("test")
+		defer atom1.Free()
+		require.Equal(t, "test", atom1.ToString())
+
+		atom2 := ctx.AtomIdx(123)
+		defer atom2.Free()
+		require.NotNil(t, atom2)
+	})
+
+	t.Run("DeprecatedInvoke", func(t *testing.T) {
+		// Test deprecated Invoke method
+		fn := ctx.NewFunction(func(ctx *Context, this *Value, args []*Value) *Value {
+			return ctx.NewString("invoked")
+		})
+		defer fn.Free()
+
+		result := ctx.Invoke(fn, ctx.NewNull(), ctx.NewString("arg"))
+		defer result.Free()
+		require.Equal(t, "invoked", result.ToString())
 	})
 }

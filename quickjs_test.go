@@ -43,15 +43,15 @@ func Example() {
 	defer ctx.Close()
 
 	// Create a new object
-	test := ctx.Object()
+	test := ctx.NewObject()
 	defer test.Free()
 	// bind properties to the object
-	test.Set("A", ctx.String("String A"))
-	test.Set("B", ctx.Int32(0))
-	test.Set("C", ctx.Bool(false))
+	test.Set("A", ctx.NewString("String A"))
+	test.Set("B", ctx.NewInt32(0))
+	test.Set("C", ctx.NewBool(false))
 	// bind go function to js object - UPDATED: function signature now uses pointers
-	test.Set("hello", ctx.Function(func(ctx *quickjs.Context, this *quickjs.Value, args []*quickjs.Value) *quickjs.Value {
-		return ctx.String("Hello " + args[0].String())
+	test.Set("hello", ctx.NewFunction(func(ctx *quickjs.Context, this *quickjs.Value, args []*quickjs.Value) *quickjs.Value {
+		return ctx.NewString("Hello " + args[0].ToString())
 	}))
 
 	// bind "test" object to global object
@@ -66,17 +66,17 @@ func Example() {
 		fmt.Printf("Error: %v\n", err)
 		return
 	}
-	fmt.Println(js_ret.String())
+	fmt.Println(js_ret.ToString())
 
 	// call js function by go
-	go_ret := ctx.Globals().Get("test").Call("hello", ctx.String("Golang!"))
+	go_ret := ctx.Globals().Get("test").Call("hello", ctx.NewString("Golang!"))
 	defer go_ret.Free()
-	fmt.Println(go_ret.String())
+	fmt.Println(go_ret.ToString())
 
 	// bind go function to Javascript async function using Function + Promise - UPDATED: function signature now uses pointers
-	ctx.Globals().Set("testAsync", ctx.Function(func(ctx *quickjs.Context, this *quickjs.Value, args []*quickjs.Value) *quickjs.Value {
-		return ctx.Promise(func(resolve, reject func(*quickjs.Value)) {
-			resolve(ctx.String("Hello Async Function!"))
+	ctx.Globals().Set("testAsync", ctx.NewFunction(func(ctx *quickjs.Context, this *quickjs.Value, args []*quickjs.Value) *quickjs.Value {
+		return ctx.NewPromise(func(resolve, reject func(*quickjs.Value)) {
+			resolve(ctx.NewString("Hello Async Function!"))
 		})
 	}))
 
@@ -103,11 +103,11 @@ func Example() {
 		fmt.Printf("Error: %v\n", err)
 		return
 	}
-	fmt.Println(asyncRet.String())
+	fmt.Println(asyncRet.ToString())
 
 	// Demonstrate TypedArray functionality
 	floatData := []float32{95.5, 87.2, 92.0}
-	typedArray := ctx.Float32Array(floatData)
+	typedArray := ctx.NewFloat32Array(floatData)
 	ctx.Globals().Set("floatData", typedArray)
 
 	arrayResult := ctx.Eval(`floatData instanceof Float32Array`)
@@ -118,7 +118,7 @@ func Example() {
 		fmt.Printf("Error: %v\n", err)
 		return
 	}
-	fmt.Println("TypedArray:", arrayResult.Bool())
+	fmt.Println("TypedArray:", arrayResult.ToBool())
 
 	// Demonstrate Marshal/Unmarshal functionality with User struct
 	user := User{
@@ -145,7 +145,7 @@ func Example() {
 		fmt.Printf("Error: %v\n", err)
 		return
 	}
-	fmt.Println("Marshal:", marshalResult.String())
+	fmt.Println("Marshal:", marshalResult.ToString())
 
 	// Demonstrate Class Binding functionality with the same User struct
 	userConstructor, _ := ctx.BindClass(&User{})
@@ -176,7 +176,7 @@ func Example() {
 		fmt.Printf("Error: %v\n", err)
 		return
 	}
-	fmt.Println("Class binding:", classResult.String())
+	fmt.Println("Class binding:", classResult.ToString())
 
 	// Output:
 	// Hello Javascript!

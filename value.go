@@ -136,7 +136,7 @@ func (v *Value) ToBigInt() *big.Int {
 	if !v.IsBigInt() {
 		return nil
 	}
-	val, _ := new(big.Int).SetString(v.String(), 10)
+	val, _ := new(big.Int).SetString(v.ToString(), 10)
 	return val
 }
 
@@ -144,14 +144,14 @@ func (v *Value) ToBigInt() *big.Int {
 func (v *Value) Len() int64 {
 	length := v.Get("length")
 	defer length.Free()
-	return length.Int64()
+	return length.ToInt64()
 }
 
 // ByteLen returns the length of the ArrayBuffer.
 func (v *Value) ByteLen() int64 {
 	byteLength := v.Get("byteLength")
 	defer byteLength.Free()
-	return byteLength.Int64()
+	return byteLength.ToInt64()
 }
 
 // Set sets the value of the property with the given name.
@@ -261,25 +261,25 @@ func (v *Value) ToError() error {
 	name := v.Get("name")
 	defer name.Free()
 	if !name.IsUndefined() {
-		err.Name = name.String()
+		err.Name = name.ToString()
 	}
 
 	message := v.Get("message")
 	defer message.Free()
 	if !message.IsUndefined() {
-		err.Message = message.String()
+		err.Message = message.ToString()
 	}
 
 	cause := v.Get("cause")
 	defer cause.Free()
 	if !cause.IsUndefined() {
-		err.Cause = cause.String()
+		err.Cause = cause.ToString()
 	}
 
 	stack := v.Get("stack")
 	defer stack.Free()
 	if !stack.IsUndefined() {
-		err.Stack = stack.String()
+		err.Stack = stack.ToString()
 	}
 
 	jsonString := v.JSONStringify()
@@ -322,21 +322,21 @@ func (v *Value) PropertyNames() ([]string, error) {
 	}
 	names := make([]string, len(pList))
 	for i := 0; i < len(names); i++ {
-		names[i] = pList[i].String()
+		names[i] = pList[i].ToString()
 	}
 	return names, nil
 }
 
 // Has returns true if the value has the property with the given name.
 func (v *Value) Has(name string) bool {
-	prop := v.ctx.Atom(name)
+	prop := v.ctx.NewAtom(name)
 	defer prop.Free()
 	return C.JS_HasProperty(v.ctx.ref, v.ref, prop.ref) == 1
 }
 
 // HasIdx returns true if the value has the property with the given index.
 func (v *Value) HasIdx(idx uint32) bool {
-	prop := v.ctx.AtomIdx(idx)
+	prop := v.ctx.NewAtomIdx(idx)
 	defer prop.Free()
 	return C.JS_HasProperty(v.ctx.ref, v.ref, prop.ref) == 1
 }
@@ -346,7 +346,7 @@ func (v *Value) Delete(name string) bool {
 	if !v.Has(name) {
 		return false // Property does not exist, nothing to delete
 	}
-	prop := v.ctx.Atom(name)
+	prop := v.ctx.NewAtom(name)
 	defer prop.Free()
 	return C.JS_DeleteProperty(v.ctx.ref, v.ref, prop.ref, C.int(1)) == 1
 }
@@ -797,7 +797,7 @@ func (v *Value) IsBigUint64Array() bool { return v != nil && v.GlobalInstanceof(
 
 // IsByteArray returns true if the value is array buffer
 func (v *Value) IsByteArray() bool {
-	return v != nil && v.IsObject() && (v.GlobalInstanceof("ArrayBuffer") || v.String() == "[object ArrayBuffer]")
+	return v != nil && v.IsObject() && (v.GlobalInstanceof("ArrayBuffer") || v.ToString() == "[object ArrayBuffer]")
 }
 
 // resolveClassIDFromInheritance attempts to resolve classID by checking if this constructor
@@ -832,7 +832,7 @@ func (v *Value) resolveClassIDFromInheritance() (uint32, bool) {
 	defer traverser.Free()
 
 	// Get all parent constructors
-	undefinedVal := v.ctx.Undefined()
+	undefinedVal := v.ctx.NewUndefined()
 	defer undefinedVal.Free()
 	parents := traverser.Execute(undefinedVal, v)
 	defer parents.Free()
@@ -841,7 +841,7 @@ func (v *Value) resolveClassIDFromInheritance() (uint32, bool) {
 	lengthVal := parents.Get("length")
 	defer lengthVal.Free()
 
-	length := int(lengthVal.Int32())
+	length := int(lengthVal.ToInt32())
 	for i := 0; i < length; i++ {
 		parent := parents.GetIdx(int64(i))
 		defer parent.Free()
