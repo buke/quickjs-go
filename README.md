@@ -126,7 +126,7 @@ func main() {
         return
     }
     
-    fmt.Println(ret.String())
+    fmt.Println(ret.ToString())
 }
 ```
 
@@ -150,10 +150,10 @@ func main() {
     ctx := rt.NewContext()
     defer ctx.Close()
 
-    test := ctx.Object()
-    test.Set("A", ctx.String("String A"))
-    test.Set("B", ctx.String("String B"))
-    test.Set("C", ctx.String("String C"))
+    test := ctx.NewObject()
+    test.Set("A", ctx.NewString("String A"))
+    test.Set("B", ctx.NewString("String B"))
+    test.Set("C", ctx.NewString("String C"))
     ctx.Globals().Set("test", test)
 
     ret := ctx.Eval(`Object.keys(test).map(key => test[key]).join(" ")`)
@@ -165,7 +165,7 @@ func main() {
         return
     }
     
-    fmt.Println(ret.String())
+    fmt.Println(ret.ToString())
 }
 
 ```
@@ -190,14 +190,14 @@ func main() {
     defer ctx.Close()
 
     // Create a new object
-    test := ctx.Object()
+    test := ctx.NewObject()
     // bind properties to the object
-    test.Set("A", ctx.String("String A"))
-    test.Set("B", ctx.Int32(0))
-    test.Set("C", ctx.Bool(false))
+    test.Set("A", ctx.NewString("String A"))
+    test.Set("B", ctx.NewInt32(0))
+    test.Set("C", ctx.NewBool(false))
     // bind go function to js object
-    test.Set("hello", ctx.Function(func(ctx *quickjs.Context, this *quickjs.Value, args []*quickjs.Value) *quickjs.Value {
-        return ctx.String("Hello " + args[0].String())
+    test.Set("hello", ctx.NewFunction(func(ctx *quickjs.Context, this *quickjs.Value, args []*quickjs.Value) *quickjs.Value {
+        return ctx.NewString("Hello " + args[0].ToString())
     }))
 
     // bind "test" object to global object
@@ -213,10 +213,10 @@ func main() {
         return
     }
     
-    fmt.Println(js_ret.String())
+    fmt.Println(js_ret.ToString())
 
     // call js function by go
-    go_ret := test.Call("hello", ctx.String("Golang!"))
+    go_ret := test.Call("hello", ctx.NewString("Golang!"))
     defer go_ret.Free()
     
     if go_ret.IsException() {
@@ -225,12 +225,12 @@ func main() {
         return
     }
     
-    fmt.Println(go_ret.String())
+    fmt.Println(go_ret.ToString())
 
     // bind go function to Javascript async function using Function + Promise
-    ctx.Globals().Set("testAsync", ctx.Function(func(ctx *quickjs.Context, this *quickjs.Value, args []*quickjs.Value) *quickjs.Value {
+    ctx.Globals().Set("testAsync", ctx.NewFunction(func(ctx *quickjs.Context, this *quickjs.Value, args []*quickjs.Value) *quickjs.Value {
         return ctx.Promise(func(resolve, reject func(*quickjs.Value)) {
-            resolve(ctx.String("Hello Async Function!"))
+            resolve(ctx.NewString("Hello Async Function!"))
         })
     }))
 
@@ -259,7 +259,7 @@ func main() {
         return
     }
 
-    fmt.Println(asyncRet.String())
+    fmt.Println(asyncRet.ToString())
 
     // Output:
     // Hello Javascript!
@@ -326,16 +326,16 @@ func main() {
 
     // Create various TypedArrays from Go slices
     int8Data := []int8{-128, -1, 0, 1, 127}
-    int8Array := ctx.Int8Array(int8Data)
+    int8Array := ctx.NewInt8Array(int8Data)
 
     uint8Data := []uint8{0, 128, 255}
-    uint8Array := ctx.Uint8Array(uint8Data)
+    uint8Array := ctx.NewUint8Array(uint8Data)
 
     float32Data := []float32{-3.14, 0.0, 2.718, 100.5}
-    float32Array := ctx.Float32Array(float32Data)
+    float32Array := ctx.NewFloat32Array(float32Data)
 
     int64Data := []int64{-9223372036854775808, 0, 9223372036854775807}
-    bigInt64Array := ctx.BigInt64Array(int64Data)
+    bigInt64Array := ctx.NewBigInt64Array(int64Data)
 
     // Set TypedArrays as global variables
     ctx.Globals().Set("int8Array", int8Array)
@@ -444,18 +444,18 @@ func main() {
 
 | Go Type    | JavaScript TypedArray | Context Method          | Value Method        |
 |------------|----------------------|-------------------------|---------------------|
-| `[]int8`   | `Int8Array`          | `ctx.Int8Array()`       | `val.ToInt8Array()` |
-| `[]uint8`  | `Uint8Array`         | `ctx.Uint8Array()`      | `val.ToUint8Array()` |
-| `[]uint8`  | `Uint8ClampedArray`  | `ctx.Uint8ClampedArray()` | `val.ToUint8Array()` |
-| `[]int16`  | `Int16Array`         | `ctx.Int16Array()`      | `val.ToInt16Array()` |
-| `[]uint16` | `Uint16Array`        | `ctx.Uint16Array()`     | `val.ToUint16Array()` |
-| `[]int32`  | `Int32Array`         | `ctx.Int32Array()`      | `val.ToInt32Array()` |
-| `[]uint32` | `Uint32Array`        | `ctx.Uint32Array()`     | `val.ToUint32Array()` |
-| `[]float32` | `Float32Array`      | `ctx.Float32Array()`    | `val.ToFloat32Array()` |
-| `[]float64` | `Float64Array`      | `ctx.Float64Array()`    | `val.ToFloat64Array()` |
-| `[]int64`  | `BigInt64Array`      | `ctx.BigInt64Array()`   | `val.ToBigInt64Array()` |
-| `[]uint64` | `BigUint64Array`     | `ctx.BigUint64Array()`  | `val.ToBigUint64Array()` |
-| `[]byte`   | `ArrayBuffer`        | `ctx.ArrayBuffer()`     | `val.ToByteArray()` |
+| `[]int8`   | `Int8Array`          | `ctx.NewInt8Array()`       | `val.ToInt8Array()` |
+| `[]uint8`  | `Uint8Array`         | `ctx.NewUint8Array()`      | `val.ToUint8Array()` |
+| `[]uint8`  | `Uint8ClampedArray`  | `ctx.NewUint8ClampedArray()` | `val.ToUint8Array()` |
+| `[]int16`  | `Int16Array`         | `ctx.NewInt16Array()`      | `val.ToInt16Array()` |
+| `[]uint16` | `Uint16Array`        | `ctx.NewUint16Array()`     | `val.ToUint16Array()` |
+| `[]int32`  | `Int32Array`         | `ctx.NewInt32Array()`      | `val.ToInt32Array()` |
+| `[]uint32` | `Uint32Array`        | `ctx.NewUint32Array()`     | `val.ToUint32Array()` |
+| `[]float32` | `Float32Array`      | `ctx.NewFloat32Array()`    | `val.ToFloat32Array()` |
+| `[]float64` | `Float64Array`      | `ctx.NewFloat64Array()`    | `val.ToFloat64Array()` |
+| `[]int64`  | `BigInt64Array`      | `ctx.NewBigInt64Array()`   | `val.ToBigInt64Array()` |
+| `[]uint64` | `BigUint64Array`     | `ctx.NewBigUint64Array()`  | `val.ToBigUint64Array()` |
+| `[]byte`   | `ArrayBuffer`        | `ctx.NewArrayBuffer()`     | `val.ToByteArray()` |
 
 #### TypedArray Detection
 
@@ -477,8 +477,8 @@ func main() {
     regularArray := ctx.Eval(`[1, 2, 3]`)
     defer regularArray.Free()
 
-    int32Array := ctx.Int32Array([]int32{1, 2, 3})
-    float64Array := ctx.Float64Array([]float64{1.1, 2.2, 3.3})
+    int32Array := ctx.NewInt32Array([]int32{1, 2, 3})
+    float64Array := ctx.NewFloat64Array([]float64{1.1, 2.2, 3.3})
 
     // Set arrays as global variables to be referenced by globals
     ctx.Globals().Set("int32Array", int32Array)
@@ -523,7 +523,7 @@ func main() {
     }
 
     // Send to JavaScript as Uint8Array
-    imageArray := ctx.Uint8Array(imageData)
+    imageArray := ctx.NewUint8Array(imageData)
     ctx.Globals().Set("imageData", imageArray)
 
     // Process in JavaScript
@@ -754,7 +754,7 @@ type CustomType struct {
 
 // Implement Marshaler interface
 func (c CustomType) MarshalJS(ctx *quickjs.Context) (*quickjs.Value, error) {
-    return ctx.String("custom:" + c.Value), nil
+    return ctx.NewString("custom:" + c.Value), nil
 }
 
 // Implement Unmarshaler interface
@@ -784,7 +784,7 @@ func main() {
     }
     defer jsVal.Free()
 
-    fmt.Println("Marshaled:", jsVal.String()) // Output: custom:hello
+    fmt.Println("Marshaled:", jsVal.ToString()) // Output: custom:hello
 
     // Unmarshal back
     var result CustomType
@@ -874,20 +874,20 @@ func main() {
     defer ctx.Close()
 
     // Create a math module with Go functions and values
-    addFunc := ctx.Function(func(ctx *quickjs.Context, this *quickjs.Value, args []*quickjs.Value) *quickjs.Value {
+    addFunc := ctx.NewFunction(func(ctx *quickjs.Context, this *quickjs.Value, args []*quickjs.Value) *quickjs.Value {
         if len(args) >= 2 {
-            return ctx.Float64(args[0].Float64() + args[1].Float64())
+            return ctx.NewFloat64(args[0].ToFloat64() + args[1].ToFloat64())
         }
-        return ctx.Float64(0)
+        return ctx.NewFloat64(0)
     })
     defer addFunc.Free()
 
     // Build the module using fluent API
     module := quickjs.NewModuleBuilder("math").
-        Export("PI", ctx.Float64(3.14159)).
+        Export("PI", ctx.NewFloat64(3.14159)).
         Export("add", addFunc).
-        Export("version", ctx.String("1.0.0")).
-        Export("default", ctx.String("Math Module"))
+        Export("version", ctx.NewString("1.0.0")).
+        Export("default", ctx.NewString("Math Module"))
 
     err := module.Build(ctx)
     if err != nil {
@@ -934,17 +934,17 @@ func main() {
     defer ctx.Close()
 
     // Create a utilities module with complex objects
-    config := ctx.Object()
-    config.Set("appName", ctx.String("MyApp"))
-    config.Set("version", ctx.String("2.0.0"))
-    config.Set("debug", ctx.Bool(true))
+    config := ctx.NewObject()
+    config.Set("appName", ctx.NewString("MyApp"))
+    config.Set("version", ctx.NewString("2.0.0"))
+    config.Set("debug", ctx.NewBool(true))
 
-    greetFunc := ctx.Function(func(ctx *quickjs.Context, this *quickjs.Value, args []*quickjs.Value) *quickjs.Value {
+    greetFunc := ctx.NewFunction(func(ctx *quickjs.Context, this *quickjs.Value, args []*quickjs.Value) *quickjs.Value {
         name := "World"
         if len(args) > 0 {
-            name = args[0].String()
+            name = args[0].ToString()
         }
-        return ctx.String(fmt.Sprintf("Hello, %s!", name))
+        return ctx.NewString(fmt.Sprintf("Hello, %s!", name))
     })
     defer greetFunc.Free()
 
@@ -956,7 +956,7 @@ func main() {
         Export("config", config).                    // Object export
         Export("greet", greetFunc).                  // Function export
         Export("constants", jsonVal).                // JSON export
-        Export("default", ctx.String("Utils Library"))  // Default export
+        Export("default", ctx.NewString("Utils Library"))  // Default export
 
     err := module.Build(ctx)
     if err != nil {
@@ -1006,24 +1006,24 @@ func main() {
     defer ctx.Close()
 
     // Create math module
-    addFunc := ctx.Function(func(ctx *quickjs.Context, this *quickjs.Value, args []*quickjs.Value) *quickjs.Value {
+    addFunc := ctx.NewFunction(func(ctx *quickjs.Context, this *quickjs.Value, args []*quickjs.Value) *quickjs.Value {
         if len(args) >= 2 {
-            return ctx.Float64(args[0].Float64() + args[1].Float64())
+            return ctx.NewFloat64(args[0].ToFloat64() + args[1].ToFloat64())
         }
-        return ctx.Float64(0)
+        return ctx.NewFloat64(0)
     })
     defer addFunc.Free()
 
     mathModule := quickjs.NewModuleBuilder("math").
         Export("add", addFunc).
-        Export("PI", ctx.Float64(3.14159))
+        Export("PI", ctx.NewFloat64(3.14159))
 
     // Create string utilities module
-    upperFunc := ctx.Function(func(ctx *quickjs.Context, this *quickjs.Value, args []*quickjs.Value) *quickjs.Value {
+    upperFunc := ctx.NewFunction(func(ctx *quickjs.Context, this *quickjs.Value, args []*quickjs.Value) *quickjs.Value {
         if len(args) > 0 {
-            return ctx.String(strings.ToUpper(args[0].String()))
+            return ctx.NewString(strings.ToUpper(args[0].ToString()))
         }
-        return ctx.String("")
+        return ctx.NewString("")
     })
     defer upperFunc.Free()
 
@@ -1063,7 +1063,7 @@ func main() {
         panic(err)
     }
 
-    fmt.Println("Multiple modules result:", result.String())
+    fmt.Println("Multiple modules result:", result.ToString())
     // Output: Multiple modules result: RESULT: 4.14
 }
 ```
@@ -1118,9 +1118,9 @@ func main() {
             x, y := 0.0, 0.0
             name := "Unnamed Point"
             
-            if len(args) > 0 { x = args[0].Float64() }
-            if len(args) > 1 { y = args[1].Float64() }
-            if len(args) > 2 { name = args[2].String() }
+            if len(args) > 0 { x = args[0].ToFloat64() }
+            if len(args) > 1 { y = args[1].ToFloat64() }
+            if len(args) > 2 { name = args[2].ToString() }
             
             // Return Go object for automatic association
             return &Point{X: x, Y: y, Name: name}, nil
@@ -1129,44 +1129,44 @@ func main() {
         Accessor("x", 
             func(ctx *quickjs.Context, this *quickjs.Value) *quickjs.Value {
                 point, _ := this.GetGoObject()
-                return ctx.Float64(point.(*Point).X)
+                return ctx.NewFloat64(point.(*Point).X)
             },
             func(ctx *quickjs.Context, this *quickjs.Value, value *quickjs.Value) *quickjs.Value {
                 point, _ := this.GetGoObject()
-                point.(*Point).X = value.Float64()
-                return ctx.Undefined()
+                point.(*Point).X = value.ToFloat64()
+                return ctx.NewUndefined()
             }).
         Accessor("y",
             func(ctx *quickjs.Context, this *quickjs.Value) *quickjs.Value {
                 point, _ := this.GetGoObject()
-                return ctx.Float64(point.(*Point).Y)
+                return ctx.NewFloat64(point.(*Point).Y)
             },
             func(ctx *quickjs.Context, this *quickjs.Value, value *quickjs.Value) *quickjs.Value {
                 point, _ := this.GetGoObject()
-                point.(*Point).Y = value.Float64()
-                return ctx.Undefined()
+                point.(*Point).Y = value.ToFloat64()
+                return ctx.NewUndefined()
             }).
         // Properties are bound directly to each instance
-        Property("version", ctx.String("1.0.0")).
-        Property("type", ctx.String("Point")).
+        Property("version", ctx.NewString("1.0.0")).
+        Property("type", ctx.NewString("Point")).
         // Read-only property
-        Property("readOnly", ctx.Bool(true), quickjs.PropertyConfigurable).
+        Property("readOnly", ctx.NewBool(true), quickjs.PropertyConfigurable).
         // Instance methods
         Method("distance", func(ctx *quickjs.Context, this *quickjs.Value, args []*quickjs.Value) *quickjs.Value {
             point, _ := this.GetGoObject()
-            return ctx.Float64(point.(*Point).Distance())
+            return ctx.NewFloat64(point.(*Point).Distance())
         }).
         Method("move", func(ctx *quickjs.Context, this *quickjs.Value, args []*quickjs.Value) *quickjs.Value {
             point, _ := this.GetGoObject()
             dx, dy := 0.0, 0.0
-            if len(args) > 0 { dx = args[0].Float64() }
-            if len(args) > 1 { dy = args[1].Float64() }
+            if len(args) > 0 { dx = args[0].ToFloat64() }
+            if len(args) > 1 { dy = args[1].ToFloat64() }
             point.(*Point).Move(dx, dy)
-            return ctx.Undefined()
+            return ctx.NewUndefined()
         }).
         Method("getName", func(ctx *quickjs.Context, this *quickjs.Value, args []*quickjs.Value) *quickjs.Value {
             point, _ := this.GetGoObject()
-            return ctx.String(point.(*Point).Name)
+            return ctx.NewString(point.(*Point).Name)
         }).
         // Static method
         StaticMethod("origin", func(ctx *quickjs.Context, this *quickjs.Value, args []*quickjs.Value) *quickjs.Value {
@@ -1301,7 +1301,7 @@ func main() {
         return
     }
     
-    fmt.Println("Positional:", result1.String())
+    fmt.Println("Positional:", result1.ToString())
 
     // Use with named arguments (object parameter)
     result2 := ctx.Eval(`
@@ -1435,7 +1435,7 @@ func main() {
         return
     }
     
-    fmt.Println(result.Int32())
+    fmt.Println(result.ToInt32())
 }
 ```
 
@@ -1524,6 +1524,6 @@ func main() {
 
     result := ctx.Globals().Get("result")
     defer result.Free()
-    fmt.Println("Fibonacci result:", result.Int32())
+    fmt.Println("Fibonacci result:", result.ToInt32())
 }
 ```
