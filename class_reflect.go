@@ -57,10 +57,10 @@ func WithIgnoredFields(fields ...string) ReflectOption {
 //	constructor, classID, err := ctx.BindClass(&MyStruct{})
 //	if err != nil { return err }
 //	ctx.Globals().Set("MyStruct", constructor)
-func (ctx *Context) BindClass(structType interface{}, options ...ReflectOption) (*Value, uint32, error) {
+func (ctx *Context) BindClass(structType interface{}, options ...ReflectOption) (*Value, uint32) {
 	builder, err := ctx.BindClassBuilder(structType, options...)
 	if err != nil {
-		return nil, 0, err
+		return ctx.ThrowError(err), 0
 	}
 
 	return builder.Build(ctx)

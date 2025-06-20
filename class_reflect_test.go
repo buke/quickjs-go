@@ -146,14 +146,14 @@ func TestReflectionBasicBinding(t *testing.T) {
 	defer ctx.Close()
 
 	// Test basic class binding
-	constructor, classID, err := ctx.BindClass(&Person{})
-	require.NoError(t, err)
+	constructor, classID := ctx.BindClass(&Person{})
+	require.False(t, constructor.IsException())
 	require.NotEqual(t, uint32(0), classID)
 
 	ctx.Globals().Set("Person", constructor)
 
 	// Test instance creation and accessor access
-	result, err := ctx.Eval(`
+	result := ctx.Eval(`
         let person = new Person();
         person.firstName = "John";
         person.lastName = "Doe";
@@ -172,8 +172,9 @@ func TestReflectionBasicBinding(t *testing.T) {
             typeof person.private  // Should be undefined (private field)
         ];
     `)
-	require.NoError(t, err)
 	defer result.Free()
+
+	require.False(t, result.IsException())
 
 	require.Equal(t, "object", result.GetIdx(0).String())
 	require.Equal(t, "John", result.GetIdx(1).String())
@@ -191,13 +192,13 @@ func TestReflectionMethodCalls(t *testing.T) {
 	ctx := rt.NewContext()
 	defer ctx.Close()
 
-	constructor, _, err := ctx.BindClass(&Person{})
-	require.NoError(t, err)
+	constructor, _ := ctx.BindClass(&Person{})
+	require.False(t, constructor.IsException())
 
 	ctx.Globals().Set("Person", constructor)
 
 	// Test method calls and private method accessibility
-	result, err := ctx.Eval(`
+	result := ctx.Eval(`
         let person = new Person();
         person.firstName = "Alice";
         person.lastName = "Johnson";
@@ -211,8 +212,9 @@ func TestReflectionMethodCalls(t *testing.T) {
             typeof person.getSecret  // Should be undefined (private method)
         ];
     `)
-	require.NoError(t, err)
 	defer result.Free()
+
+	require.False(t, result.IsException())
 
 	require.Equal(t, "Alice Johnson", result.GetIdx(0).String())
 	require.Equal(t, int32(30), result.GetIdx(1).Int32())
@@ -226,13 +228,13 @@ func TestReflectionMultipleReturnValues(t *testing.T) {
 	ctx := rt.NewContext()
 	defer ctx.Close()
 
-	constructor, _, err := ctx.BindClass(&Person{})
-	require.NoError(t, err)
+	constructor, _ := ctx.BindClass(&Person{})
+	require.False(t, constructor.IsException())
 
 	ctx.Globals().Set("Person", constructor)
 
 	// Test method with multiple return values
-	result, err := ctx.Eval(`
+	result := ctx.Eval(`
         let person = new Person();
         person.firstName = "Bob";
         person.lastName = "Wilson";
@@ -242,8 +244,9 @@ func TestReflectionMultipleReturnValues(t *testing.T) {
         let profile = person.GetProfile(); // Returns array [fullName, age, isActive]
         [profile[0], profile[1], profile[2]];
     `)
-	require.NoError(t, err)
 	defer result.Free()
+
+	require.False(t, result.IsException())
 
 	require.Equal(t, "Bob Wilson", result.GetIdx(0).String())
 	require.Equal(t, int32(35), result.GetIdx(1).Int32())
@@ -260,8 +263,8 @@ func TestReflectionConstructorModes(t *testing.T) {
 	ctx := rt.NewContext()
 	defer ctx.Close()
 
-	constructor, _, err := ctx.BindClass(&Person{})
-	require.NoError(t, err)
+	constructor, _ := ctx.BindClass(&Person{})
+	require.False(t, constructor.IsException())
 
 	ctx.Globals().Set("Person", constructor)
 
@@ -294,14 +297,14 @@ func TestReflectionConstructorModes(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			result, err := ctx.Eval(fmt.Sprintf(`
+			result := ctx.Eval(fmt.Sprintf(`
                 (function() {
                     let person = %s;
                     return [person.firstName, person.lastName, person.age, person.salary, person.isActive];
                 })();
             `, tc.js))
-			require.NoError(t, err)
 			defer result.Free()
+			require.False(t, result.IsException())
 
 			for i, expected := range tc.want {
 				switch exp := expected.(type) {
@@ -330,12 +333,12 @@ func TestReflectionWithIgnoredFields(t *testing.T) {
 	defer ctx.Close()
 
 	// Test WithIgnoredFields option
-	constructor, _, err := ctx.BindClass(&ReflectionTestStruct{}, WithIgnoredFields("IgnoredOne", "IgnoredTwo"))
-	require.NoError(t, err)
+	constructor, _ := ctx.BindClass(&ReflectionTestStruct{}, WithIgnoredFields("IgnoredOne", "IgnoredTwo"))
+	require.False(t, constructor.IsException())
 
 	ctx.Globals().Set("ReflectionTestStruct", constructor)
 
-	result, err := ctx.Eval(`
+	result := ctx.Eval(`
         let obj = new ReflectionTestStruct();
         [
             typeof obj.field1,      // Should exist
@@ -344,8 +347,9 @@ func TestReflectionWithIgnoredFields(t *testing.T) {
             typeof obj.ignoredTwo   // Should be undefined (ignored)
         ];
     `)
-	require.NoError(t, err)
 	defer result.Free()
+
+	require.False(t, result.IsException())
 
 	require.Equal(t, "string", result.GetIdx(0).String())
 	require.Equal(t, "string", result.GetIdx(1).String())
@@ -363,12 +367,12 @@ func TestReflectionWithMethodPrefix(t *testing.T) {
 	builder, err := ctx.BindClassBuilder(&FilteredMethods{}, WithMethodPrefix("Get"))
 	require.NoError(t, err)
 
-	constructor, _, err := builder.Build(ctx)
-	require.NoError(t, err)
+	constructor, _ := builder.Build(ctx)
+	require.False(t, constructor.IsException())
 
 	ctx.Globals().Set("Filtered", constructor)
 
-	result, err := ctx.Eval(`
+	result := ctx.Eval(`
         let obj = new Filtered();
         [
             typeof obj.GetData,      // Should exist
@@ -377,8 +381,9 @@ func TestReflectionWithMethodPrefix(t *testing.T) {
             typeof obj.ProcessData   // Should be undefined (no Get prefix)
         ];
     `)
-	require.NoError(t, err)
 	defer result.Free()
+
+	require.False(t, result.IsException())
 
 	require.Equal(t, "function", result.GetIdx(0).String())
 	require.Equal(t, "function", result.GetIdx(1).String())
@@ -396,12 +401,12 @@ func TestReflectionWithIgnoredMethods(t *testing.T) {
 	builder, err := ctx.BindClassBuilder(&FilteredMethods{}, WithIgnoredMethods("GetInfo", "ProcessData"))
 	require.NoError(t, err)
 
-	constructor, _, err := builder.Build(ctx)
-	require.NoError(t, err)
+	constructor, _ := builder.Build(ctx)
+	require.False(t, constructor.IsException())
 
 	ctx.Globals().Set("Filtered", constructor)
 
-	result, err := ctx.Eval(`
+	result := ctx.Eval(`
         let obj = new Filtered();
         [
             typeof obj.GetData,      // Should exist
@@ -410,8 +415,9 @@ func TestReflectionWithIgnoredMethods(t *testing.T) {
             typeof obj.ProcessData   // Should be undefined (ignored)
         ];
     `)
-	require.NoError(t, err)
 	defer result.Free()
+
+	require.False(t, result.IsException())
 
 	require.Equal(t, "function", result.GetIdx(0).String())
 	require.Equal(t, "undefined", result.GetIdx(1).String())
@@ -466,9 +472,9 @@ func TestReflectionInputValidation(t *testing.T) {
 			Age  int    `js:"age"`
 		}{}
 
-		_, _, err := ctx.BindClass(anonymousStruct)
-		require.Error(t, err)
-		require.Contains(t, err.Error(), "cannot determine class name from anonymous type")
+		ret, _ := ctx.BindClass(anonymousStruct)
+		require.True(t, ret.IsException())
+		require.Contains(t, ctx.Exception().Error(), "cannot determine class name from anonymous type")
 	})
 
 	t.Run("AnonymousStructPointer", func(t *testing.T) {
@@ -520,14 +526,14 @@ func TestReflectionMethodArgumentErrors(t *testing.T) {
 	ctx := rt.NewContext()
 	defer ctx.Close()
 
-	constructor, _, err := ctx.BindClass(&MethodTestStruct{})
-	require.NoError(t, err)
+	constructor, _ := ctx.BindClass(&MethodTestStruct{})
+	require.False(t, constructor.IsException())
 
 	ctx.Globals().Set("MethodTest", constructor)
 
 	// Test too many arguments
 	t.Run("TooManyArguments", func(t *testing.T) {
-		result, err := ctx.Eval(`
+		result := ctx.Eval(`
             (function() {
                 let obj = new MethodTest();
                 try {
@@ -538,14 +544,14 @@ func TestReflectionMethodArgumentErrors(t *testing.T) {
                 }
             })();
         `)
-		require.NoError(t, err)
 		defer result.Free()
+		require.False(t, result.IsException())
 		require.Contains(t, result.String(), "too many arguments")
 	})
 
 	// Test argument conversion errors
 	t.Run("ArgumentConversionError", func(t *testing.T) {
-		result, err := ctx.Eval(`
+		result := ctx.Eval(`
             (function() {
                 let obj = new MethodTest();
                 try {
@@ -556,22 +562,22 @@ func TestReflectionMethodArgumentErrors(t *testing.T) {
                 }
             })();
         `)
-		require.NoError(t, err)
 		defer result.Free()
+		require.False(t, result.IsException())
 		require.Contains(t, result.String(), "failed to convert argument")
 	})
 
 	// Test missing arguments (zero value filling)
 	t.Run("MissingArguments", func(t *testing.T) {
-		result, err := ctx.Eval(`
+		result := ctx.Eval(`
             (function() {
                 let obj = new MethodTest();
                 // Call MultipleArgs with only 1 argument, others should use zero values
                 return obj.MultipleArgs(42); // Should be "42--false"
             })();
         `)
-		require.NoError(t, err)
 		defer result.Free()
+		require.False(t, result.IsException())
 		require.Equal(t, "42--false", result.String())
 	})
 }
@@ -586,13 +592,13 @@ func TestReflectionConstructorErrors(t *testing.T) {
 	ctx := rt.NewContext()
 	defer ctx.Close()
 
-	constructor, _, err := ctx.BindClass(&Person{})
-	require.NoError(t, err)
+	constructor, _ := ctx.BindClass(&Person{})
+	require.False(t, constructor.IsException())
 	ctx.Globals().Set("Person", constructor)
 
 	// Test positional argument conversion error
 	t.Run("PositionalArgumentError", func(t *testing.T) {
-		ret, err := ctx.Eval(`
+		ret := ctx.Eval(`
             try {
                 // Pass an object where an int is expected for age
                 new Person("John", "Doe", {invalid: "object"}, 50000, true);
@@ -601,13 +607,16 @@ func TestReflectionConstructorErrors(t *testing.T) {
             }
         `)
 		defer ret.Free()
+		require.True(t, ret.IsException())
+
+		err := ctx.Exception()
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "constructor initialization failed")
 	})
 
 	// Test object argument conversion error
 	t.Run("ObjectArgumentError", func(t *testing.T) {
-		ret, err := ctx.Eval(`
+		ret := ctx.Eval(`
             try {
                 // Pass an object where an int is expected for age accessor
                 new Person({
@@ -620,6 +629,9 @@ func TestReflectionConstructorErrors(t *testing.T) {
             }
         `)
 		defer ret.Free()
+		require.True(t, ret.IsException())
+
+		err := ctx.Exception()
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "constructor initialization failed")
 	})
@@ -628,7 +640,7 @@ func TestReflectionConstructorErrors(t *testing.T) {
 	t.Run("PositionalArgsSkipUnexportedFields", func(t *testing.T) {
 		// Person struct has: FirstName, LastName, Age, Salary, IsActive (exported)
 		// and private (unexported) - this should be skipped during positional initialization
-		result, err := ctx.Eval(`
+		result := ctx.Eval(`
             (function() {
                 // Pass 5 arguments for the 5 exported fields
                 // The private field should be skipped (continue branch)
@@ -643,8 +655,8 @@ func TestReflectionConstructorErrors(t *testing.T) {
                 ];
             })();
         `)
-		require.NoError(t, err)
 		defer result.Free()
+		require.False(t, result.IsException())
 
 		require.Equal(t, "Alice", result.GetIdx(0).String())
 		require.Equal(t, "Smith", result.GetIdx(1).String())
@@ -661,12 +673,12 @@ func TestReflectionAccessorSetterErrors(t *testing.T) {
 	ctx := rt.NewContext()
 	defer ctx.Close()
 
-	constructor, _, err := ctx.BindClass(&Person{})
-	require.NoError(t, err)
+	constructor, _ := ctx.BindClass(&Person{})
+	require.False(t, constructor.IsException())
 	ctx.Globals().Set("Person", constructor)
 
 	// Test accessor setter conversion error
-	result, err := ctx.Eval(`
+	result := ctx.Eval(`
         (function() {
             let person = new Person();
             try {
@@ -678,8 +690,8 @@ func TestReflectionAccessorSetterErrors(t *testing.T) {
             }
         })();
     `)
-	require.NoError(t, err)
 	defer result.Free()
+	require.False(t, result.IsException())
 	require.Contains(t, result.String(), "failed to unmarshal value for field")
 }
 
@@ -689,12 +701,12 @@ func TestReflectionMarshalErrors(t *testing.T) {
 	ctx := rt.NewContext()
 	defer ctx.Close()
 
-	constructor, _, err := ctx.BindClass(&ProblematicStruct{})
-	require.NoError(t, err)
+	constructor, _ := ctx.BindClass(&ProblematicStruct{})
+	require.False(t, constructor.IsException())
 	ctx.Globals().Set("ProblematicStruct", constructor)
 
 	// Test accessor getter marshal error
-	result, err := ctx.Eval(`
+	result := ctx.Eval(`
         (function() {
             let obj = new ProblematicStruct();
             try {
@@ -705,12 +717,12 @@ func TestReflectionMarshalErrors(t *testing.T) {
             }
         })();
     `)
-	require.NoError(t, err)
 	defer result.Free()
+	require.False(t, result.IsException())
 	require.Contains(t, result.String(), "failed to marshal field")
 
 	// Test method return value marshal error
-	result2, err := ctx.Eval(`
+	result2 := ctx.Eval(`
         (function() {
             let obj = new ProblematicStruct();
             try {
@@ -721,12 +733,12 @@ func TestReflectionMarshalErrors(t *testing.T) {
             }
         })();
     `)
-	require.NoError(t, err)
 	defer result2.Free()
+	require.False(t, result2.IsException())
 	require.Contains(t, result2.String(), "failed to marshal return value")
 
 	// Test multiple return values marshal error
-	result3, err := ctx.Eval(`
+	result3 := ctx.Eval(`
         (function() {
             let obj = new ProblematicStruct();
             try {
@@ -737,8 +749,8 @@ func TestReflectionMarshalErrors(t *testing.T) {
             }
         })();
     `)
-	require.NoError(t, err)
 	defer result3.Free()
+	require.False(t, result3.IsException())
 	require.Contains(t, result3.String(), "failed to marshal return values")
 }
 
@@ -748,12 +760,12 @@ func TestReflectionFieldTagEdgeCases(t *testing.T) {
 	ctx := rt.NewContext()
 	defer ctx.Close()
 
-	constructor, _, err := ctx.BindClass(&EdgeCaseStruct{})
-	require.NoError(t, err)
+	constructor, _ := ctx.BindClass(&EdgeCaseStruct{})
+	require.False(t, constructor.IsException())
 	ctx.Globals().Set("EdgeCaseStruct", constructor)
 
 	// Test accessor names with empty tag names
-	result, err := ctx.Eval(`
+	result := ctx.Eval(`
         (function() {
             let obj = new EdgeCaseStruct();
             obj.field1 = "test1";  // js:",omitempty" -> should use camelCase field name
@@ -764,8 +776,8 @@ func TestReflectionFieldTagEdgeCases(t *testing.T) {
             return [obj.field1, obj.field2, obj.field3, obj.field4];
         })();
     `)
-	require.NoError(t, err)
 	defer result.Free()
+	require.False(t, result.IsException())
 
 	require.Equal(t, "test1", result.GetIdx(0).String())
 	require.Equal(t, "test2", result.GetIdx(1).String())
@@ -783,13 +795,13 @@ func TestReflectionComplexTypes(t *testing.T) {
 	ctx := rt.NewContext()
 	defer ctx.Close()
 
-	constructor, _, err := ctx.BindClass(&Vehicle{})
-	require.NoError(t, err)
+	constructor, _ := ctx.BindClass(&Vehicle{})
+	require.False(t, constructor.IsException())
 
 	ctx.Globals().Set("Vehicle", constructor)
 
 	// Test complex struct with nested objects, maps, and arrays
-	result, err := ctx.Eval(`
+	result := ctx.Eval(`
         let car = new Vehicle({
             brand: "Toyota",
             model: "Camry",
@@ -810,8 +822,8 @@ func TestReflectionComplexTypes(t *testing.T) {
             car.GetDescription()
         ];
     `)
-	require.NoError(t, err)
 	defer result.Free()
+	require.False(t, result.IsException())
 
 	require.Equal(t, "Toyota", result.GetIdx(0).String())
 	require.Equal(t, "Camry", result.GetIdx(1).String())
@@ -831,75 +843,75 @@ func TestReflectionEdgeCases(t *testing.T) {
 
 	// Test empty struct
 	t.Run("EmptyStruct", func(t *testing.T) {
-		constructor, _, err := ctx.BindClass(&EmptyStruct{})
-		require.NoError(t, err)
+		constructor, _ := ctx.BindClass(&EmptyStruct{})
+		require.False(t, constructor.IsException())
 
 		ctx.Globals().Set("EmptyStruct", constructor)
 
-		result, err := ctx.Eval(`
+		result := ctx.Eval(`
             (function() {
                 let obj = new EmptyStruct();
                 return typeof obj;
             })();
         `)
-		require.NoError(t, err)
 		defer result.Free()
+		require.False(t, result.IsException())
 		require.Equal(t, "object", result.String())
 	})
 
 	// Test struct with only private fields
 	t.Run("OnlyPrivateFields", func(t *testing.T) {
-		constructor, _, err := ctx.BindClass(&PrivateStruct{})
-		require.NoError(t, err)
+		constructor, _ := ctx.BindClass(&PrivateStruct{})
+		require.False(t, constructor.IsException())
 
 		ctx.Globals().Set("PrivateStruct", constructor)
 
-		result, err := ctx.Eval(`
+		result := ctx.Eval(`
             (function() {
                 let obj = new PrivateStruct();
                 return Object.keys(obj).length; // Should have no enumerable accessors
             })();
         `)
-		require.NoError(t, err)
 		defer result.Free()
+		require.False(t, result.IsException())
 		require.Equal(t, int32(0), result.Int32())
 	})
 
 	// Test method with zero return values
 	t.Run("VoidMethod", func(t *testing.T) {
-		constructor, _, err := ctx.BindClass(&VoidStruct{})
-		require.NoError(t, err)
+		constructor, _ := ctx.BindClass(&VoidStruct{})
+		require.False(t, constructor.IsException())
 
 		ctx.Globals().Set("VoidStruct", constructor)
 
-		result, err := ctx.Eval(`
+		result := ctx.Eval(`
             (function() {
                 let obj = new VoidStruct();
                 let returnValue = obj.VoidMethod();
                 return typeof returnValue; // Should be undefined
             })();
         `)
-		require.NoError(t, err)
 		defer result.Free()
+		require.False(t, result.IsException())
 		require.Equal(t, "undefined", result.String())
 	})
 
 	// Test valid reflect.Type input
 	t.Run("ValidReflectType", func(t *testing.T) {
 		personType := reflect.TypeOf(Person{})
-		constructor, _, err := ctx.BindClass(personType)
-		require.NoError(t, err)
+		constructor, _ := ctx.BindClass(personType)
+		require.False(t, constructor.IsException())
 
 		ctx.Globals().Set("PersonFromType", constructor)
 
-		result, err := ctx.Eval(`
+		result := ctx.Eval(`
             (function() {
                 let person = new PersonFromType();
                 return typeof person;
             })();
         `)
-		require.NoError(t, err)
 		defer result.Free()
+		require.False(t, result.IsException())
 		require.Equal(t, "object", result.String())
 	})
 }
@@ -910,12 +922,12 @@ func TestReflectionMethodOnNonClassInstance(t *testing.T) {
 	ctx := rt.NewContext()
 	defer ctx.Close()
 
-	constructor, _, err := ctx.BindClass(&Person{})
-	require.NoError(t, err)
+	constructor, _ := ctx.BindClass(&Person{})
+	require.False(t, constructor.IsException())
 	ctx.Globals().Set("Person", constructor)
 
 	// Test calling class method on wrong object type
-	result, err := ctx.Eval(`
+	result := ctx.Eval(`
         (function() {
             let person = new Person();
             let fakeObj = {};
@@ -929,8 +941,8 @@ func TestReflectionMethodOnNonClassInstance(t *testing.T) {
             }
         })();
     `)
-	require.NoError(t, err)
 	defer result.Free()
+	require.False(t, result.IsException())
 	require.Contains(t, result.String(), "failed to get instance data")
 }
 
@@ -940,12 +952,12 @@ func TestReflectionAccessorGetterOnNonClassInstance(t *testing.T) {
 	ctx := rt.NewContext()
 	defer ctx.Close()
 
-	constructor, _, err := ctx.BindClass(&Person{})
-	require.NoError(t, err)
+	constructor, _ := ctx.BindClass(&Person{})
+	require.False(t, constructor.IsException())
 	ctx.Globals().Set("Person", constructor)
 
 	// Test accessing accessor getter on wrong object type - covers createFieldGetter error branch
-	result, err := ctx.Eval(`
+	result := ctx.Eval(`
         (function() {
             let person = new Person();
             let fakeObj = {};
@@ -960,8 +972,8 @@ func TestReflectionAccessorGetterOnNonClassInstance(t *testing.T) {
             }
         })();
     `)
-	require.NoError(t, err)
 	defer result.Free()
+	require.False(t, result.IsException())
 	require.Contains(t, result.String(), "failed to get instance data")
 }
 
@@ -971,12 +983,12 @@ func TestReflectionAccessorSetterOnNonClassInstance(t *testing.T) {
 	ctx := rt.NewContext()
 	defer ctx.Close()
 
-	constructor, _, err := ctx.BindClass(&Person{})
-	require.NoError(t, err)
+	constructor, _ := ctx.BindClass(&Person{})
+	require.False(t, constructor.IsException())
 	ctx.Globals().Set("Person", constructor)
 
 	// Test accessing accessor setter on wrong object type - covers createFieldSetter error branch
-	result, err := ctx.Eval(`
+	result := ctx.Eval(`
         (function() {
             let person = new Person();
             let fakeObj = {};
@@ -991,7 +1003,7 @@ func TestReflectionAccessorSetterOnNonClassInstance(t *testing.T) {
             }
         })();
     `)
-	require.NoError(t, err)
 	defer result.Free()
+	require.False(t, result.IsException())
 	require.Contains(t, result.String(), "failed to get instance data")
 }

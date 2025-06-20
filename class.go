@@ -251,8 +251,8 @@ func (cb *ClassBuilder) StaticProperty(name string, value *Value, flags ...int) 
 
 // Build creates and registers the JavaScript class in the given context
 // Returns the constructor function and classID for NewInstance
-func (cb *ClassBuilder) Build(ctx *Context) (*Value, uint32, error) {
-	return ctx.createClass(cb)
+func (cb *ClassBuilder) Build(ctx *Context) (*Value, uint32) {
+	return createClass(ctx, cb)
 }
 
 // =============================================================================
@@ -269,10 +269,10 @@ func validateClassBuilder(builder *ClassBuilder) error {
 
 // createClass implements the core class creation logic using C layer optimization
 // MODIFIED FOR SCHEME C: Now stores entire ClassBuilder and separates static/instance properties
-func (ctx *Context) createClass(builder *ClassBuilder) (*Value, uint32, error) {
+func createClass(ctx *Context, builder *ClassBuilder) (*Value, uint32) {
 	// Step 1: Input validation (keep in Go layer for business logic) - unchanged
 	if err := validateClassBuilder(builder); err != nil {
-		return ctx.ThrowError(err), 0, err
+		return ctx.ThrowError(err), 0
 	}
 
 	// Step 2: Go layer manages class name and JSClassDef memory - unchanged
@@ -434,7 +434,7 @@ func (ctx *Context) createClass(builder *ClassBuilder) (*Value, uint32, error) {
 		// Note: Don't clean up className and classDef - let Go GC handle them
 		// The C function failed, so QuickJS isn't using them
 
-		return &Value{ctx: ctx, ref: constructor}, 0, ctx.Exception()
+		return &Value{ctx: ctx, ref: constructor}, 0
 	}
 
 	// SCHEME C STEP 11: Register constructor -> classID mapping for constructor proxy access
@@ -446,5 +446,5 @@ func (ctx *Context) createClass(builder *ClassBuilder) (*Value, uint32, error) {
 	// - classID: returned via pointer from C function
 	// - All handlers: stored in handleStore for proper cleanup
 	// - ClassBuilder: stored in handleStore for constructor proxy access
-	return &Value{ctx: ctx, ref: constructor}, uint32(classID), nil
+	return &Value{ctx: ctx, ref: constructor}, uint32(classID)
 }

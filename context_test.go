@@ -75,15 +75,15 @@ func TestContextEvaluation(t *testing.T) {
 
 	t.Run("BasicEvaluation", func(t *testing.T) {
 		// Simple expression
-		result, err := ctx.Eval(`1 + 2`)
-		require.NoError(t, err)
+		result := ctx.Eval(`1 + 2`)
 		defer result.Free()
+		require.False(t, result.IsException())
 		require.EqualValues(t, 3, result.ToInt32())
 
 		// Empty code
-		result2, err := ctx.Eval(``)
-		require.NoError(t, err)
+		result2 := ctx.Eval(``)
 		defer result2.Free()
+		require.False(t, result2.IsException())
 	})
 
 	t.Run("EvaluationOptions", func(t *testing.T) {
@@ -101,15 +101,19 @@ func TestContextEvaluation(t *testing.T) {
 
 		for _, tt := range optionTests {
 			t.Run(tt.name, func(t *testing.T) {
-				result, err := ctx.Eval(tt.code, tt.options...)
-				require.NoError(t, err)
+				result := ctx.Eval(tt.code, tt.options...)
 				defer result.Free()
+				require.False(t, result.IsException())
 			})
 		}
 	})
 
 	t.Run("EvaluationErrors", func(t *testing.T) {
-		_, err := ctx.Eval(`invalid syntax {`)
+		result := ctx.Eval(`invalid syntax {`)
+		defer result.Free()
+		require.True(t, result.IsException())
+
+		err := ctx.Exception()
 		require.Error(t, err)
 	})
 }
@@ -127,9 +131,9 @@ func TestContextBytecodeOperations(t *testing.T) {
 		require.NotEmpty(t, bytecode)
 
 		// Execute bytecode
-		result, err := ctx.EvalBytecode(bytecode)
-		require.NoError(t, err)
+		result := ctx.EvalBytecode(bytecode)
 		defer result.Free()
+		require.False(t, result.IsException())
 		require.EqualValues(t, 5, result.ToInt32())
 	})
 
@@ -141,9 +145,9 @@ func TestContextBytecodeOperations(t *testing.T) {
 		defer os.Remove(testFile)
 
 		// EvalFile with options
-		resultFromFile, err := ctx.EvalFile(testFile, EvalFlagStrict(true))
-		require.NoError(t, err)
+		resultFromFile := ctx.EvalFile(testFile, EvalFlagStrict(true))
 		defer resultFromFile.Free()
+		require.False(t, resultFromFile.IsException())
 		require.EqualValues(t, 12, resultFromFile.ToInt32())
 
 		// CompileFile tests
@@ -159,18 +163,36 @@ func TestContextBytecodeOperations(t *testing.T) {
 	t.Run("ErrorCases", func(t *testing.T) {
 		errorTests := []struct {
 			name string
-			test func() error
+			test func() bool // Changed to return bool indicating if exception occurred
 		}{
-			{"EmptyBytecode", func() error { _, err := ctx.EvalBytecode([]byte{}); return err }},
-			{"InvalidBytecode", func() error { _, err := ctx.EvalBytecode([]byte{0x01, 0x02, 0x03}); return err }},
-			{"NonexistentFile", func() error { _, err := ctx.EvalFile("./nonexistent.js"); return err }},
-			{"CompileNonexistentFile", func() error { _, err := ctx.CompileFile("./nonexistent.js"); return err }},
-			{"CompilationError", func() error { _, err := ctx.Compile(`invalid syntax {`); return err }},
+			{"EmptyBytecode", func() bool {
+				result := ctx.EvalBytecode([]byte{})
+				defer result.Free()
+				return result.IsException()
+			}},
+			{"InvalidBytecode", func() bool {
+				result := ctx.EvalBytecode([]byte{0x01, 0x02, 0x03})
+				defer result.Free()
+				return result.IsException()
+			}},
+			{"NonexistentFile", func() bool {
+				result := ctx.EvalFile("./nonexistent.js")
+				defer result.Free()
+				return result.IsException()
+			}},
+			{"CompileNonexistentFile", func() bool {
+				_, err := ctx.CompileFile("./nonexistent.js")
+				return err != nil
+			}},
+			{"CompilationError", func() bool {
+				_, err := ctx.Compile(`invalid syntax {`)
+				return err != nil
+			}},
 		}
 
 		for _, tt := range errorTests {
 			t.Run(tt.name, func(t *testing.T) {
-				require.Error(t, tt.test())
+				require.True(t, tt.test())
 			})
 		}
 
@@ -179,7 +201,11 @@ func TestContextBytecodeOperations(t *testing.T) {
 		invalidBytecode, err := ctx.Compile(invalidCode)
 		require.NoError(t, err)
 
-		_, err = ctx.EvalBytecode(invalidBytecode)
+		result := ctx.EvalBytecode(invalidBytecode)
+		defer result.Free()
+		require.True(t, result.IsException())
+
+		err = ctx.Exception()
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "test exception during evaluation")
 	})
@@ -192,17 +218,17 @@ func TestContextBytecodeOperations(t *testing.T) {
 
 		// Test normal function compilation
 		normalCode := `(function() { return 42; })`
-		r, e := ctx.Eval(normalCode)
+		r := ctx.Eval(normalCode)
 		defer r.Free()
-		require.NoError(t, e)
+		require.False(t, r.IsException())
 
 		bytecode, err = ctx.Compile(normalCode)
 		require.NoError(t, err)
 		require.NotEmpty(t, bytecode)
 
-		result, err := ctx.EvalBytecode(bytecode)
-		require.NoError(t, err)
+		result := ctx.EvalBytecode(bytecode)
 		defer result.Free()
+		require.False(t, result.IsException())
 		require.True(t, result.IsFunction())
 	})
 }
@@ -217,14 +243,14 @@ func TestContextModules(t *testing.T) {
 
 	t.Run("ModuleLoading", func(t *testing.T) {
 		// Basic module loading
-		result, err := ctx.LoadModule(moduleCode, "math_module")
-		require.NoError(t, err)
+		result := ctx.LoadModule(moduleCode, "math_module")
 		defer result.Free()
+		require.False(t, result.IsException())
 
 		// Module with load_only option
-		result2, err := ctx.LoadModule(moduleCode, "math_module2", EvalLoadOnly(true))
-		require.NoError(t, err)
+		result2 := ctx.LoadModule(moduleCode, "math_module2", EvalLoadOnly(true))
 		defer result2.Free()
+		require.False(t, result2.IsException())
 	})
 
 	t.Run("ModuleBytecode", func(t *testing.T) {
@@ -232,14 +258,14 @@ func TestContextModules(t *testing.T) {
 		require.NoError(t, err)
 
 		// Basic bytecode loading
-		result, err := ctx.LoadModuleBytecode(bytecode)
-		require.NoError(t, err)
+		result := ctx.LoadModuleBytecode(bytecode)
 		defer result.Free()
+		require.False(t, result.IsException())
 
 		// Bytecode loading with load_only flag
-		result2, err := ctx.LoadModuleBytecode(bytecode, EvalLoadOnly(true))
-		require.NoError(t, err)
+		result2 := ctx.LoadModuleBytecode(bytecode, EvalLoadOnly(true))
 		defer result2.Free()
+		require.False(t, result2.IsException())
 	})
 
 	t.Run("ModuleFiles", func(t *testing.T) {
@@ -250,9 +276,9 @@ func TestContextModules(t *testing.T) {
 		defer os.Remove(moduleFile)
 
 		// LoadModuleFile
-		moduleResult, err := ctx.LoadModuleFile(moduleFile, "test_module")
-		require.NoError(t, err)
+		moduleResult := ctx.LoadModuleFile(moduleFile, "test_module")
 		defer moduleResult.Free()
+		require.False(t, moduleResult.IsException())
 
 		// CompileModule tests
 		compiledModule, err := ctx.CompileModule(moduleFile, "compiled_module")
@@ -267,23 +293,48 @@ func TestContextModules(t *testing.T) {
 	t.Run("ModuleErrors", func(t *testing.T) {
 		errorTests := []struct {
 			name string
-			test func() error
+			test func() bool // Changed to return bool indicating if exception occurred
 		}{
-			{"NotModule", func() error { _, err := ctx.LoadModule(`var x = 1; x;`, "not_module"); return err }},
-			{"InvalidModule", func() error { _, err := ctx.LoadModule(`export { unclosed_brace`, "invalid_module"); return err }},
-			{"EmptyBytecode", func() error { _, err := ctx.LoadModuleBytecode([]byte{}); return err }},
-			{"InvalidBytecode", func() error { _, err := ctx.LoadModuleBytecode([]byte{0x01, 0x02, 0x03}); return err }},
-			{"MissingFile", func() error { _, err := ctx.LoadModuleFile("./nonexistent_file.js", "missing"); return err }},
-			{"ModuleThrowsError", func() error {
-				_, err := ctx.LoadModule(`export default 123; throw new Error('aah')`, "mod")
-				return err
+			{"NotModule", func() bool {
+				result := ctx.LoadModule(`var x = 1; x;`, "not_module")
+				defer result.Free()
+				return result.IsException()
 			}},
-			{"ModuleUndefinedVariable", func() error { _, err := ctx.LoadModule(`export default 123; blah`, "mod"); return err }},
+			{"InvalidModule", func() bool {
+				result := ctx.LoadModule(`export { unclosed_brace`, "invalid_module")
+				defer result.Free()
+				return result.IsException()
+			}},
+			{"EmptyBytecode", func() bool {
+				result := ctx.LoadModuleBytecode([]byte{})
+				defer result.Free()
+				return result.IsException()
+			}},
+			{"InvalidBytecode", func() bool {
+				result := ctx.LoadModuleBytecode([]byte{0x01, 0x02, 0x03})
+				defer result.Free()
+				return result.IsException()
+			}},
+			{"MissingFile", func() bool {
+				result := ctx.LoadModuleFile("./nonexistent_file.js", "missing")
+				defer result.Free()
+				return result.IsException()
+			}},
+			{"ModuleThrowsError", func() bool {
+				result := ctx.LoadModule(`export default 123; throw new Error('aah')`, "mod")
+				defer result.Free()
+				return result.IsException()
+			}},
+			{"ModuleUndefinedVariable", func() bool {
+				result := ctx.LoadModule(`export default 123; blah`, "mod")
+				defer result.Free()
+				return result.IsException()
+			}},
 		}
 
 		for _, tt := range errorTests {
 			t.Run(tt.name, func(t *testing.T) {
-				require.Error(t, tt.test())
+				require.True(t, tt.test())
 			})
 		}
 	})
@@ -334,9 +385,9 @@ func TestContextFunctions(t *testing.T) {
 		})
 
 		ctx.Globals().Set("testAsync", asyncFn)
-		result, err := ctx.Eval(`testAsync()`, EvalAwait(true))
-		require.NoError(t, err)
+		result := ctx.Eval(`testAsync()`, EvalAwait(true))
 		defer result.Free()
+		require.False(t, result.IsException())
 		require.EqualValues(t, "async result", result.String())
 	})
 }
@@ -348,7 +399,7 @@ func TestContextErrorHandling(t *testing.T) {
 	defer ctx.Close()
 
 	t.Run("ErrorCreation", func(t *testing.T) {
-		testErr := errors.New("test error")
+		testErr := errors.New("test error message")
 		errorVal := ctx.Error(testErr)
 		defer errorVal.Free()
 		require.True(t, errorVal.IsError())
@@ -439,7 +490,11 @@ func TestContextUtilities(t *testing.T) {
 			return 1 // Interrupt
 		})
 
-		_, err := ctx.Eval(`while(true){}`)
+		result := ctx.Eval(`while(true){}`)
+		defer result.Free()
+		require.True(t, result.IsException())
+
+		err := ctx.Exception()
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "interrupted")
 		require.True(t, interruptCalled)
@@ -453,18 +508,18 @@ func TestContextAsync(t *testing.T) {
 	defer ctx.Close()
 
 	t.Run("EventLoop", func(t *testing.T) {
-		result, err := ctx.Eval(`
+		result := ctx.Eval(`
             var executed = false;
             setTimeout(() => { executed = true; }, 10);
         `)
-		require.NoError(t, err)
 		defer result.Free()
+		require.False(t, result.IsException())
 
 		ctx.Loop()
 
-		executedResult, err := ctx.Eval(`executed`)
-		require.NoError(t, err)
+		executedResult := ctx.Eval(`executed`)
 		defer executedResult.Free()
+		require.False(t, executedResult.IsException())
 		require.True(t, executedResult.ToBool())
 	})
 
@@ -478,13 +533,13 @@ func TestContextAsync(t *testing.T) {
 		})
 		ctx.Globals().Set("asyncTest", asyncTestFn)
 
-		promiseResult, err := ctx.Eval(`asyncTest()`)
-		require.NoError(t, err)
+		promiseResult := ctx.Eval(`asyncTest()`)
+		require.False(t, promiseResult.IsException())
 		require.True(t, promiseResult.IsPromise())
 
-		awaitedResult, err := ctx.Await(promiseResult)
-		require.NoError(t, err)
+		awaitedResult := ctx.Await(promiseResult)
 		defer awaitedResult.Free()
+		require.False(t, awaitedResult.IsException())
 		require.EqualValues(t, "awaited result", awaitedResult.String())
 
 		// Test rejected promise using new Promise API
@@ -497,11 +552,13 @@ func TestContextAsync(t *testing.T) {
 		})
 		ctx.Globals().Set("asyncReject", asyncRejectFn)
 
-		rejectPromise, err := ctx.Eval(`asyncReject()`)
-		require.NoError(t, err)
+		rejectPromise := ctx.Eval(`asyncReject()`)
+		require.False(t, rejectPromise.IsException())
 
-		_, err = ctx.Await(rejectPromise)
-		require.Error(t, err)
+		rejectedResult := ctx.Await(rejectPromise)
+		defer rejectedResult.Free()
+		require.True(t, rejectedResult.IsException())
+		require.Contains(t, ctx.Exception().Error(), "rejection reason")
 	})
 }
 
@@ -520,9 +577,9 @@ func TestContextPromise(t *testing.T) {
 		require.True(t, promise.IsPromise())
 		require.Equal(t, PromiseFulfilled, promise.PromiseState())
 
-		result, err := promise.Await()
-		require.NoError(t, err)
+		result := promise.Await()
 		defer result.Free()
+		require.False(t, result.IsException())
 		require.Equal(t, "success", result.String())
 	})
 
@@ -538,9 +595,9 @@ func TestContextPromise(t *testing.T) {
 		state := promise.PromiseState()
 		require.Equal(t, PromiseRejected, state)
 
-		_, err := promise.Await()
-		require.Error(t, err)
-		require.Contains(t, err.Error(), "error")
+		result := promise.Await()
+		defer result.Free()
+		require.True(t, result.IsException())
 	})
 
 	t.Run("PromiseFunction", func(t *testing.T) {
@@ -562,19 +619,21 @@ func TestContextPromise(t *testing.T) {
 		global.Set("asyncGreet", asyncFn)
 
 		// Test with argument
-		result1, err := ctx.Eval(`asyncGreet("World")`)
-		require.NoError(t, err)
+		result1 := ctx.Eval(`asyncGreet("World")`)
+		require.False(t, result1.IsException())
 
-		final1, err := result1.Await()
-		require.NoError(t, err)
+		final1 := result1.Await()
+		defer final1.Free()
+		require.False(t, final1.IsException())
 		require.Equal(t, "Hello World", final1.String())
 
 		// Test without argument (should reject)
-		result2, err := ctx.Eval(`asyncGreet()`)
-		require.NoError(t, err)
+		result2 := ctx.Eval(`asyncGreet()`)
+		require.False(t, result2.IsException())
 
-		_, err = result2.Await()
-		require.Error(t, err)
+		final2 := result2.Await()
+		defer final2.Free()
+		require.True(t, final2.IsException())
 	})
 
 	t.Run("PromiseChaining", func(t *testing.T) {
@@ -596,34 +655,34 @@ func TestContextPromise(t *testing.T) {
 		global.Set("asyncDouble", asyncDouble)
 
 		// Test promise chaining
-		result, err := ctx.Eval(`
+		result := ctx.Eval(`
             asyncDouble(5)
                 .then(x => asyncDouble(x))
                 .then(x => x + 10)
         `)
-		require.NoError(t, err)
+		require.False(t, result.IsException())
 
-		final, err := result.Await()
-		require.NoError(t, err)
+		final := result.Await()
 		defer final.Free()
+		require.False(t, final.IsException())
 		require.Equal(t, int32(30), final.ToInt32()) // 5 * 2 * 2 + 10 = 30
 	})
 
 	t.Run("PromiseState", func(t *testing.T) {
 		// Test different promise states
-		pendingPromise, err := ctx.Eval(`new Promise(() => {})`) // Never resolves
-		require.NoError(t, err)
+		pendingPromise := ctx.Eval(`new Promise(() => {})`) // Never resolves
 		defer pendingPromise.Free()
+		require.False(t, pendingPromise.IsException())
 		require.Equal(t, PromisePending, pendingPromise.PromiseState())
 
-		fulfilledPromise, err := ctx.Eval(`Promise.resolve("fulfilled")`)
-		require.NoError(t, err)
+		fulfilledPromise := ctx.Eval(`Promise.resolve("fulfilled")`)
 		defer fulfilledPromise.Free()
+		require.False(t, fulfilledPromise.IsException())
 		require.Equal(t, PromiseFulfilled, fulfilledPromise.PromiseState())
 
-		rejectedPromise, err := ctx.Eval(`Promise.reject("rejected")`)
-		require.NoError(t, err)
+		rejectedPromise := ctx.Eval(`Promise.reject("rejected")`)
 		defer rejectedPromise.Free()
+		require.False(t, rejectedPromise.IsException())
 		require.Equal(t, PromiseRejected, rejectedPromise.PromiseState())
 
 		// Test PromiseState on non-Promise
@@ -638,16 +697,17 @@ func TestContextPromise(t *testing.T) {
 			resolve(ctx.String("awaited via Value.Await"))
 		})
 
-		result, err := promise.Await()
-		require.NoError(t, err)
+		result := promise.Await()
+		defer result.Free()
+		require.False(t, result.IsException())
 		require.Equal(t, "awaited via Value.Await", result.String())
 
 		// Test Await on non-Promise (should return equivalent value)
 		nonPromise := ctx.String("not a promise")
 
-		result2, err := nonPromise.Await()
-		require.NoError(t, err)
+		result2 := nonPromise.Await()
 		defer result2.Free()
+		require.False(t, result2.IsException())
 
 		// Verify the content is the same
 		require.Equal(t, nonPromise.String(), result2.String())
@@ -686,21 +746,21 @@ func TestContextPromise(t *testing.T) {
 		global.Set("process", asyncProcessor)
 
 		// Test successful processing
-		success, err := ctx.Eval(`process("data").then(result => "Success: " + result)`)
-		require.NoError(t, err)
+		success := ctx.Eval(`process("data").then(result => "Success: " + result)`)
+		require.False(t, success.IsException())
 
-		successResult, err := success.Await()
-		require.NoError(t, err)
+		successResult := success.Await()
 		defer successResult.Free()
+		require.False(t, successResult.IsException())
 		require.Equal(t, "Success: processed: data", successResult.String())
 
 		// Test error handling
-		errorCase, err := ctx.Eval(`process("error").catch(err =>  err)`)
-		require.NoError(t, err)
+		errorCase := ctx.Eval(`process("error").catch(err =>  err)`)
+		require.False(t, errorCase.IsException())
 
-		errorResult, err := errorCase.Await()
-		require.NoError(t, err)
+		errorResult := errorCase.Await()
 		defer errorResult.Free()
+		require.False(t, errorResult.IsException())
 		require.Equal(t, "Error: processing failed", errorResult.String())
 	})
 }
@@ -834,21 +894,21 @@ func TestContextTypedArrays(t *testing.T) {
 		goArray := ctx.Int32Array(goData)
 		ctx.Globals().Set("goArray", goArray)
 
-		result, err := ctx.Eval(`
+		result := ctx.Eval(`
             let sum = 0;
             for (let i = 0; i < goArray.length; i++) {
                 sum += goArray[i];
             }
             sum;
         `)
-		require.NoError(t, err)
 		defer result.Free()
+		require.False(t, result.IsException())
 		require.EqualValues(t, 15, result.ToInt32()) // 1+2+3+4+5 = 15
 
 		// JavaScript to Go
-		jsArray, err := ctx.Eval(`new Int32Array([10, 20, 30, 40, 50])`)
-		require.NoError(t, err)
+		jsArray := ctx.Eval(`new Int32Array([10, 20, 30, 40, 50])`)
 		defer jsArray.Free()
+		require.False(t, jsArray.IsException())
 
 		require.True(t, jsArray.IsTypedArray())
 		require.True(t, jsArray.IsInt32Array())
@@ -926,22 +986,22 @@ func TestContextTypedArrays(t *testing.T) {
 		ctx.Globals().Set("sharedBuffer", arrayBuffer)
 
 		// Create different views on the same buffer
-		ret, err := ctx.Eval(`
+		ret := ctx.Eval(`
             globalThis.uint8View = new Uint8Array(sharedBuffer);
             globalThis.uint16View = new Uint16Array(sharedBuffer);
         `)
 		defer ret.Free()
-		require.NoError(t, err)
+		require.False(t, ret.IsException())
 
 		// Modify through uint8 view
-		modifyResult, err := ctx.Eval(`uint8View[0] = 255;`)
-		require.NoError(t, err)
+		modifyResult := ctx.Eval(`uint8View[0] = 255;`)
 		defer modifyResult.Free()
+		require.False(t, modifyResult.IsException())
 
 		// Verify change is visible through uint16 view (shared memory)
-		uint16Value, err := ctx.Eval(`uint16View[0]`)
-		require.NoError(t, err)
+		uint16Value := ctx.Eval(`uint16View[0]`)
 		defer uint16Value.Free()
+		require.False(t, uint16Value.IsException())
 
 		// The uint16 value should have changed because we modified the underlying byte
 		// Original: bytes [1, 2] -> uint16: 513 (little-endian: 1 + 2*256)
@@ -949,9 +1009,9 @@ func TestContextTypedArrays(t *testing.T) {
 		require.EqualValues(t, 767, uint16Value.ToInt32())
 
 		// Clean up
-		cleanupResult, err := ctx.Eval(`delete globalThis.uint8View; delete globalThis.uint16View;`)
-		require.NoError(t, err)
+		cleanupResult := ctx.Eval(`delete globalThis.uint8View; delete globalThis.uint16View;`)
 		defer cleanupResult.Free()
+		require.False(t, cleanupResult.IsException())
 	})
 }
 
@@ -963,7 +1023,7 @@ func TestContextMemoryPressure(t *testing.T) {
 	defer ctx.Close()
 
 	// Fill memory first
-	memoryResult, err := ctx.Eval(`
+	memoryResult := ctx.Eval(`
         var memoryFiller = [];
         try {
             for(let i = 0; i < 1000; i++) {
@@ -973,12 +1033,10 @@ func TestContextMemoryPressure(t *testing.T) {
             // Expected to fail due to memory limit
         }
     `)
-	if err == nil {
-		defer memoryResult.Free()
-	}
+	defer memoryResult.Free()
 
 	// Try to compile - this should fail at JS_WriteObject due to no available memory
-	_, err = ctx.Compile(`
+	_, err := ctx.Compile(`
         var obj = {};
         for(let i = 0; i < 100; i++) {
             obj['prop_' + i] = function() { return 'value_' + i; };
@@ -1019,9 +1077,9 @@ func TestContextAsyncFunction(t *testing.T) {
 		})
 
 		ctx.Globals().Set("testAsyncResolveNoArgs", asyncFn)
-		result, err := ctx.Eval(`testAsyncResolveNoArgs()`, EvalAwait(true))
-		require.NoError(t, err)
+		result := ctx.Eval(`testAsyncResolveNoArgs()`, EvalAwait(true))
 		defer result.Free()
+		require.False(t, result.IsException())
 		require.True(t, result.IsUndefined()) // Should resolve to undefined
 	})
 
@@ -1039,7 +1097,11 @@ func TestContextAsyncFunction(t *testing.T) {
 		})
 
 		ctx.Globals().Set("testAsyncRejectWithArgs", asyncFn)
-		_, err := ctx.Eval(`testAsyncRejectWithArgs()`, EvalAwait(true))
+		result := ctx.Eval(`testAsyncRejectWithArgs()`, EvalAwait(true))
+		defer result.Free()
+		require.True(t, result.IsException())
+
+		err := ctx.Exception()
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "specific error message")
 	})
@@ -1057,7 +1119,11 @@ func TestContextAsyncFunction(t *testing.T) {
 		})
 
 		ctx.Globals().Set("testAsyncRejectNoArgs", asyncFn)
-		_, err := ctx.Eval(`testAsyncRejectNoArgs()`, EvalAwait(true))
+		result := ctx.Eval(`testAsyncRejectNoArgs()`, EvalAwait(true))
+		defer result.Free()
+		require.True(t, result.IsException())
+
+		err := ctx.Exception()
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "Promise rejected without reason")
 	})
@@ -1071,9 +1137,9 @@ func TestContextAsyncFunction(t *testing.T) {
 		})
 
 		ctx.Globals().Set("testAsyncDirectReturn", asyncFn)
-		result, err := ctx.Eval(`testAsyncDirectReturn()`, EvalAwait(true))
-		require.NoError(t, err)
+		result := ctx.Eval(`testAsyncDirectReturn()`, EvalAwait(true))
 		defer result.Free()
+		require.False(t, result.IsException())
 		require.Equal(t, "direct return value", result.String())
 	})
 
@@ -1094,9 +1160,9 @@ func TestContextAsyncFunction(t *testing.T) {
 		})
 
 		ctx.Globals().Set("testAsyncReturnUndefined", asyncFn)
-		result, err := ctx.Eval(`testAsyncReturnUndefined()`, EvalAwait(true))
-		require.NoError(t, err)
+		result := ctx.Eval(`testAsyncReturnUndefined()`, EvalAwait(true))
 		defer result.Free()
+		require.False(t, result.IsException())
 		require.True(t, resolvedByPromise)
 		require.Equal(t, "resolved by promise", result.String())
 	})
@@ -1139,20 +1205,23 @@ func TestContextAsyncFunction(t *testing.T) {
 		ctx.Globals().Set("testAsyncComplex", asyncFn)
 
 		// Test resolve without arguments
-		result1, err := ctx.Eval(`testAsyncComplex("resolve_no_args")`, EvalAwait(true))
-		require.NoError(t, err)
+		result1 := ctx.Eval(`testAsyncComplex("resolve_no_args")`, EvalAwait(true))
 		defer result1.Free()
+		require.False(t, result1.IsException())
 		require.True(t, result1.IsUndefined())
 
 		// Test reject with arguments
-		_, err = ctx.Eval(`testAsyncComplex("reject_with_args")`, EvalAwait(true))
-		require.Error(t, err)
+		result2 := ctx.Eval(`testAsyncComplex("reject_with_args")`, EvalAwait(true))
+		defer result2.Free()
+		require.True(t, result2.IsException())
+
+		err := ctx.Exception()
 		require.Contains(t, err.Error(), "custom rejection")
 
 		// Test direct return value
-		result3, err := ctx.Eval(`testAsyncComplex("direct_return")`, EvalAwait(true))
-		require.NoError(t, err)
+		result3 := ctx.Eval(`testAsyncComplex("direct_return")`, EvalAwait(true))
 		defer result3.Free()
+		require.False(t, result3.IsException())
 		require.Equal(t, "returned directly", result3.String())
 	})
 }

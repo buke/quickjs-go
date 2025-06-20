@@ -34,7 +34,7 @@ func TestModuleBuilder_Basic(t *testing.T) {
 		err := module.Build(ctx)
 		require.NoError(t, err)
 
-		result, err := ctx.Eval(`
+		result := ctx.Eval(`
             (async function() {
                 const { PI, add, version } = await import('math');
                 return add(PI, 1.0);
@@ -42,7 +42,7 @@ func TestModuleBuilder_Basic(t *testing.T) {
         `, EvalAwait(true))
 		defer result.Free()
 
-		require.NoError(t, err)
+		require.False(t, result.IsException())
 		require.InDelta(t, 4.14159, result.Float64(), 0.0001)
 	})
 
@@ -54,7 +54,7 @@ func TestModuleBuilder_Basic(t *testing.T) {
 		err := module.Build(ctx)
 		require.NoError(t, err)
 
-		result, err := ctx.Eval(`
+		result := ctx.Eval(`
             (async function() {
                 const defaultValue = await import('default-test');
                 return defaultValue.default;
@@ -62,7 +62,7 @@ func TestModuleBuilder_Basic(t *testing.T) {
         `, EvalAwait(true))
 		defer result.Free()
 
-		require.NoError(t, err)
+		require.False(t, result.IsException())
 		require.Equal(t, "Default Export Value", result.String())
 	})
 }
@@ -93,7 +93,7 @@ func TestModuleBuilder_Import(t *testing.T) {
 		err := module.Build(ctx)
 		require.NoError(t, err)
 
-		result, err := ctx.Eval(`
+		result := ctx.Eval(`
             (async function() {
                 const { greet, defaultName } = await import('greeting');
                 return greet('QuickJS');
@@ -101,7 +101,7 @@ func TestModuleBuilder_Import(t *testing.T) {
         `, EvalAwait(true))
 		defer result.Free()
 
-		require.NoError(t, err)
+		require.False(t, result.IsException())
 		require.Equal(t, "Hello, QuickJS!", result.String())
 	})
 
@@ -121,7 +121,7 @@ func TestModuleBuilder_Import(t *testing.T) {
 		err := module.Build(ctx)
 		require.NoError(t, err)
 
-		result, err := ctx.Eval(`
+		result := ctx.Eval(`
             (async function() {
                 const { multiply, PI } = await import('calculator');
                 return multiply(PI, 2);
@@ -129,7 +129,7 @@ func TestModuleBuilder_Import(t *testing.T) {
         `, EvalAwait(true))
 		defer result.Free()
 
-		require.NoError(t, err)
+		require.False(t, result.IsException())
 		expected := 3.14159 * 2
 		require.InDelta(t, expected, result.Float64(), 0.0001)
 	})
@@ -143,7 +143,7 @@ func TestModuleBuilder_Import(t *testing.T) {
 		err := module.Build(ctx)
 		require.NoError(t, err)
 
-		result, err := ctx.Eval(`
+		result := ctx.Eval(`
             (async function() {
                 const module = await import('utils');
                 const { version, debug } = module;
@@ -152,7 +152,7 @@ func TestModuleBuilder_Import(t *testing.T) {
         `, EvalAwait(true))
 		defer result.Free()
 
-		require.NoError(t, err)
+		require.False(t, result.IsException())
 		require.Equal(t, "1.0.0 - Utils Library", result.String())
 	})
 }
@@ -232,23 +232,23 @@ func TestModuleBuilder_Integration(t *testing.T) {
 		require.NoError(t, err)
 
 		// Test math module
-		mathResult, err := ctx.Eval(`
+		mathResult := ctx.Eval(`
         (async function() {
             const { add, PI } = await import('math');
             return add(PI, 1);
         })()`, EvalAwait(true))
 		defer mathResult.Free()
-		require.NoError(t, err)
+		require.False(t, mathResult.IsException())
 		require.InDelta(t, 4.14159, mathResult.Float64(), 0.0001)
 
 		// Test utils module
-		utilsResult, err := ctx.Eval(`
+		utilsResult := ctx.Eval(`
         (async function() {
             const { name, version } = await import('utils');
             return name + ' v' + version;
         })()`, EvalAwait(true))
 		defer utilsResult.Free()
-		require.NoError(t, err)
+		require.False(t, utilsResult.IsException())
 		require.Equal(t, "UtilsModule v1.0.0", utilsResult.String())
 	})
 
@@ -265,7 +265,7 @@ func TestModuleBuilder_Integration(t *testing.T) {
 		err := module.Build(ctx)
 		require.NoError(t, err)
 
-		result, err := ctx.Eval(`
+		result := ctx.Eval(`
             (async function() {
                 const { config } = await import('config');
                 return config.name + ' v' + config.version;
@@ -273,7 +273,7 @@ func TestModuleBuilder_Integration(t *testing.T) {
         `, EvalAwait(true))
 		defer result.Free()
 
-		require.NoError(t, err)
+		require.False(t, result.IsException())
 		require.Equal(t, "TestApp v2.0.0", result.String())
 	})
 
@@ -289,7 +289,7 @@ func TestModuleBuilder_Integration(t *testing.T) {
 		err = goodModule.Build(ctx)
 		require.NoError(t, err)
 
-		result, err := ctx.Eval(`
+		result := ctx.Eval(`
             (async function() {
                 const { message } = await import('recovery');
                 return message;
@@ -297,7 +297,7 @@ func TestModuleBuilder_Integration(t *testing.T) {
         `, EvalAwait(true))
 		defer result.Free()
 
-		require.NoError(t, err)
+		require.False(t, result.IsException())
 		require.Equal(t, "Recovery successful", result.String())
 	})
 }
@@ -319,13 +319,15 @@ func TestModuleBuilder_ErrorBranches(t *testing.T) {
 		unregisterContext(ctx.ref)
 
 		// Import will fail during initialization
-		_, err = ctx.Eval(`import('error-test-1')`, EvalAwait(true))
+		result := ctx.Eval(`import('error-test-1')`, EvalAwait(true))
+		defer result.Free()
 
 		// Re-register for cleanup
 		registerContext(ctx.ref, ctx)
 
 		// Should get context error
-		require.Error(t, err)
+		require.True(t, result.IsException())
+		err = ctx.Exception()
 		require.Contains(t, err.Error(), "Context not found")
 	})
 
@@ -340,11 +342,12 @@ func TestModuleBuilder_ErrorBranches(t *testing.T) {
 		ctx.handleStore.Clear()
 
 		// Import will fail during initialization
-		_, err = ctx.Eval(`import('error-test-2')`, EvalAwait(true))
+		result := ctx.Eval(`import('error-test-2')`, EvalAwait(true))
+		defer result.Free()
 
 		// Should get handle store error
-		require.Error(t, err)
+		require.True(t, result.IsException())
+		err = ctx.Exception()
 		require.Contains(t, err.Error(), "Function not found")
 	})
-
 }

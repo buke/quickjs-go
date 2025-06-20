@@ -7,12 +7,9 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
-)
 
-// Point represents a 2D point class for testing basic functionality
-type Point struct {
-	X, Y float64
-}
+	"github.com/stretchr/testify/require"
+)
 
 // Implement ClassFinalizer interface for automatic cleanup testing
 func (p *Point) Finalize() {
@@ -39,7 +36,7 @@ func getFinalizeCount() int64 {
 }
 
 // createPointClass creates a Point class for testing with SCHEME C constructor
-func createPointClass(ctx *Context) (*Value, uint32, error) {
+func createPointClass(ctx *Context) (*Value, uint32) {
 	return NewClassBuilder("Point").
 		Constructor(func(ctx *Context, instance *Value, args []*Value) (interface{}, error) {
 			x, y := 0.0, 0.0
@@ -133,8 +130,10 @@ func TestBasicClassCreation(t *testing.T) {
 	defer context.Close()
 
 	// Create Point class
-	pointConstructor, _, err := createPointClass(context)
-	if err != nil {
+	pointConstructor, _ := createPointClass(context)
+	if pointConstructor.IsException() {
+		defer pointConstructor.Free()
+		err := context.Exception()
 		t.Fatalf("Failed to create Point class: %v", err)
 	}
 
@@ -143,14 +142,15 @@ func TestBasicClassCreation(t *testing.T) {
 	context.Globals().Set("Point", pointConstructor)
 
 	// Test basic constructor call
-	result, err := context.Eval(`
+	result := context.Eval(`
         let p = new Point(3, 4);
         p.norm();
     `)
-	if err != nil {
+	defer result.Free()
+	if result.IsException() {
+		err := context.Exception()
 		t.Fatalf("Failed to evaluate basic constructor test: %v", err)
 	}
-	defer result.Free()
 
 	expected := 5.0 // sqrt(3^2 + 4^2) = 5
 	if math.Abs(result.Float64()-expected) > 0.001 {
@@ -167,8 +167,10 @@ func TestConstructorFunctionality(t *testing.T) {
 	defer context.Close()
 
 	// Create and register Point class
-	pointConstructor, _, err := createPointClass(context)
-	if err != nil {
+	pointConstructor, _ := createPointClass(context)
+	if pointConstructor.IsException() {
+		defer pointConstructor.Free()
+		err := context.Exception()
 		t.Fatalf("Failed to create Point class: %v", err)
 	}
 
@@ -177,14 +179,15 @@ func TestConstructorFunctionality(t *testing.T) {
 	context.Globals().Set("Point", pointConstructor)
 
 	// Test constructor with no arguments
-	result, err := context.Eval(`
+	result := context.Eval(`
         let p1 = new Point();
         [p1.x, p1.y];
     `)
-	if err != nil {
+	defer result.Free()
+	if result.IsException() {
+		err := context.Exception()
 		t.Fatalf("Failed to evaluate no-args constructor: %v", err)
 	}
-	defer result.Free()
 
 	if result.GetIdx(0).Float64() != 0.0 || result.GetIdx(1).Float64() != 0.0 {
 		t.Errorf("Expected Point(0, 0), got Point(%f, %f)",
@@ -192,14 +195,15 @@ func TestConstructorFunctionality(t *testing.T) {
 	}
 
 	// Test constructor with partial arguments
-	result2, err := context.Eval(`
+	result2 := context.Eval(`
         let p2 = new Point(5);
         [p2.x, p2.y];
     `)
-	if err != nil {
+	defer result2.Free()
+	if result2.IsException() {
+		err := context.Exception()
 		t.Fatalf("Failed to evaluate partial-args constructor: %v", err)
 	}
-	defer result2.Free()
 
 	if result2.GetIdx(0).Float64() != 5.0 || result2.GetIdx(1).Float64() != 0.0 {
 		t.Errorf("Expected Point(5, 0), got Point(%f, %f)",
@@ -216,8 +220,10 @@ func TestInstanceMethods(t *testing.T) {
 	defer context.Close()
 
 	// Create and register Point class
-	pointConstructor, _, err := createPointClass(context)
-	if err != nil {
+	pointConstructor, _ := createPointClass(context)
+	if pointConstructor.IsException() {
+		defer pointConstructor.Free()
+		err := context.Exception()
 		t.Fatalf("Failed to create Point class: %v", err)
 	}
 
@@ -226,28 +232,30 @@ func TestInstanceMethods(t *testing.T) {
 	context.Globals().Set("Point", pointConstructor)
 
 	// Test norm method
-	result, err := context.Eval(`
+	result := context.Eval(`
         let p1 = new Point(3, 4);
         p1.norm();
     `)
-	if err != nil {
+	defer result.Free()
+	if result.IsException() {
+		err := context.Exception()
 		t.Fatalf("Failed to evaluate norm method: %v", err)
 	}
-	defer result.Free()
 
 	if math.Abs(result.Float64()-5.0) > 0.001 {
 		t.Errorf("Expected norm 5.0, got %f", result.Float64())
 	}
 
 	// Test toString method
-	result2, err := context.Eval(`
+	result2 := context.Eval(`
         let p2 = new Point(1.5, 2.5);
         p2.toString();
     `)
-	if err != nil {
+	defer result2.Free()
+	if result2.IsException() {
+		err := context.Exception()
 		t.Fatalf("Failed to evaluate toString method: %v", err)
 	}
-	defer result2.Free()
 
 	expected := "Point(1.50, 2.50)"
 	if result2.String() != expected {
@@ -264,8 +272,10 @@ func TestAccessors(t *testing.T) {
 	defer context.Close()
 
 	// Create and register Point class
-	pointConstructor, _, err := createPointClass(context)
-	if err != nil {
+	pointConstructor, _ := createPointClass(context)
+	if pointConstructor.IsException() {
+		defer pointConstructor.Free()
+		err := context.Exception()
 		t.Fatalf("Failed to create Point class: %v", err)
 	}
 
@@ -274,14 +284,15 @@ func TestAccessors(t *testing.T) {
 	context.Globals().Set("Point", pointConstructor)
 
 	// Test accessor getters
-	result, err := context.Eval(`
+	result := context.Eval(`
         let p1 = new Point(3, 4);
         [p1.x, p1.y];
     `)
-	if err != nil {
+	defer result.Free()
+	if result.IsException() {
+		err := context.Exception()
 		t.Fatalf("Failed to evaluate accessor getters: %v", err)
 	}
-	defer result.Free()
 
 	if result.GetIdx(0).Float64() != 3.0 || result.GetIdx(1).Float64() != 4.0 {
 		t.Errorf("Expected [3, 4], got [%f, %f]",
@@ -289,16 +300,17 @@ func TestAccessors(t *testing.T) {
 	}
 
 	// Test accessor setters
-	result2, err := context.Eval(`
+	result2 := context.Eval(`
         let p2 = new Point(1, 2);
         p2.x = 10;
         p2.y = 20;
         [p2.x, p2.y];
     `)
-	if err != nil {
+	defer result2.Free()
+	if result2.IsException() {
+		err := context.Exception()
 		t.Fatalf("Failed to evaluate accessor setters: %v", err)
 	}
-	defer result2.Free()
 
 	if result2.GetIdx(0).Float64() != 10.0 || result2.GetIdx(1).Float64() != 20.0 {
 		t.Errorf("Expected [10, 20], got [%f, %f]",
@@ -315,8 +327,10 @@ func TestStaticMethods(t *testing.T) {
 	defer context.Close()
 
 	// Create and register Point class
-	pointConstructor, _, err := createPointClass(context)
-	if err != nil {
+	pointConstructor, _ := createPointClass(context)
+	if pointConstructor.IsException() {
+		defer pointConstructor.Free()
+		err := context.Exception()
 		t.Fatalf("Failed to create Point class: %v", err)
 	}
 
@@ -325,14 +339,15 @@ func TestStaticMethods(t *testing.T) {
 	context.Globals().Set("Point", pointConstructor)
 
 	// Test static method
-	result, err := context.Eval(`
+	result := context.Eval(`
         let p1 = Point.zero();
         [p1.x, p1.y];
     `)
-	if err != nil {
+	defer result.Free()
+	if result.IsException() {
+		err := context.Exception()
 		t.Fatalf("Failed to evaluate static method: %v", err)
 	}
-	defer result.Free()
 
 	if result.GetIdx(0).Float64() != 0.0 || result.GetIdx(1).Float64() != 0.0 {
 		t.Errorf("Expected [0, 0], got [%f, %f]",
@@ -349,8 +364,10 @@ func TestStaticAccessors(t *testing.T) {
 	defer context.Close()
 
 	// Create and register Point class
-	pointConstructor, _, err := createPointClass(context)
-	if err != nil {
+	pointConstructor, _ := createPointClass(context)
+	if pointConstructor.IsException() {
+		defer pointConstructor.Free()
+		err := context.Exception()
 		t.Fatalf("Failed to create Point class: %v", err)
 	}
 
@@ -359,11 +376,12 @@ func TestStaticAccessors(t *testing.T) {
 	context.Globals().Set("Point", pointConstructor)
 
 	// Test static read-only accessor
-	result, err := context.Eval(`Point.PI`)
-	if err != nil {
+	result := context.Eval(`Point.PI`)
+	defer result.Free()
+	if result.IsException() {
+		err := context.Exception()
 		t.Fatalf("Failed to evaluate static accessor: %v", err)
 	}
-	defer result.Free()
 
 	if math.Abs(result.Float64()-math.Pi) > 0.001 {
 		t.Errorf("Expected PI %f, got %f", math.Pi, result.Float64())
@@ -379,8 +397,10 @@ func TestProperties(t *testing.T) {
 	defer context.Close()
 
 	// Create and register Point class
-	pointConstructor, _, err := createPointClass(context)
-	if err != nil {
+	pointConstructor, _ := createPointClass(context)
+	if pointConstructor.IsException() {
+		defer pointConstructor.Free()
+		err := context.Exception()
 		t.Fatalf("Failed to create Point class: %v", err)
 	}
 
@@ -388,7 +408,7 @@ func TestProperties(t *testing.T) {
 	context.Globals().Set("Point", pointConstructor)
 
 	// Test instance properties
-	result, err := context.Eval(`
+	result := context.Eval(`
         let p = new Point(1, 2);
         [
             p.version,           // Instance property
@@ -397,10 +417,11 @@ func TestProperties(t *testing.T) {
             typeof p.readOnlyFlag // Should be boolean
         ];
     `)
-	if err != nil {
+	defer result.Free()
+	if result.IsException() {
+		err := context.Exception()
 		t.Fatalf("Failed to evaluate instance properties: %v", err)
 	}
-	defer result.Free()
 
 	if result.GetIdx(0).String() != "1.0.0" {
 		t.Errorf("Expected version '1.0.0', got '%s'", result.GetIdx(0).String())
@@ -425,8 +446,10 @@ func TestStaticProperties(t *testing.T) {
 	defer context.Close()
 
 	// Create and register Point class
-	pointConstructor, _, err := createPointClass(context)
-	if err != nil {
+	pointConstructor, _ := createPointClass(context)
+	if pointConstructor.IsException() {
+		defer pointConstructor.Free()
+		err := context.Exception()
 		t.Fatalf("Failed to create Point class: %v", err)
 	}
 
@@ -434,7 +457,7 @@ func TestStaticProperties(t *testing.T) {
 	context.Globals().Set("Point", pointConstructor)
 
 	// Test static properties
-	result, err := context.Eval(`
+	result := context.Eval(`
         [
             Point.PI_CONST,      // Static property (default flags)
             Point.AUTHOR,        // Enumerable-only static property
@@ -442,10 +465,11 @@ func TestStaticProperties(t *testing.T) {
             typeof Point.AUTHOR
         ];
     `)
-	if err != nil {
+	defer result.Free()
+	if result.IsException() {
+		err := context.Exception()
 		t.Fatalf("Failed to evaluate static properties: %v", err)
 	}
-	defer result.Free()
 
 	if math.Abs(result.GetIdx(0).Float64()-math.Pi) > 0.001 {
 		t.Errorf("Expected PI_CONST %f, got %f", math.Pi, result.GetIdx(0).Float64())
@@ -470,8 +494,10 @@ func TestPropertyFlags(t *testing.T) {
 	defer context.Close()
 
 	// Create and register Point class
-	pointConstructor, _, err := createPointClass(context)
-	if err != nil {
+	pointConstructor, _ := createPointClass(context)
+	if pointConstructor.IsException() {
+		defer pointConstructor.Free()
+		err := context.Exception()
 		t.Fatalf("Failed to create Point class: %v", err)
 	}
 
@@ -479,7 +505,7 @@ func TestPropertyFlags(t *testing.T) {
 	context.Globals().Set("Point", pointConstructor)
 
 	// Test property descriptor flags
-	result, err := context.Eval(`
+	result := context.Eval(`
         let p = new Point(1, 2)
 
         // Test default flags for version (writable, enumerable, configurable)
@@ -514,10 +540,11 @@ func TestPropertyFlags(t *testing.T) {
             authorDesc.configurable   // Should be false
         ];
     `)
-	if err != nil {
+	defer result.Free()
+	if result.IsException() {
+		err := context.Exception()
 		t.Fatalf("Failed to evaluate property flags: %v", err)
 	}
-	defer result.Free()
 
 	// Check version property flags (default: writable, enumerable, configurable)
 	if !result.GetIdx(0).ToBool() {
@@ -573,8 +600,10 @@ func TestPropertyVsAccessorBehavior(t *testing.T) {
 	defer context.Close()
 
 	// Create and register Point class
-	pointConstructor, _, err := createPointClass(context)
-	if err != nil {
+	pointConstructor, _ := createPointClass(context)
+	if pointConstructor.IsException() {
+		defer pointConstructor.Free()
+		err := context.Exception()
 		t.Fatalf("Failed to create Point class: %v", err)
 	}
 
@@ -582,7 +611,7 @@ func TestPropertyVsAccessorBehavior(t *testing.T) {
 	context.Globals().Set("Point", pointConstructor)
 
 	// Test behavioral differences between properties and accessors
-	result, err := context.Eval(`
+	result := context.Eval(`
         let p = new Point(5, 10);
         
         // Test property behavior (direct data storage)
@@ -610,10 +639,11 @@ func TestPropertyVsAccessorBehavior(t *testing.T) {
             typeof xDesc.get           // "function" (accessor has getter)
         ];
     `)
-	if err != nil {
+	defer result.Free()
+	if result.IsException() {
+		err := context.Exception()
 		t.Fatalf("Failed to evaluate property vs accessor behavior: %v", err)
 	}
-	defer result.Free()
 
 	// Check property behavior (direct data storage)
 	if result.GetIdx(0).String() != "1.0.0" {
@@ -655,8 +685,10 @@ func TestInheritanceAndNewTarget(t *testing.T) {
 	defer context.Close()
 
 	// Create and register Point class
-	pointConstructor, _, err := createPointClass(context)
-	if err != nil {
+	pointConstructor, _ := createPointClass(context)
+	if pointConstructor.IsException() {
+		defer pointConstructor.Free()
+		err := context.Exception()
 		t.Fatalf("Failed to create Point class: %v", err)
 	}
 
@@ -665,7 +697,7 @@ func TestInheritanceAndNewTarget(t *testing.T) {
 	context.Globals().Set("Point", pointConstructor)
 
 	// Test inheritance using extends
-	result, err := context.Eval(`
+	result := context.Eval(`
         class Point3D extends Point {
             constructor(x, y, z) {
                 super(x, y);
@@ -680,10 +712,11 @@ func TestInheritanceAndNewTarget(t *testing.T) {
         let p3d1 = new Point3D(3, 4, 12);
         p3d1.norm(); // sqrt(3^2 + 4^2 + 12^2) = sqrt(169) = 13
     `)
-	if err != nil {
+	defer result.Free()
+	if result.IsException() {
+		err := context.Exception()
 		t.Fatalf("Failed to evaluate inheritance test: %v", err)
 	}
-	defer result.Free()
 
 	expected := 13.0 // sqrt(9 + 16 + 144) = 13
 	if math.Abs(result.Float64()-expected) > 0.001 {
@@ -691,14 +724,15 @@ func TestInheritanceAndNewTarget(t *testing.T) {
 	}
 
 	// Test that inherited object is still instance of Point
-	result2, err := context.Eval(`
+	result2 := context.Eval(`
         let p3d2 = new Point3D(1, 2, 3);
         p3d2 instanceof Point;
     `)
-	if err != nil {
+	defer result2.Free()
+	if result2.IsException() {
+		err := context.Exception()
 		t.Fatalf("Failed to evaluate instanceof test: %v", err)
 	}
-	defer result2.Free()
 
 	if !result2.ToBool() {
 		t.Errorf("Expected Point3D instance to be instanceof Point")
@@ -714,8 +748,10 @@ func TestClassInstanceChecking(t *testing.T) {
 	defer context.Close()
 
 	// Create and register Point class
-	pointConstructor, pointClassID, err := createPointClass(context)
-	if err != nil {
+	pointConstructor, pointClassID := createPointClass(context)
+	if pointConstructor.IsException() {
+		defer pointConstructor.Free()
+		err := context.Exception()
 		t.Fatalf("Failed to create Point class: %v", err)
 	}
 
@@ -724,11 +760,12 @@ func TestClassInstanceChecking(t *testing.T) {
 	context.Globals().Set("Point", pointConstructor)
 
 	// Create test instance
-	instance, err := context.Eval(`new Point(1, 2)`)
-	if err != nil {
+	instance := context.Eval(`new Point(1, 2)`)
+	defer instance.Free()
+	if instance.IsException() {
+		err := context.Exception()
 		t.Fatalf("Failed to create test instance: %v", err)
 	}
-	defer instance.Free()
 
 	// Test IsClassInstance
 	if !instance.IsClassInstance() {
@@ -756,11 +793,12 @@ func TestClassInstanceChecking(t *testing.T) {
 	}
 
 	// Test with regular object
-	regularObj, err := context.Eval(`({})`)
-	if err != nil {
+	regularObj := context.Eval(`({})`)
+	defer regularObj.Free()
+	if regularObj.IsException() {
+		err := context.Exception()
 		t.Fatalf("Failed to create regular object: %v", err)
 	}
-	defer regularObj.Free()
 
 	if regularObj.IsClassInstance() {
 		t.Errorf("Expected IsClassInstance to return false for regular object")
@@ -780,8 +818,10 @@ func TestGetGoObject(t *testing.T) {
 	defer context.Close()
 
 	// Create and register Point class
-	pointConstructor, _, err := createPointClass(context)
-	if err != nil {
+	pointConstructor, _ := createPointClass(context)
+	if pointConstructor.IsException() {
+		defer pointConstructor.Free()
+		err := context.Exception()
 		t.Fatalf("Failed to create Point class: %v", err)
 	}
 
@@ -790,11 +830,12 @@ func TestGetGoObject(t *testing.T) {
 	context.Globals().Set("Point", pointConstructor)
 
 	// Create test instance
-	instance, err := context.Eval(`new Point(3.14, 2.71)`)
-	if err != nil {
+	instance := context.Eval(`new Point(3.14, 2.71)`)
+	defer instance.Free()
+	if instance.IsException() {
+		err := context.Exception()
 		t.Fatalf("Failed to create test instance: %v", err)
 	}
-	defer instance.Free()
 
 	// Use GetGoObject to retrieve Go object
 	obj, err := instance.GetGoObject()
@@ -839,8 +880,10 @@ func TestFinalizerInterface(t *testing.T) {
 	resetFinalizeCounter()
 
 	// Create and register Point class
-	pointConstructor, _, err := createPointClass(context)
-	if err != nil {
+	pointConstructor, _ := createPointClass(context)
+	if pointConstructor.IsException() {
+		defer pointConstructor.Free()
+		err := context.Exception()
 		t.Fatalf("Failed to create Point class: %v", err)
 	}
 
@@ -849,13 +892,15 @@ func TestFinalizerInterface(t *testing.T) {
 	context.Globals().Set("Point", pointConstructor)
 
 	// Create instances that will be garbage collected
-	_, err = context.Eval(`
+	result := context.Eval(`
         for (let i = 0; i < 10; i++) {
             let p = new Point(i, i * 2);
             // Don't keep references, let them be GC'd
         }
     `)
-	if err != nil {
+	defer result.Free()
+	if result.IsException() {
+		err := context.Exception()
 		t.Fatalf("Failed to create test instances: %v", err)
 	}
 
@@ -892,7 +937,7 @@ func TestErrorHandling(t *testing.T) {
 	defer context.Close()
 
 	// Test creating class with empty name
-	ctor, _, err := NewClassBuilder("").
+	ctor, _ := NewClassBuilder("").
 		Constructor(func(ctx *Context, instance *Value, args []*Value) (interface{}, error) {
 			return nil, nil
 		}).
@@ -920,26 +965,29 @@ func TestErrorHandling(t *testing.T) {
 		Build(context)
 	defer ctor.Free()
 
-	if err == nil {
-		t.Errorf("Expected error for empty class name")
+	if ctor.IsException() {
+		err := context.Exception()
+		require.Contains(t, err.Error(), "class_name cannot be empty")
 	}
 
 	// Test creating class without constructor
-	ctor2, _, err := NewClassBuilder("TestClass").Build(context)
+	ctor2, _ := NewClassBuilder("TestClass").Build(context)
 	defer ctor2.Free()
-	if err == nil {
-		t.Errorf("Expected error for missing constructor")
+	if ctor2.IsException() {
+		err := context.Exception()
+		require.Contains(t, err.Error(), "constructor function is required")
 	}
 
 	// Test GetGoObject on non-class object
-	regularObj, err := context.Eval(`({})`)
-	if err != nil {
+	regularObj := context.Eval(`({})`)
+	defer regularObj.Free()
+	if regularObj.IsException() {
+		err := context.Exception()
 		t.Fatalf("Failed to create regular object: %v", err)
 	}
-	defer regularObj.Free()
 
 	// Use GetGoObject to test error handling
-	_, err = regularObj.GetGoObject()
+	_, err := regularObj.GetGoObject()
 
 	if err == nil {
 		t.Errorf("Expected error when getting instance data from regular object")
@@ -970,7 +1018,7 @@ func TestMemoryManagement(t *testing.T) {
 	// Create multiple classes to test handle store management
 	for i := 0; i < 5; i++ {
 		className := fmt.Sprintf("TestClass%d", i)
-		constructor, _, err := NewClassBuilder(className).
+		constructor, _ := NewClassBuilder(className).
 			Constructor(func(ctx *Context, instance *Value, args []*Value) (interface{}, error) {
 				point := &Point{X: float64(i), Y: float64(i * 2)}
 				// SCHEME C: Return Go object for automatic association
@@ -981,19 +1029,22 @@ func TestMemoryManagement(t *testing.T) {
 			}).
 			Build(context)
 
-		if err != nil {
+		if constructor.IsException() {
+			err := context.Exception()
 			t.Fatalf("Failed to create class %s: %v", className, err)
 		}
 
 		// Create instances and let them be garbage collected
 		// Note: Globals will manage the constructor memory automatically
 		context.Globals().Set(className, constructor)
-		_, err = context.Eval(fmt.Sprintf(`
+		result := context.Eval(fmt.Sprintf(`
             for (let j = 0; j < 5; j++) {
                 let obj = new %s();
             }
         `, className))
-		if err != nil {
+		defer result.Free()
+		if result.IsException() {
+			err := context.Exception()
 			t.Fatalf("Failed to create instances for %s: %v", className, err)
 		}
 	}
@@ -1017,8 +1068,9 @@ func TestComplexClassHierarchy(t *testing.T) {
 	defer context.Close()
 
 	// Create Point class
-	pointConstructor, _, err := createPointClass(context)
-	if err != nil {
+	pointConstructor, _ := createPointClass(context)
+	if pointConstructor.IsException() {
+		err := context.Exception()
 		t.Fatalf("Failed to create Point class: %v", err)
 	}
 
@@ -1027,7 +1079,7 @@ func TestComplexClassHierarchy(t *testing.T) {
 	context.Globals().Set("Point", pointConstructor)
 
 	// Test complex inheritance hierarchy
-	result, err := context.Eval(`
+	result := context.Eval(`
         // First level inheritance
         class ColoredPoint extends Point {
             constructor(x, y, color) {
@@ -1064,10 +1116,11 @@ func TestComplexClassHierarchy(t *testing.T) {
             ncp1.norm()
         ];
     `)
-	if err != nil {
+	defer result.Free()
+	if result.IsException() {
+		err := context.Exception()
 		t.Fatalf("Failed to evaluate complex hierarchy: %v", err)
 	}
-	defer result.Free()
 
 	// Check all instanceof relationships
 	if !result.GetIdx(0).ToBool() {
@@ -1107,8 +1160,9 @@ func TestConcurrentAccess(t *testing.T) {
 	defer context.Close()
 
 	// Create Point class
-	pointConstructor, _, err := createPointClass(context)
-	if err != nil {
+	pointConstructor, _ := createPointClass(context)
+	if pointConstructor.IsException() {
+		err := context.Exception()
 		t.Fatalf("Failed to create Point class: %v", err)
 	}
 
@@ -1121,14 +1175,15 @@ func TestConcurrentAccess(t *testing.T) {
 	// when accessed from a single goroutine repeatedly
 
 	for i := 0; i < 100; i++ {
-		result, err := context.Eval(fmt.Sprintf(`
+		result := context.Eval(fmt.Sprintf(`
             let p%d = new Point(%d, %d);
             p%d.norm();
         `, i, i, i+1, i))
-		if err != nil {
+		defer result.Free()
+		if result.IsException() {
+			err := context.Exception()
 			t.Fatalf("Failed on iteration %d: %v", i, err)
 		}
-		result.Free()
 	}
 }
 
@@ -1140,15 +1195,17 @@ func TestUnifiedConstructorMapping(t *testing.T) {
 	defer ctx.Close()
 
 	// Test manual class creation
-	manualConstructor, manualClassID, err := createPointClass(ctx)
-	if err != nil {
+	manualConstructor, manualClassID := createPointClass(ctx)
+	if manualConstructor.IsException() {
+		err := ctx.Exception()
 		t.Fatalf("Failed to create manual Point class: %v", err)
 	}
 
 	// Test reflection class creation
-	reflectConstructor, reflectClassID, err := ctx.BindClass(&Point{})
-	if err != nil {
-		t.Fatalf("Failed to create reflected Point class: %v", err)
+	reflectConstructor, reflectClassID := ctx.BindClass(&Point{})
+	if reflectConstructor.IsException() {
+		err := ctx.Exception()
+		t.Fatalf("Failed to create reflection Point class: %v", err)
 	}
 
 	// Verify both constructors are registered in the unified mapping
@@ -1172,17 +1229,18 @@ func TestUnifiedConstructorMapping(t *testing.T) {
 	ctx.Globals().Set("ManualPoint", manualConstructor)
 	ctx.Globals().Set("ReflectPoint", reflectConstructor)
 
-	result, err := ctx.Eval(`
+	result := ctx.Eval(`
         let manual = new ManualPoint(1, 2);
         let reflect = new ReflectPoint();
         reflect.X = 3;
         reflect.Y = 4;
         [manual.x, manual.y, reflect.X, reflect.Y];
     `)
-	if err != nil {
+	defer result.Free()
+	if result.IsException() {
+		err := ctx.Exception()
 		t.Fatalf("Failed to test unified mapping: %v", err)
 	}
-	defer result.Free()
 
 	if result.GetIdx(0).Float64() != 1.0 || result.GetIdx(1).Float64() != 2.0 {
 		t.Errorf("Manual constructor instance incorrect: got (%f, %f)",
@@ -1202,7 +1260,7 @@ func TestReadOnlyAndWriteOnlyAccessors(t *testing.T) {
 	defer ctx.Close()
 
 	// Test ReadOnlyAccessor
-	constructor1, _, err := NewClassBuilder("ReadOnlyTest").
+	constructor1, _ := NewClassBuilder("ReadOnlyTest").
 		Constructor(func(ctx *Context, instance *Value, args []*Value) (interface{}, error) {
 			return &Point{X: 10, Y: 20}, nil
 		}).
@@ -1213,23 +1271,25 @@ func TestReadOnlyAndWriteOnlyAccessors(t *testing.T) {
 		}, nil).
 		Build(ctx)
 
-	if err != nil {
+	if constructor1.IsException() {
+		err := ctx.Exception()
 		t.Fatalf("Failed to create ReadOnlyTest class: %v", err)
 	}
 
 	ctx.Globals().Set("ReadOnlyTest", constructor1)
 
 	// Test reading works, writing doesn't change value
-	result, err := ctx.Eval(`
+	result := ctx.Eval(`
         let obj1 = new ReadOnlyTest();
         let original = obj1.readOnlyX;
         obj1.readOnlyX = 999; // Should not change
         [original, obj1.readOnlyX];
     `)
-	if err != nil {
+	defer result.Free()
+	if result.IsException() {
+		err := ctx.Exception()
 		t.Fatalf("ReadOnly accessor test failed: %v", err)
 	}
-	defer result.Free()
 
 	if result.GetIdx(0).Float64() != 10.0 || result.GetIdx(1).Float64() != 10.0 {
 		t.Errorf("ReadOnly accessor failed: expected [10, 10], got [%f, %f]",
@@ -1237,7 +1297,7 @@ func TestReadOnlyAndWriteOnlyAccessors(t *testing.T) {
 	}
 
 	// Test WriteOnlyAccessor
-	constructor2, _, err := NewClassBuilder("WriteOnlyTest").
+	constructor2, _ := NewClassBuilder("WriteOnlyTest").
 		Constructor(func(ctx *Context, instance *Value, args []*Value) (interface{}, error) {
 			return &Point{X: 0, Y: 0}, nil
 		}).
@@ -1254,22 +1314,24 @@ func TestReadOnlyAndWriteOnlyAccessors(t *testing.T) {
 		}, nil).
 		Build(ctx)
 
-	if err != nil {
+	if constructor2.IsException() {
+		err := ctx.Exception()
 		t.Fatalf("Failed to create WriteOnlyTest class: %v", err)
 	}
 
 	ctx.Globals().Set("WriteOnlyTest", constructor2)
 
 	// Test writing works, reading returns undefined
-	result2, err := ctx.Eval(`
+	result2 := ctx.Eval(`
         let obj2 = new WriteOnlyTest();
         obj2.writeOnlyX = 42;
         [obj2.getX, obj2.writeOnlyX]; // getX should show 42, writeOnlyX should be undefined
     `)
-	if err != nil {
+	defer result2.Free()
+	if result2.IsException() {
+		err := ctx.Exception()
 		t.Fatalf("WriteOnly accessor test failed: %v", err)
 	}
-	defer result2.Free()
 
 	if result2.GetIdx(0).Float64() != 42.0 || !result2.GetIdx(1).IsUndefined() {
 		t.Errorf("WriteOnly accessor failed: expected [42, undefined], got [%f, %v]",
@@ -1277,7 +1339,7 @@ func TestReadOnlyAndWriteOnlyAccessors(t *testing.T) {
 	}
 
 	// Test StaticReadOnlyAccessor
-	constructor3, _, err := NewClassBuilder("StaticReadOnlyTest").
+	constructor3, _ := NewClassBuilder("StaticReadOnlyTest").
 		Constructor(func(ctx *Context, instance *Value, args []*Value) (interface{}, error) {
 			return &Point{X: 0, Y: 0}, nil
 		}).
@@ -1286,22 +1348,24 @@ func TestReadOnlyAndWriteOnlyAccessors(t *testing.T) {
 		}, nil).
 		Build(ctx)
 
-	if err != nil {
+	if constructor3.IsException() {
+		err := ctx.Exception()
 		t.Fatalf("Failed to create StaticReadOnlyTest class: %v", err)
 	}
 
 	ctx.Globals().Set("StaticReadOnlyTest", constructor3)
 
 	// Test static readonly accessor
-	result3, err := ctx.Eval(`
+	result3 := ctx.Eval(`
         let original3 = StaticReadOnlyTest.VERSION;
         StaticReadOnlyTest.VERSION = "2.0.0"; // Should not change
         [original3, StaticReadOnlyTest.VERSION];
     `)
-	if err != nil {
+	defer result3.Free()
+	if result3.IsException() {
+		err := ctx.Exception()
 		t.Fatalf("StaticReadOnly accessor test failed: %v", err)
 	}
-	defer result3.Free()
 
 	if result3.GetIdx(0).String() != "1.0.0" || result3.GetIdx(1).String() != "1.0.0" {
 		t.Errorf("StaticReadOnly accessor failed: expected ['1.0.0', '1.0.0'], got ['%s', '%s']",
@@ -1317,18 +1381,20 @@ func TestCallConstructorAPI(t *testing.T) {
 	defer ctx.Close()
 
 	// Create Point class
-	pointConstructor, _, err := createPointClass(ctx)
-	if err != nil {
+	pointConstructor, _ := createPointClass(ctx)
+	defer pointConstructor.Free()
+	if pointConstructor.IsException() {
+		err := ctx.Exception()
 		t.Fatalf("Failed to create Point class: %v", err)
 	}
-	defer pointConstructor.Free()
 
 	// Test CallConstructor with no arguments
 	instance1 := pointConstructor.CallConstructor()
 	defer instance1.Free()
 
 	if instance1.IsException() {
-		t.Fatalf("CallConstructor with no args failed: %v", ctx.Exception())
+		err := ctx.Exception()
+		t.Fatalf("CallConstructor with no args failed: %v", err)
 	}
 
 	// Verify instance properties
@@ -1350,7 +1416,8 @@ func TestCallConstructorAPI(t *testing.T) {
 	defer instance2.Free()
 
 	if instance2.IsException() {
-		t.Fatalf("CallConstructor with args failed: %v", ctx.Exception())
+		err := ctx.Exception()
+		t.Fatalf("CallConstructor with args failed: %v", err)
 	}
 
 	// Verify constructor arguments were applied
@@ -1388,15 +1455,16 @@ func TestSchemeCSynchronization(t *testing.T) {
 	defer ctx.Close()
 
 	// Create Point class
-	pointConstructor, _, err := createPointClass(ctx)
-	if err != nil {
+	pointConstructor, _ := createPointClass(ctx)
+	if pointConstructor.IsException() {
+		err := ctx.Exception()
 		t.Fatalf("Failed to create Point class: %v", err)
 	}
 
 	ctx.Globals().Set("Point", pointConstructor)
 
 	// Test that accessor changes sync with Go object
-	result, err := ctx.Eval(`
+	result := ctx.Eval(`
         let p = new Point(1, 2);
         
         // Change values via accessors
@@ -1406,10 +1474,11 @@ func TestSchemeCSynchronization(t *testing.T) {
         // Read back via accessors  
         [p.x, p.y];
     `)
-	if err != nil {
+	defer result.Free()
+	if result.IsException() {
+		err := ctx.Exception()
 		t.Fatalf("Failed to evaluate synchronization test: %v", err)
 	}
-	defer result.Free()
 
 	if result.GetIdx(0).Float64() != 100.0 || result.GetIdx(1).Float64() != 200.0 {
 		t.Errorf("Accessor synchronization failed: expected [100, 200], got [%f, %f]",
@@ -1417,11 +1486,12 @@ func TestSchemeCSynchronization(t *testing.T) {
 	}
 
 	// Test that we can retrieve the Go object and verify synchronization
-	instance, err := ctx.Eval(`p`)
-	if err != nil {
+	instance := ctx.Eval(`p`)
+	defer instance.Free()
+	if instance.IsException() {
+		err := ctx.Exception()
 		t.Fatalf("Failed to get instance: %v", err)
 	}
-	defer instance.Free()
 
 	goObj, err := instance.GetGoObject()
 	if err != nil {
