@@ -116,8 +116,13 @@ func NewRuntime(opts ...Option) *Runtime {
 	if rt.options.canBlock {
 		C.JS_SetCanBlock(rt.ref, C.int(1))
 	}
+
 	if rt.options.strip > 0 {
 		rt.SetStripInfo(rt.options.strip)
+	}
+
+	if rt.options.moduleImport {
+		rt.SetModuleImport(rt.options.moduleImport)
 	}
 
 	// Set timeout after registration (will override interrupt handler)
@@ -191,8 +196,14 @@ func (r *Runtime) SetExecuteTimeout(timeout uint64) {
 	r.interruptHandler = nil
 }
 
+// SetStripInfo sets the strip info for the runtime.
 func (r *Runtime) SetStripInfo(strip int) {
 	C.JS_SetStripInfo(r.ref, C.int(strip))
+}
+
+// SetModuleImport sets whether the runtime supports module import.
+func (r *Runtime) SetModuleImport(moduleImport bool) {
+	C.JS_SetModuleLoaderFunc2(r.ref, (*C.JSModuleNormalizeFunc)(unsafe.Pointer(nil)), (*C.JSModuleLoaderFunc2)(C.js_module_loader), (*C.JSModuleCheckSupportedImportAttributes)(C.js_module_check_attributes), unsafe.Pointer(nil))
 }
 
 // SetInterruptHandler sets a user interrupt handler using simplified approach.
@@ -228,11 +239,6 @@ func (r *Runtime) NewContext() *Context {
 
 	// create a new context (heap, global object and context stack
 	ctx_ref := C.JS_NewContext(r.ref)
-
-	// set the module loader for support dynamic import
-	if r.options.moduleImport {
-		C.JS_SetModuleLoaderFunc2(r.ref, (*C.JSModuleNormalizeFunc)(unsafe.Pointer(nil)), (*C.JSModuleLoaderFunc2)(C.js_module_loader), (*C.JSModuleCheckSupportedImportAttributes)(C.js_module_check_attributes), unsafe.Pointer(nil))
-	}
 
 	// import the 'std' and 'os' modules
 	C.js_init_module_std(ctx_ref, C.CString("std"))
