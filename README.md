@@ -12,31 +12,6 @@ Go bindings to QuickJS: a fast, small, and embeddable ES2020 JavaScript interpre
 
 **⚠️ This project is not ready for production use yet. Use at your own risk. APIs may change without notice.**
 
-## Platform Support
-
-we prebuilt quickjs static library for the following platforms:
-
-| Platform | Arch  | Static Library                                       |
-| -------- | ----- | ---------------------------------------------------- |
-| Linux    | x64   | [libquickjs.a](deps/libs/linux_amd64/libquickjs.a)   |
-| Linux    | arm64 | [libquickjs.a](deps/libs/linux_arm64/libquickjs.a)   |
-| Windows  | x64   | [libquickjs.a](deps/libs/windows_amd64/libquickjs.a) |
-| Windows  | x86   | [libquickjs.a](deps/libs/windows_386/libquickjs.a)   |
-| MacOS    | x64   | [libquickjs.a](deps/libs/darwin_amd64/libquickjs.a)  |
-| MacOS    | arm64 | [libquickjs.a](deps/libs/darwin_arm64/libquickjs.a)  |
-
-\* for build on windows, ples see: https://github.com/buke/quickjs-go/issues/151#issuecomment-2134307728
-
-## Version Notes
-
-| quickjs-go | QuickJS     |
-| ---------- | ----------- |
-| v0.5.x     | v2025-04-26 |
-| v0.4.x     | v2024-02-14 |
-| v0.3.x     | v2024-01-13 |
-| v0.2.x     | v2023-12-09 |
-| v0.1.x     | v2021-03-27 |
-
 ## Features
 
 - Evaluate script
@@ -47,23 +22,10 @@ we prebuilt quickjs static library for the following platforms:
 - **Marshal/Unmarshal Go values to/from JavaScript values**
 - **Full TypedArray support (Int8Array, Uint8Array, Float32Array, etc.)**
 - **Create JavaScript Classes from Go with ClassBuilder**
-- **Create JavaScript Modules from Go with ModuleBuilder**
+- **Create JavaScript Modules from Go with ModuleBuilder*o
+- **Cross-platform:** Prebuilt QuickJS static libraries for Linux (x64/arm64), Windows (x64/x86), MacOS (x64/arm64).  
+  *(See [deps/libs](deps/libs) for details. For Windows build tips, see: https://github.com/buke/quickjs-go/issues/151#issuecomment-2134307728)*
 
-## Breaking Changes
-
-### v0.5.11
-- **API Simplification**: Removed error return values from JavaScript execution methods
-  - `Context.Eval()`, `Context.EvalFile()`, `Context.LoadModule()`, `Context.LoadModuleBytecode()` now return only `*Value`
-  - `Context.EvalBytecode()`, `Context.Await()` now return only `*Value`  
-  - `Context.BindClass()`, `ClassBuilder.Build()` now return only `(*Value, uint32)`
-  * Tips: Use `Value.IsException()` to check for exceptions and Use `Context.Exception()` to get exception as Go error
-
-### v0.5.10
-- **Value Type Changed from Value to *Value**
-  - All `Value` parameters and return values have been changed from value types to pointer types (`*Value`)
-  - `Context.Function(fn func(*Context, Value, []Value) Value)` → `Context.Function(fn func(*Context, *Value, []*Value) *Value)`
-  - All value creation methods now return `*Value` instead of `Value`
-  - Class struct signatures updated to use `*Value` parameters
 
 ## Guidelines
 
@@ -79,16 +41,15 @@ we prebuilt quickjs static library for the following platforms:
 - Use `runtime.SetFinalizer()` cautiously as it may interfere with QuickJS's GC.
 
 ### Performance Tips
-- QuickJS is not thread-safe. Ensure execution in a single thread or use a thread pool pattern with pre-initialized runtimes
-- Reuse Runtime and Context objects when possible
-- Avoid frequent conversion between Go and JS values
-- Consider using bytecode compilation for frequently executed scripts
+- QuickJS is not thread-safe. For concurrency or isolation, use a thread pool pattern with pre-initialized runtimes, or manage separate Runtime/Context instances for different tasks or users (such as : [https://github.com/buke/js-executor](https://github.com/buke/js-executor)).
+- Reuse Runtime and Context objects when possible.
+- Avoid frequent conversion between Go and JS values.
+- Consider using bytecode compilation for frequently executed scripts.
 
 ### Best Practices
-- Keep JavaScript execution isolated to prevent interference - **Create separate Runtime/Context instances for different tasks or users**
-- Use appropriate `EvalOptions` for different script types
-- Handle both JavaScript exceptions and Go errors appropriately
-- Test memory usage under load to prevent leaks
+- Use appropriate `EvalOptions` for different script types.
+- Handle both JavaScript exceptions and Go errors appropriately.
+- Test memory usage under load to prevent leaks.
 
 
 ## Usage
@@ -1527,3 +1488,7 @@ func main() {
     fmt.Println("Fibonacci result:", result.ToInt32())
 }
 ```
+
+## License
+
+[MIT License](LICENSE)

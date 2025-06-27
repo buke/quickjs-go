@@ -1,0 +1,326 @@
+# Changelog
+
+## v0.5.13
+2f0adf2 add SetModuleImport method for Runtime (#491)
+
+## v0.5.12
+1e6ac15  New Context methods with 'New' prefix for value creation (#490)
+
+## v0.5.11
+ae22e20 Remove error return values from JS execution methods (#489)
+
+## v0.5.10
+fce713c refact: convert Value methods to use pointer receivers (#488)
+
+## v0.5.9
+93be967 Update QuickJS Library for Production Optimized
+
+## v0.5.8
+1189365 Create JavaScript Modules from Go with ModuleBuilder (#472)
+
+## v0.5.7
+da40a51 remove wrong FreeValue in LoadModuleBytecode to avoid crash (#469)
+ecd30ed Feature/refact class (#468)
+6acbbcf Merge pull request #461 from buke/dependabot/submodules/deps/quickjs-4d9a27c
+8576403 Merge pull request #465 from buke/create-pull-request/patch-nrdidpb
+a3613f5 Merge pull request #466 from buke/create-pull-request/patch-etp756o
+3a5a21a Merge pull request #467 from buke/create-pull-request/patch-rwjn02o
+23166b0 Merge pull request #464 from buke/create-pull-request/patch-t2t5bxu
+fbfbaa9 Merge pull request #463 from buke/create-pull-request/patch-77ut9dd
+db9b66a Merge pull request #462 from buke/create-pull-request/patch-v3glfin
+77296aa Update QuickJS Static Library For Linux aarch64
+857700d Update QuickJS Static Library For windows_amd64
+56bdf70 Update QuickJS Static Library For windows_386
+80b2850 Update QuickJS Static Library For Linux x86_64
+e6d77dc Update QuickJS Static Library For darwin_arm64
+7d36261 Update QuickJS Static Library For darwin_amd64
+05dd057 Bump deps/quickjs from `638ec8c` to `4d9a27c`
+3a3827f update codecov badge icon
+
+## v0.5.6
+da3d5a9 Merge pull request #459 from buke/feature/class
+d2639c7 update readme and example
+f9e8cb7 using parseFieldTag for marshal and class reflect
+49e03f3 test:  coverage  for class_reflect.go to : 100%
+3b62fd5 test:  coverage  for bridge.go to : 96.6%
+ba8ee53 test:  coverage  for class.go to : 94.3%
+dba1545 impl C.CreateClass & improve cov to 93.9%
+40c85d0 test:  coverage  for value.go to : 92.8%
+edac641 test: test cov 100% for value.go
+92ea0c7 Use Range + Delete to avoid potential race conditions with map replacement
+c806a44 feat: unify constructor-classID mapping for manual and reflection classes
+b670fbc fixed Windows compatibility
+1bd9346 fixed checkptr error
+a3de775 feat: implement reflection-based  Go struct to JS class binding
+15de892 feat: implement ClassBuilder API for JavaScript class bindings
+
+## v0.5.5
+30cf062 Refact Function/Asyncfunction/SetInterruptHandler and add Promise API (#458)
+
+## v0.5.4
+d722871 Implementing TypedArray Binding (#457)
+68b5dd1 update .codecov.yml (#456)
+522551c Improve coverage (#455)
+7af2609 add .codecov.yml (#454)
+
+## v0.5.3
+2287cac impl Marshal/Unmarshal interface (#453)
+2798978 Implementation LoadModuleBytecode C function (#452)
+5f84a1f Remove unnecessary HasException & ValueGetTag check since QuickJS C functions already check it
+ff756f6 Bump deps/quickjs from `bb986e5` to `638ec8c` (#444)
+cf2edbd exposed HasException and improve  test cov
+76af103 improve test coverage with copilot (#442)
+7f4025f remove collection (#438)
+0841702 Handling exceptions consistently when loading module from source or bytecode (#439)
+38ab575 Update test.yml with CODECOV_TOKEN (#441)
+bbb11d4 Bump deps/quickjs from `f10ef29` to `bb986e5` (#429)
+
+## v0.5.2
+a6bda2f Bump deps/quickjs from `9bce51e` to `f10ef29` (#421)
+
+## v0.5.1
+4ea9a19 Bump deps/quickjs from `aaa9cea` to `9bce51e` (#408)
+84e6a09 opt runtime default option
+
+## v0.5.0
+fcd91bd 0.5.0 (#406)
+e5afd11 Bump deps/quickjs from 6e2e68f to aaa9cea (#398)
+da2f7fa Move SetInterruptHandler from context to runtime and add missing Pin of C.handlerArgs instance (#391)
+8243c33 Bump codecov/codecov-action from 5.4.0 to 5.4.3 (#397)
+44e7cb4 Bump codecov/codecov-action from 5.3.1 to 5.4.0 (#374)
+b6d6f74 Bump codecov/codecov-action from 5.1.2 to 5.3.1 (#369)
+787d3db Bump codecov/codecov-action from 5.1.1 to 5.1.2 (#362)
+a7c7591 Bump codecov/codecov-action from 5.0.7 to 5.1.1 (#361)
+4666e35 Bump github.com/stretchr/testify from 1.9.0 to 1.10.0 (#360)
+b169a43 Bump codecov/codecov-action from 5.0.4 to 5.0.7 (#359)
+fb723e3 Bump codecov/codecov-action from 5.0.2 to 5.0.4 (#358)
+f8c593a Bump codecov/codecov-action from 5.0.0 to 5.0.2 (#357)
+3086d2b Bump codecov/codecov-action from 4.6.0 to 5.0.0 (#355)
+
+## v0.4.15
+be74e6c add call class Constructor (#351)
+e3bc34d Bump codecov/codecov-action from 4.5.0 to 4.6.0 (#348)
+01fd0f4 Bump peter-evans/create-pull-request from 6 to 7 (#346)
+
+## v0.4.14
+f6b5379 Merge branch 'main' of github.com:buke/quickjs-go
+5b4534e Feature/module compile (#344)
+700bda9 Merge branch 'main' of github.com:buke/quickjs-go
+a8f2ecf Bump deps/quickjs from `012451d` to `6e2e68f` (#341)
+
+## v0.4.13
+8fb30a0 Merge branch 'main' of github.com:buke/quickjs-go
+8a17026 Feature/readme (#340)
+f58cf9a Merge branch 'main' of github.com:buke/quickjs-go
+1f440d4 Bump deps/quickjs from `b3715f7` to `012451d` (#333)
+54d42eb Update build_static_lib.yml (#331)
+be3a92b Bump deps/quickjs from `36911f0` to `b3715f7` (#310)
+812489e Update build_static_lib.yml (#316)
+bfdd497 Update build_static_lib.yml
+
+## v0.4.12
+d939fca Merge branch 'main' of github.com:buke/quickjs-go
+575b983 set EvalFlag function receive boolean argument (#309)
+7aeaf26 set EvalFlag function receive boolean argument
+
+## v0.4.11
+aa8102b remove JS_DetectModule from LoadModule avoid err (#308)
+
+## v0.4.10
+de4baef Feature/module (#307)
+5fae7cb Feature/module (#306)
+b8649c2 Bump codecov/codecov-action from 4.4.1 to 4.5.0 (#305)
+
+## v0.4.9
+59f33a5 add AwaitEval and IsPromise (#303)
+
+## v0.4.8
+51598d7 add await function to execute a promise (#302)
+30889b0 update quickjs from `d378a9f` to `36911f0`
+9066708 set build static workflow run on pull_request open
+56d11c6 Bump deps/quickjs from `d378a9f` to `36911f0` (#280)
+
+## v0.4.7
+de12704 Timeout (#279)
+
+## v0.4.6
+5f36dbc add Runtime() function to context (#278)
+11209d5 add target for build darwin amd64
+be45c99 --- (#273)
+82fc7f3 update readme
+
+## v0.4.5
+690ccc6 new build static lib (#188)
+
+## v0.4.4
+cba5289 set up ci build at dependbot create quickjs pr
+5f55aee add win32 support (#256)
+af8f1b1 new build static lib (#188)
+95d89af Bump codecov/codecov-action from 4.3.1 to 4.4.0 (#171)
+f562baf Bump deps/quickjs from `3b45d15` to `d378a9f` (#167)
+b1c165c Bump codecov/codecov-action from 4.3.0 to 4.3.1 (#164)
+f0a91db Bump codecov/codecov-action from 4.2.0 to 4.3.0 (#161)
+e3ddb30 Bump codecov/codecov-action from 4.1.1 to 4.2.0 (#160)
+
+## v0.4.3
+e14d2a9 Bump deps/quickjs to 3b45d15 (#156)
+006c5d3 set quickjs submodule
+8b8a722 Bump codecov/codecov-action from 4.1.0 to 4.1.1 (#155)
+
+## v0.4.2
+4b0187f Bump deps/quickjs from `8180d3d` to `6a89d7c` (#149)
+5342fc5 Bump github.com/stretchr/testify from 1.8.4 to 1.9.0 (#150)
+ed40160 Bump codecov/codecov-action from 4.0.2 to 4.1.0 (#148)
+
+## v0.4.1
+c67c99a Bump deps/quickjs from `12c91df` to `8180d3d` (#144)
+81d6348 Bump codecov/codecov-action from 4.0.1 to 4.0.2 (#143)
+
+## v0.4.0
+9ad5658 Bump deps/quickjs from `95e0aa0` to `12c91df` (#138)
+a81c97a Bump deps/quickjs from `6f480ab` to `95e0aa0` (#133)
+e799097 remove unnecessary code on NewContext
+
+## v0.3.4
+
+## v0.3.3
+5a96050 using quickjs eventloop to impl setTimeout & clearTimeout
+5961fda Feature/win (#129)
+9927d7a Bump codecov/codecov-action from 4.0.0 to 4.0.1 (#112)
+cc7bd89 improve fmt format
+
+## v0.3.2
+ff4209f stop loop on runtime close.  issues/105 (#106)
+7184eef Bump codecov/codecov-action from 3.1.5 to 4.0.0 (#110)
+196eb54 Bump peter-evans/create-pull-request from 5 to 6 (#111)
+01a93d6 Bump deps/quickjs from `67723c9` to `c6cc6a9` (#104)
+
+## v0.3.1
+39076d8 Bump codecov/codecov-action from 3.1.4 to 3.1.5 (#103)
+ee4326d Bump deps/quickjs from `3f81070` to `67723c9` (#100)
+1d23ea6 Bump actions/dependency-review-action from 3 to 4 (#98)
+
+## v0.3.0
+065c40b Bump deps/quickjs v2024-01-13 (#95)
+af86a54 Bump deps/quickjs from `e1e65ac` to `f25e5d4` (#90)
+7497656 Bump deps/quickjs from `3c2cfab` to `e1e65ac` (#87)
+
+## v0.2.5
+58834a4 Bump deps/quickjs from `3ab1c2b` to `3c2cfab` (#84)
+
+## v0.2.4
+f1160c4 Bump deps/quickjs from `2ee6be7` to `3ab1c2b` (#80)
+
+## v0.2.3
+bcf5884 Bump deps/quickjs from `9b587c4` to `2ee6be7` (#77)
+9d5ce76 bump build for macos12 (#75)
+
+## v0.2.2
+8330403 Bump deps/quickjs from `4bb8c35` to `9b587c4` (#72)
+
+## v0.2.1
+a68e4d7 Bump deps/quickjs from `daa35bc` to `4bb8c35` (#69)
+37e8c85 Bump github/codeql-action from 2 to 3 (#68)
+
+## v0.2.0
+f908e06 Bump deps/quickjs from v2021-03-27 to v2023-12-09 (#65)
+1a9c344 Bump deps/quickjs from `321dbfa` to `55a4878` (#62)
+d002b60 Bump actions/setup-go from 4 to 5 (#61)
+
+## v0.1.18
+cd850f8 Bump deps/quickjs from `03cc5ec` to `321dbfa` (#56)
+
+## v0.1.17
+1758b86 Update QuickJS Static Library For Darwin (#54)
+30867e3 Update build.yml (#53)
+
+## v0.1.16
+276dfc7 Update QuickJS Static Library For Darwin (#51)
+566c7d9 Update QuickJS Static Library For Linux & Windows (#52)
+735b227 Update build.yml (#50)
+63e0228 git submodule updated (#48)
+
+## v0.1.15
+5c012eb using runtime/cgo instead map store fn/asyncfn & context (#46)
+d495b02 upgrade go version 1.20+ (#47)
+1800b71 Bump actions/checkout from 3 to 4 (#45)
+
+## v0.1.14
+462a490 update go 1.18 (#44)
+74da115 feat SetInterruptHandler (#43)
+
+## v0.1.13
+cabd2de 【feat】添加ArrayBuffer操作 (#40)
+d337637 add instanceof function
+f08c12b fix cargs len == 0
+d082307 【feat】添加简单的集合操作 (#39)
+0e0269a Bump github.com/stretchr/testify from 1.8.3 to 1.8.4 (#37)
+7439214 Bump github.com/stretchr/testify from 1.8.2 to 1.8.3 (#36)
+
+## v0.1.12
+a818064 Bump codecov/codecov-action from 3.1.3 to 3.1.4 (#35)
+6c49f39 Bump codecov/codecov-action from 3.1.1 to 3.1.3 (#34)
+c94c020 Bump peter-evans/create-pull-request from 4 to 5 (#32)
+e965988 Bump actions/setup-go from 3 to 4 (#31)
+1c75886 Bump github.com/stretchr/testify from 1.8.1 to 1.8.2 (#30)
+ae26216 Bump actions/dependency-review-action from 2 to 3 (#27)
+bebebd9 Bump github.com/stretchr/testify from 1.8.0 to 1.8.1 (#25)
+c7cedee Bump codecov/codecov-action from 3.1.0 to 3.1.1 (#24)
+f805612 git zh-cn readme (#23)
+91da902 update license
+
+## v0.1.11
+ddfbec3 [feature] JSON Stringify and ParseJSON (#22)
+
+## v0.1.10
+c1fadd6 Bugfix/async (#21)
+af0406d bugfix: call same promise in a function (#20)
+
+## v0.1.9
+b24dc60 make ScheduleJob sync exec
+
+## v0.1.8
+ff680a1 set jobChan size to 1024
+
+## v0.1.7
+91d89b3 manual manager goroutine for schedulejob
+
+## v0.1.6
+bc0f559 Feature/loop (#19)
+
+## v0.1.5
+d19dbe6 Feature/loop (#17)
+9c4b042 add IsJobPending api
+73599a9 using unsafe.Slice to get c array
+
+## v0.1.4
+fc2b5b3 Feature/invoke (#16)
+
+## v0.1.3
+c9e16c0 add ctx.invoke method (#15)
+
+## v0.1.2
+bbca222 mini require go 1.17
+6aabc65 async function binding (#14)
+c7bab42 Update test.yml
+
+## v0.1.1
+40a1f63 Feature/pendingjob (#12)
+59ca75d add ExecutePendingJob (#11)
+7421100 Bump github.com/stretchr/testify from 1.7.5 to 1.8.0 (#10)
+
+## v0.1.0
+3eab6e6 Bump github.com/stretchr/testify from 1.7.4 to 1.7.5 (#9)
+5354030 Bump github.com/stretchr/testify from 1.7.2 to 1.7.4 (#8)
+830843d Bump actions/dependency-review-action from 1 to 2 (#7)
+1498d38 Update README.md
+ed45cfe windows support
+4b8877e Update QuickJS Static Library For Linux & Windows (#6)
+0a5f2f5 Update QuickJS Static Library For Darwin (#5)
+6de1366 update Makefile
+0b11739 add windows build (#3)
+c902778 git submodule updated
+47b1544 fixed windows cgo compile error (#2)
+491c4a1 Update test.yml
+3b7f486 Add github actions
+e51ba32 make it run

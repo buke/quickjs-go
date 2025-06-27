@@ -12,30 +12,6 @@ Go 语言的 QuickJS 绑定库：快速、小型、可嵌入的 ES2020 JavaScrip
 
 **⚠️ 此项目尚未准备好用于生产环境。请自行承担使用风险。API 可能会随时更改。**
 
-## 平台支持
-
-使用预编译的 quickjs 静态库，支持以下平台：
-
-| 平台    | 架构  | 静态库                                               |
-| ------- | ----- | ---------------------------------------------------- |
-| Linux   | x64   | [libquickjs.a](deps/libs/linux_amd64/libquickjs.a)   |
-| Linux   | arm64 | [libquickjs.a](deps/libs/linux_arm64/libquickjs.a)   |
-| Windows | x64   | [libquickjs.a](deps/libs/windows_amd64/libquickjs.a) |
-| Windows | x86   | [libquickjs.a](deps/libs/windows_386/libquickjs.a)   |
-| MacOS   | x64   | [libquickjs.a](deps/libs/darwin_amd64/libquickjs.a)  |
-| MacOS   | arm64 | [libquickjs.a](deps/libs/darwin_arm64/libquickjs.a)  |
-
-\* Windows 构建步骤请参考：https://github.com/buke/quickjs-go/issues/151#issuecomment-2134307728
-
-## 版本说明
-
-| quickjs-go | QuickJS     |
-| ---------- | ----------- |
-| v0.5.x     | v2025-04-26 |
-| v0.4.x     | v2024-02-14 |
-| v0.3.x     | v2024-01-13 |
-| v0.2.x     | v2023-12-09 |
-| v0.1.x     | v2021-03-27 |
 
 ## 功能特性
 
@@ -48,22 +24,8 @@ Go 语言的 QuickJS 绑定库：快速、小型、可嵌入的 ES2020 JavaScrip
 - **完整的 TypedArray 支持 (Int8Array, Uint8Array, Float32Array 等)**
 - **使用 ClassBuilder 从 Go 创建 JavaScript 类**
 - **使用 ModuleBuilder 从 Go 创建 JavaScript 模块**
-
-## 重大变更
-
-### v0.5.11 (最新版本)
-- **API 简化**: 移除了 JavaScript 执行方法的 error 返回值
-  - `Context.Eval()`, `Context.EvalFile()`, `Context.LoadModule()`, `Context.LoadModuleBytecode()` 现在只返回 `*Value`
-  - `Context.EvalBytecode()`, `Context.Await()` 现在只返回 `*Value`  
-  - `Context.BindClass()`, `ClassBuilder.Build()` 现在只返回 `(*Value, uint32)`
-  - 提示：使用 `Value.IsException()` 检查异常，使用 `Context.Exception()` 获取异常作为 Go error
-
-### v0.5.10
-- **Value类型从 Value 改为 *Value**
-  - 所有 `Value` 参数和返回值都已从值类型更改为指针类型 (`*Value`)
-  - `Context.Function(fn func(*Context, Value, []Value) Value)` → `Context.Function(fn func(*Context, *Value, []*Value) *Value)`
-  - 所有Value创建方法现在返回 `*Value` 而不是 `Value`
-  - Class 相关方法签名更新为使用 `*Value` 参数
+- **跨平台支持：** 提供预编译的 QuickJS 静态库，支持 Linux (x64/arm64)、Windows (x64/x86)、MacOS (x64/arm64)。  
+  *(详见 [deps/libs](deps/libs)。Windows 构建请参考：https://github.com/buke/quickjs-go/issues/151#issuecomment-2134307728)*
 
 ## 使用指南
 
@@ -79,16 +41,15 @@ Go 语言的 QuickJS 绑定库：快速、小型、可嵌入的 ES2020 JavaScrip
 - 谨慎使用 `runtime.SetFinalizer()`，因为它可能会干扰 QuickJS 的 GC。
 
 ### 性能建议
-- QuickJS 不是线程安全的。确保在单线程中执行，或者使用预初始化运行时的线程池模式
-- 尽可能重复使用 Runtime 和 Context 对象
+- QuickJS 不是线程安全的。如需并发或隔离，建议使用线程池模式预初始化运行时，或为不同任务/用户管理独立的 Runtime/Context 实例（推荐使用：[https://github.com/buke/js-executor](https://github.com/buke/js-executor)）。
+- 尽可能复用 Runtime 和 Context 对象
 - 避免频繁在 Go 和 JS 值之间转换
-- 对于频繁执行的脚本考虑使用字节码编译
+- 对于频繁执行的脚本建议使用字节码编译
 
 ### 最佳实践
-- 保持 JavaScript 执行隔离以防止干扰 - **为不同的任务或用户创建单独的 Runtime/Context 实例**
-- 为不同的脚本类型使用适当的 `EvalOptions`
-- 适当处理 JavaScript 异常和 Go 错误
-- 在负载下测试内存使用以防止泄漏
+- 针对不同脚本类型使用合适的 `EvalOptions`
+- 正确处理 JavaScript 异常和 Go 错误
+- 在高负载下测试内存使用，防止泄漏
 
 ## 用法
 
@@ -1527,3 +1488,6 @@ func main() {
 ```
 
 
+## License
+
+[MIT License](LICENSE)
