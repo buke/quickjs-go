@@ -1,4 +1,4 @@
-name: Build QuickJS Static Libraries (Production Optimized)
+name: Build QuickJS Static Libraries
 
 on:
     workflow_dispatch:
@@ -15,7 +15,7 @@ jobs:
               with:
                   arch: x86_64
                   packages: "build-base make cmake"
-            - name: Build Production Optimized Library
+            - name: Build Production Library
               shell: alpine.sh {0}
               run: |
                 mkdir -p deps/libs/linux_amd64
@@ -26,10 +26,7 @@ jobs:
                 
                 # Build with production optimizations for Linux x86_64
                 # Add optimization flags to the default CFLAGS instead of replacing them
-                make -e CONFIG_LTO=y \
-                  'CFLAGS_OPT=$(CFLAGS) -O3 -DNDEBUG -ffast-math -funroll-loops -fomit-frame-pointer -fstrict-aliasing -march=x86-64 -mtune=generic -flto' \
-                  'CFLAGS_NOLTO=$(CFLAGS) -O3 -DNDEBUG -ffast-math -funroll-loops -fomit-frame-pointer -fstrict-aliasing -march=x86-64 -mtune=generic' \
-                  libquickjs.a
+                make -e CONFIG_LTO=y libquickjs.a
                 
                 # Verify library file
                 file libquickjs.a
@@ -42,7 +39,7 @@ jobs:
                   commit-message: "Update QuickJS Production Library - Linux x86_64"
                   branch-suffix: random
                   delete-branch: true
-                  title: "QuickJS Production Optimized Library - Linux x86_64"
+                  title: "QuickJS Production Library - Linux x86_64"
                   base: ${{ github.head_ref }}
 
     linux-aarch64:
@@ -56,7 +53,7 @@ jobs:
               with:
                   arch: aarch64
                   packages: "build-base make cmake"
-            - name: Build Production Optimized Library
+            - name: Build Production Library
               shell: alpine.sh {0}
               run: |
                 mkdir -p deps/libs/linux_arm64
@@ -65,10 +62,7 @@ jobs:
                 make clean
                 
                 # Build with production optimizations for Linux ARM64
-                make -e CONFIG_LTO=y \
-                  'CFLAGS_OPT=$(CFLAGS) -O3 -DNDEBUG -ffast-math -funroll-loops -fomit-frame-pointer -fstrict-aliasing -march=armv8-a -mtune=generic -flto' \
-                  'CFLAGS_NOLTO=$(CFLAGS) -O3 -DNDEBUG -ffast-math -funroll-loops -fomit-frame-pointer -fstrict-aliasing -march=armv8-a -mtune=generic' \
-                  libquickjs.a
+                make -e CONFIG_LTO=y libquickjs.a
                 
                 file libquickjs.a
                 size libquickjs.a
@@ -80,7 +74,7 @@ jobs:
                   commit-message: "Update QuickJS Production Library - Linux aarch64"
                   branch-suffix: random
                   delete-branch: true
-                  title: "QuickJS Production Optimized Library - Linux aarch64"
+                  title: "QuickJS Production Library - Linux aarch64"
                   base: ${{ github.head_ref }}
 
     darwin_amd64:
@@ -90,7 +84,7 @@ jobs:
               with:
                   submodules: true
                   fetch-depth: 1
-            - name: Build Production Optimized Library
+            - name: Build Production Library
               run: |
                 mkdir -p deps/libs/darwin_amd64
                 cd deps/quickjs
@@ -99,8 +93,8 @@ jobs:
                 
                 # Build with production optimizations for macOS x86_64
                 make -e CONFIG_LTO=y \
-                  'CFLAGS_OPT=$(CFLAGS) -O3 -DNDEBUG -ffast-math -funroll-loops -fomit-frame-pointer -fstrict-aliasing -mmacosx-version-min=12.0 -target x86_64-apple-macos12 -arch x86_64 -flto' \
-                  'CFLAGS_NOLTO=$(CFLAGS) -O3 -DNDEBUG -ffast-math -funroll-loops -fomit-frame-pointer -fstrict-aliasing -mmacosx-version-min=12.0 -target x86_64-apple-macos12 -arch x86_64' \
+                  'CFLAGS_OPT=$(CFLAGS) -target x86_64-apple-macos12 -arch x86_64 -flto' \
+                  'CFLAGS_NOLTO=$(CFLAGS) -target x86_64-apple-macos12 -arch x86_64' \
                   libquickjs.a
                 
                 file libquickjs.a
@@ -113,7 +107,7 @@ jobs:
                   commit-message: "Update QuickJS Production Library - macOS x86_64"
                   branch-suffix: random
                   delete-branch: true
-                  title: "QuickJS Production Optimized Library - macOS x86_64"
+                  title: "QuickJS Production Library - macOS x86_64"
                   base: ${{ github.head_ref }}
 
     darwin_arm64:
@@ -123,7 +117,7 @@ jobs:
               with:
                   submodules: true
                   fetch-depth: 1
-            - name: Build Production Optimized Library
+            - name: Build Production Library
               run: |
                 mkdir -p deps/libs/darwin_arm64
                 cd deps/quickjs
@@ -132,8 +126,8 @@ jobs:
                 
                 # Build with production optimizations for macOS ARM64
                 make -e CONFIG_LTO=y \
-                  'CFLAGS_OPT=$(CFLAGS) -O3 -DNDEBUG -ffast-math -funroll-loops -fomit-frame-pointer -fstrict-aliasing -mmacosx-version-min=12.0 -target arm64-apple-macos12 -arch arm64 -mcpu=apple-a14 -flto' \
-                  'CFLAGS_NOLTO=$(CFLAGS) -O3 -DNDEBUG -ffast-math -funroll-loops -fomit-frame-pointer -fstrict-aliasing -mmacosx-version-min=12.0 -target arm64-apple-macos12 -arch arm64 -mcpu=apple-a14' \
+                  'CFLAGS_OPT=$(CFLAGS) -target arm64-apple-macos12 -arch arm64 -mcpu=apple-a14 -flto' \
+                  'CFLAGS_NOLTO=$(CFLAGS) -target arm64-apple-macos12 -arch arm64 -mcpu=apple-a14' \
                   libquickjs.a
                 
                 file libquickjs.a
@@ -146,7 +140,7 @@ jobs:
                   commit-message: "Update QuickJS Production Library - macOS ARM64"
                   branch-suffix: random
                   delete-branch: true
-                  title: "QuickJS Production Optimized Library - macOS ARM64"
+                  title: "QuickJS Production Library - macOS ARM64"
                   base: ${{ github.head_ref }}
 
     windows_386:
@@ -161,7 +155,7 @@ jobs:
               with:
                   platform: x86
                   version: 12.2.0 
-            - name: Build Production Optimized Library
+            - name: Build Production Library
               shell: bash
               run: |
                 mkdir -p deps/libs/windows_386
@@ -170,10 +164,7 @@ jobs:
                 make clean
                 
                 # Build with production optimizations for Windows x86
-                make -e CONFIG_WIN32=y CONFIG_M32=y CONFIG_LTO=y \
-                  'CFLAGS_OPT=$(CFLAGS) -O3 -DNDEBUG -ffast-math -funroll-loops -fomit-frame-pointer -fstrict-aliasing -march=i686 -mtune=generic -flto' \
-                  'CFLAGS_NOLTO=$(CFLAGS) -O3 -DNDEBUG -ffast-math -funroll-loops -fomit-frame-pointer -fstrict-aliasing -march=i686 -mtune=generic' \
-                  libquickjs.a
+                make -e CONFIG_WIN32=y CONFIG_M32=y CONFIG_LTO=y libquickjs.a
                 
                 # Verify library file
                 ls -la libquickjs.a
@@ -185,7 +176,7 @@ jobs:
                   commit-message: "Update QuickJS Production Library - Windows x86"
                   branch-suffix: random
                   delete-branch: true
-                  title: "QuickJS Production Optimized Library - Windows x86"
+                  title: "QuickJS Production Library - Windows x86"
                   base: ${{ github.head_ref }}
 
     windows_amd64:
@@ -200,7 +191,7 @@ jobs:
               with:
                   platform: x64
                   version: 12.2.0 
-            - name: Build Production Optimized Library
+            - name: Build Production Library
               shell: bash
               run: |
                 mkdir -p deps/libs/windows_amd64
@@ -209,10 +200,7 @@ jobs:
                 make clean
                 
                 # Build with production optimizations for Windows x64
-                make -e CONFIG_WIN32=y CONFIG_LTO=y \
-                  'CFLAGS_OPT=$(CFLAGS) -O3 -DNDEBUG -ffast-math -funroll-loops -fomit-frame-pointer -fstrict-aliasing -march=x86-64 -mtune=generic -flto' \
-                  'CFLAGS_NOLTO=$(CFLAGS) -O3 -DNDEBUG -ffast-math -funroll-loops -fomit-frame-pointer -fstrict-aliasing -march=x86-64 -mtune=generic' \
-                  libquickjs.a
+                make -e CONFIG_WIN32=y CONFIG_LTO=y libquickjs.a
                 
                 ls -la libquickjs.a
                 
@@ -223,7 +211,7 @@ jobs:
                   commit-message: "Update QuickJS Production Library - Windows x64"
                   branch-suffix: random
                   delete-branch: true
-                  title: "QuickJS Production Optimized Library - Windows x64"
+                  title: "QuickJS Production Library - Windows x64"
                   base: ${{ github.head_ref }}
 
     update_headers:
@@ -297,7 +285,7 @@ jobs:
                   echo "❌ Header files update failed"
                 fi
                 
-                echo "🎉 Production optimized QuickJS libraries build process completed!"
+                echo "🎉 Production QuickJS libraries build process completed!"
                 echo ""
                 echo "📊 Build Summary:"
                 echo "   - All libraries built with -O3 optimization"
