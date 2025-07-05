@@ -144,7 +144,7 @@ jobs:
                   base: ${{ github.head_ref }}
 
     windows_386:
-        runs-on: windows-2019
+        runs-on: windows-latest
         steps:
             - uses: actions/checkout@v4
               with:
@@ -180,7 +180,7 @@ jobs:
                   base: ${{ github.head_ref }}
 
     windows_amd64:
-        runs-on: windows-2019
+        runs-on: windows-latest
         steps:
             - uses: actions/checkout@v4
               with:
