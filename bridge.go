@@ -34,15 +34,6 @@ func unregisterContext(cCtx *C.JSContext) {
 	contextMapping.Delete(cCtx)
 }
 
-// clearContextMapping clears all registered contexts (internal use)
-func clearContextMapping() {
-	// Clear all mappings
-	contextMapping.Range(func(key, value interface{}) bool {
-		contextMapping.Delete(key)
-		return true // continue iteration
-	})
-}
-
 // getContextFromJS gets Go Context from C JSContext (internal use)
 func getContextFromJS(cCtx *C.JSContext) *Context {
 	if value, ok := contextMapping.Load(cCtx); ok {

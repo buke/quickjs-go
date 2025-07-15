@@ -156,10 +156,7 @@ func (r *Runtime) Close() {
 	// Step 3: Unregister runtime mapping
 	unregisterRuntime(r.ref)
 
-	// Step 4: Clear context mapping
-	clearContextMapping()
-
-	// Step 5: Free QuickJS runtime
+	// Step 4: Free QuickJS runtime
 	C.JS_FreeRuntime(r.ref)
 
 }
