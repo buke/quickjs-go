@@ -1293,7 +1293,7 @@ func TestIntegrationExample(t *testing.T) {
 	require.Equal(t, user.CreatedAt.Time, updatedUser.CreatedAt.Time)
 }
 
-func TestMarshal_MapWithNilValues(t *testing.T) {
+func TestMarshalNilAndInvalidValues(t *testing.T) {
 	ctx := NewRuntime().NewContext()
 	defer ctx.Close()
 
