@@ -193,7 +193,7 @@ func (ctx *Context) marshal(rv reflect.Value) (*Value, error) {
 	}
 
 	// Handle nil kind (invalid value)
-	if !rv.IsValid() || rv.Kind() == reflect.Invalid {
+	if !rv.IsValid() {
 		return ctx.NewNull(), nil
 	}
 

@@ -1302,20 +1302,28 @@ func TestMarshal_MapWithNilValues(t *testing.T) {
 	defer valNil.Free()
 	require.True(t, valNil.IsNull())
 
+	// 1. interface{} nil
 	data := map[string]interface{}{
 		"Nil": nil,
-		"NilWithInterfaceArray": []interface{}{
-			map[string]interface{}{
-				"Id": "d1v0fqfhsa61s6s877u0",
-			},
-		},
 	}
-
 	val, err := ctx.Marshal(data)
 	require.NoError(t, err)
 	defer val.Free()
-
 	require.True(t, val.Has("Nil"))
 	require.True(t, val.Get("Nil").IsNull())
-	require.True(t, val.Get("NilWithInterfaceArray").IsArray())
+
+	// 2. *string nil
+	data2 := map[string]*string{
+		"NilPtr": nil,
+	}
+	val2, err := ctx.Marshal(data2)
+	require.NoError(t, err)
+	defer val2.Free()
+	require.True(t, val2.Has("NilPtr"))
+	require.True(t, val2.Get("NilPtr").IsNull())
+
+	// 3.  marshal(reflect.Value{})
+	val3, err := ctx.marshal(reflect.Value{})
+	require.NoError(t, err)
+	require.True(t, val3.IsNull())
 }
