@@ -185,8 +185,16 @@ func (ctx *Context) Unmarshal(jsVal *Value, v interface{}) error {
 // marshal recursively marshals a Go value to JavaScript
 func (ctx *Context) marshal(rv reflect.Value) (*Value, error) {
 	// Handle interface{} by getting the concrete value
-	if rv.Kind() == reflect.Interface && !rv.IsNil() {
+	if rv.Kind() == reflect.Interface {
+		if rv.IsNil() {
+			return ctx.NewNull(), nil
+		}
 		rv = rv.Elem()
+	}
+
+	// Handle nil kind (invalid value)
+	if !rv.IsValid() || rv.Kind() == reflect.Invalid {
+		return ctx.NewNull(), nil
 	}
 
 	// Check if type implements Marshaler interface

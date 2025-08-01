@@ -1292,3 +1292,25 @@ func TestIntegrationExample(t *testing.T) {
 	require.Contains(t, updatedUser.Tags, "moderator")
 	require.Equal(t, user.CreatedAt.Time, updatedUser.CreatedAt.Time)
 }
+
+func TestMarshal_MapWithNilValues(t *testing.T) {
+	ctx := NewRuntime().NewContext()
+	defer ctx.Close()
+
+	data := map[string]interface{}{
+		"Nil": nil,
+		"NilWithInterfaceArray": []interface{}{
+			map[string]interface{}{
+				"Id": "d1v0fqfhsa61s6s877u0",
+			},
+		},
+	}
+
+	val, err := ctx.Marshal(data)
+	require.NoError(t, err)
+	defer val.Free()
+
+	require.True(t, val.Has("Nil"))
+	require.True(t, val.Get("Nil").IsNull())
+	require.True(t, val.Get("NilWithInterfaceArray").IsArray())
+}
