@@ -1297,6 +1297,11 @@ func TestMarshal_MapWithNilValues(t *testing.T) {
 	ctx := NewRuntime().NewContext()
 	defer ctx.Close()
 
+	valNil, err := ctx.Marshal(nil)
+	require.NoError(t, err)
+	defer valNil.Free()
+	require.True(t, valNil.IsNull())
+
 	data := map[string]interface{}{
 		"Nil": nil,
 		"NilWithInterfaceArray": []interface{}{
