@@ -1292,3 +1292,38 @@ func TestIntegrationExample(t *testing.T) {
 	require.Contains(t, updatedUser.Tags, "moderator")
 	require.Equal(t, user.CreatedAt.Time, updatedUser.CreatedAt.Time)
 }
+
+func TestMarshalNilAndInvalidValues(t *testing.T) {
+	ctx := NewRuntime().NewContext()
+	defer ctx.Close()
+
+	valNil, err := ctx.Marshal(nil)
+	require.NoError(t, err)
+	defer valNil.Free()
+	require.True(t, valNil.IsNull())
+
+	// 1. interface{} nil
+	data := map[string]interface{}{
+		"Nil": nil,
+	}
+	val, err := ctx.Marshal(data)
+	require.NoError(t, err)
+	defer val.Free()
+	require.True(t, val.Has("Nil"))
+	require.True(t, val.Get("Nil").IsNull())
+
+	// 2. *string nil
+	data2 := map[string]*string{
+		"NilPtr": nil,
+	}
+	val2, err := ctx.Marshal(data2)
+	require.NoError(t, err)
+	defer val2.Free()
+	require.True(t, val2.Has("NilPtr"))
+	require.True(t, val2.Get("NilPtr").IsNull())
+
+	// 3.  marshal(reflect.Value{})
+	val3, err := ctx.marshal(reflect.Value{})
+	require.NoError(t, err)
+	require.True(t, val3.IsNull())
+}
