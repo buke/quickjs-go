@@ -13,5 +13,9 @@ type Error struct {
 
 // Error implements the error interface.
 func (err *Error) Error() string {
-	return fmt.Sprintf("%s: %s", err.Name, err.Message)
+	msg := fmt.Sprintf("%s: %s", err.Name, err.Message)
+	if err.Cause != "" {
+		return fmt.Sprintf("%s (cause: %s)", msg, err.Cause)
+	}
+	return msg
 }

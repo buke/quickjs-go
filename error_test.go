@@ -19,7 +19,7 @@ func TestErrorBasics(t *testing.T) {
 	}
 
 	// Test Error() method format
-	require.EqualValues(t, "TestError: test message", err.Error())
+	require.EqualValues(t, "TestError: test message (cause: test cause)", err.Error())
 
 	// Test all fields are accessible
 	require.EqualValues(t, "TestError", err.Name)
@@ -192,7 +192,7 @@ func TestErrorFieldManipulation(t *testing.T) {
 	err.JSONString = `{"modified": true}`
 
 	// Test after modification
-	require.EqualValues(t, "ModifiedError: modified message", err.Error())
+	require.EqualValues(t, "ModifiedError: modified message (cause: new cause)", err.Error())
 	require.EqualValues(t, "ModifiedError", err.Name)
 	require.EqualValues(t, "modified message", err.Message)
 	require.EqualValues(t, "new cause", err.Cause)
