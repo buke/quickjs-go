@@ -1048,15 +1048,15 @@ func TestContextMemoryPressure(t *testing.T) {
 		t.Logf("Memory pressure compilation error (expected): %v", err)
 	}
 
-	// // Try multiple rapid compilations to exhaust memory
-	// for i := 0; i < 20; i++ {
-	// 	code := fmt.Sprintf(`var obj%d = { data: new Array(500).fill(%d) }; obj%d;`, i, i, i)
-	// 	_, err := ctx.Compile(code)
-	// 	if err != nil {
-	// 		t.Logf("Rapid compilation %d failed (expected): %v", i, err)
-	// 		break
-	// 	}
-	// }
+	// Try multiple rapid compilations to exhaust memory
+	for i := 0; i < 20; i++ {
+		code := fmt.Sprintf(`var obj%d = { data: new Array(500).fill(%d) }; obj%d;`, i, i, i)
+		_, err := ctx.Compile(code)
+		if err != nil {
+			t.Logf("Rapid compilation %d failed (expected): %v", i, err)
+			break
+		}
+	}
 }
 
 func TestContextAsyncFunction(t *testing.T) {
