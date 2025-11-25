@@ -1017,7 +1017,7 @@ func TestContextTypedArrays(t *testing.T) {
 
 func TestContextMemoryPressure(t *testing.T) {
 	// Test extreme memory pressure to trigger compilation failures
-	rt := NewRuntime(WithMemoryLimit(128 * 1024)) // 128KB limit
+	rt := NewRuntime(WithMemoryLimit(256 * 1024)) // 256KB limit
 	defer rt.Close()
 	ctx := rt.NewContext()
 	defer ctx.Close()
