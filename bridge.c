@@ -16,6 +16,7 @@ JSValue JS_NewUninitialized() { return JS_UNINITIALIZED; }
 JSValue JS_NewException() { return JS_EXCEPTION; }
 JSValue JS_NewTrue() { return JS_TRUE; }
 JSValue JS_NewFalse() { return JS_FALSE; }
+JSValue JS_DupValue_Go(JSContext *ctx, JSValue v) { return JS_DupValue(ctx, v); }
 
 // Error throwing macros -> functions
 JSValue ThrowSyntaxError(JSContext *ctx, const char *fmt) { return JS_ThrowSyntaxError(ctx, "%s", fmt); }
