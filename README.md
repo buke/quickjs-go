@@ -1,56 +1,6 @@
 # quickjs-go
 
 English | [简体中文](README_zh-cn.md)
-### Async Promise with Context Scheduler
-
-The new context-level scheduler helps you resolve or reject JavaScript Promises from other goroutines while ensuring the actual QuickJS calls still happen on the context thread.
-
-```go
-package main
-
-import (
-    "fmt"
-    "time"
-
-    "github.com/buke/quickjs-go"
-)
-
-func main() {
-    rt := quickjs.NewRuntime()
-    defer rt.Close()
-
-    ctx := rt.NewContext()
-    defer ctx.Close()
-
-    ctx.Globals().Set("asyncJob", ctx.NewFunction(func(ctx *quickjs.Context, this *quickjs.Value, args []*quickjs.Value) *quickjs.Value {
-        return ctx.NewPromise(func(resolve, reject func(*quickjs.Value)) {
-            go func() {
-                time.Sleep(10 * time.Millisecond)
-
-                ctx.Schedule(func(inner *quickjs.Context) {
-                    result := inner.NewString("async result")
-                    defer result.Free()
-                    resolve(result)
-                })
-            }()
-        })
-    }))
-
-    promise := ctx.Eval(`asyncJob()`)
-    defer promise.Free()
-
-    result := ctx.Await(promise)
-    defer result.Free()
-
-    if result.IsException() {
-        fmt.Println("error:", ctx.Exception())
-        return
-    }
-
-    fmt.Println(result.ToString())
-}
-```
-
 
 [![Test](https://github.com/buke/quickjs-go/workflows/Test/badge.svg)](https://github.com/buke/quickjs-go/actions?query=workflow%3ATest)
 [![codecov](https://codecov.io/gh/buke/quickjs-go/graph/badge.svg?token=8z6vgOaIIS)](https://codecov.io/gh/buke/quickjs-go)
@@ -208,7 +158,7 @@ func main() {
     test.Set("A", ctx.NewString("String A"))
     test.Set("B", ctx.NewInt32(0))
     test.Set("C", ctx.NewBool(false))
-    // bind go function to js object
+    // bind go function to js object (sync)
     test.Set("hello", ctx.NewFunction(func(ctx *quickjs.Context, this *quickjs.Value, args []*quickjs.Value) *quickjs.Value {
         return ctx.NewString("Hello " + args[0].ToString())
     }))
@@ -216,36 +166,62 @@ func main() {
     // bind "test" object to global object
     ctx.Globals().Set("test", test)
 
-    // call js function by js
-    js_ret := ctx.Eval(`test.hello("Javascript!")`)
-    defer js_ret.Free()
-    
-    if js_ret.IsException() {
+    // call js function by js (sync)
+    jsRet := ctx.Eval(`test.hello("Javascript!")`)
+    defer jsRet.Free()
+    if jsRet.IsException() {
         err := ctx.Exception()
         fmt.Println("Error:", err.Error())
         return
     }
-    
-    fmt.Println(js_ret.ToString())
+    fmt.Println(jsRet.ToString())
 
-    // call js function by go
-    go_ret := test.Call("hello", ctx.NewString("Golang!"))
-    defer go_ret.Free()
-    
-    if go_ret.IsException() {
+    // call js function by go (sync)
+    goRet := test.Call("hello", ctx.NewString("Golang!"))
+    defer goRet.Free()
+    if goRet.IsException() {
         err := ctx.Exception()
         fmt.Println("Error:", err.Error())
         return
     }
-    
-    fmt.Println(go_ret.ToString())
+    fmt.Println(goRet.ToString())
 
-    // bind go function to Javascript async function using Function + Promise
+    // --- Sync Promise example (immediate resolve/reject, no goroutine) ---
+    ctx.Globals().Set("syncPromise", ctx.NewFunction(func(ctx *quickjs.Context, this *quickjs.Value, args []*quickjs.Value) *quickjs.Value {
+        return ctx.NewPromise(func(resolve, reject func(*quickjs.Value)) {
+            // You can resolve the Promise synchronously:
+            msg := ctx.NewString("Hello from sync Promise")
+            defer msg.Free()
+            resolve(msg)
+
+            // Or reject synchronously instead (example):
+            // errVal := ctx.NewString("sync error")
+            // defer errVal.Free()
+            // reject(errVal)
+        })
+    }))
+
+    syncPromise := ctx.Eval(`syncPromise()`)
+    defer syncPromise.Free()
+
+    syncRet := ctx.Await(syncPromise)
+    defer syncRet.Free()
+    if syncRet.IsException() {
+        err := ctx.Exception()
+        fmt.Println("Error:", err.Error())
+        return
+    }
+    fmt.Println(syncRet.ToString())
+
+    // --- Async binding example using Promise + scheduler ---
     ctx.Globals().Set("testAsync", ctx.NewFunction(func(ctx *quickjs.Context, this *quickjs.Value, args []*quickjs.Value) *quickjs.Value {
         return ctx.NewPromise(func(resolve, reject func(*quickjs.Value)) {
+            // Heavy or blocking work can happen in a goroutine.
             go func() {
                 time.Sleep(10 * time.Millisecond)
 
+                // But QuickJS/Context APIs must be used back on
+                // the Context's own thread via ctx.Schedule.
                 ctx.Schedule(func(inner *quickjs.Context) {
                     value := inner.NewString("Hello Async Function!")
                     defer value.Free()
@@ -255,9 +231,13 @@ func main() {
         })
     }))
 
+    // From JS side, this is just a normal Promise-returning function.
     promiseResult := ctx.Eval(`testAsync()`)
     defer promiseResult.Free()
 
+    // ctx.Await drives the QuickJS pending-job queue and the
+    // context-level scheduler, so you usually don't need ctx.Loop()
+    // if you only care about the Promise result.
     asyncRet := ctx.Await(promiseResult)
     defer asyncRet.Free()
 
@@ -275,12 +255,13 @@ func main() {
     // Hello Async Function!
 }
 
-// NOTE: Always defer interacting with the Context from goroutines until you are
-// inside ctx.Schedule. The function passed to ctx.Schedule runs back on the
-// Context thread, so QuickJS APIs remain safe to call there.
+// NOTE:
+// - Goroutines must NOT call QuickJS/Context APIs directly.
+// - Always schedule back to the Context thread via ctx.Schedule
+//   before creating values or resolving/rejecting Promises.
+// - ctx.Await will internally drive pending jobs and the
+//   scheduler until the Promise settles.
 ```
-
-`ctx.Await` drives the pending-job loop internally, so you do not need to call `ctx.Loop()` when you only need the promise result.
 
 ### Error Handling
 

@@ -165,36 +165,62 @@ func main() {
     // 将 "test" 对象绑定到全局对象
     ctx.Globals().Set("test", test)
 
-    // 通过 js 调用 js 函数
+    // 通过 js 调用 js 函数（同步）
     js_ret := ctx.Eval(`test.hello("Javascript!")`)
     defer js_ret.Free()
-    
     if js_ret.IsException() {
         err := ctx.Exception()
         fmt.Println("Error:", err.Error())
         return
     }
-    
     fmt.Println(js_ret.ToString())
 
-    // 通过 go 调用 js 函数
+    // 通过 go 调用 js 函数（同步）
     go_ret := test.Call("hello", ctx.NewString("Golang!"))
     defer go_ret.Free()
-    
     if go_ret.IsException() {
         err := ctx.Exception()
         fmt.Println("Error:", err.Error())
         return
     }
-    
     fmt.Println(go_ret.ToString())
 
-    // 使用 Function + Promise 将 Go 函数绑定为 JavaScript 异步函数
+    // --- 同步 Promise 示例（立即 resolve/reject，不开 goroutine）---
+    ctx.Globals().Set("syncPromise", ctx.NewFunction(func(ctx *quickjs.Context, this *quickjs.Value, args []*quickjs.Value) *quickjs.Value {
+        return ctx.NewPromise(func(resolve, reject func(*quickjs.Value)) {
+            // 可以在 executor 中直接同步 resolve：
+            msg := ctx.NewString("Hello from sync Promise")
+            defer msg.Free()
+            resolve(msg)
+
+            // 如需同步失败，可以改为：
+            // errVal := ctx.NewString("sync error")
+            // defer errVal.Free()
+            // reject(errVal)
+        })
+    }))
+
+    syncPromise := ctx.Eval(`syncPromise()`)
+    defer syncPromise.Free()
+
+    syncRet := ctx.Await(syncPromise)
+    defer syncRet.Free()
+    if syncRet.IsException() {
+        err := ctx.Exception()
+        fmt.Println("Error:", err.Error())
+        return
+    }
+    fmt.Println(syncRet.ToString())
+
+    // --- 使用 Function + Promise + 调度器 的异步示例 ---
     ctx.Globals().Set("testAsync", ctx.NewFunction(func(ctx *quickjs.Context, this *quickjs.Value, args []*quickjs.Value) *quickjs.Value {
         return ctx.NewPromise(func(resolve, reject func(*quickjs.Value)) {
+            // 耗时或阻塞操作可以放在 goroutine 中
             go func() {
                 time.Sleep(10 * time.Millisecond)
 
+                // 但 QuickJS/Context API 必须回到 Context 线程上
+                // 通过 ctx.Schedule 调度执行
                 ctx.Schedule(func(inner *quickjs.Context) {
                     value := inner.NewString("Hello Async Function!")
                     defer value.Free()
@@ -204,9 +230,13 @@ func main() {
         })
     }))
 
+    // 从 JS 角度看，这只是一个返回 Promise 的普通函数
     promiseResult := ctx.Eval(`testAsync()`)
     defer promiseResult.Free()
 
+    // ctx.Await 内部会驱动 QuickJS 的 pending-job 队列
+    // 以及 Context 级调度器，因此如果你只关心 Promise
+    // 的最终结果，通常不需要单独调用 ctx.Loop()
     asyncRet := ctx.Await(promiseResult)
     defer asyncRet.Free()
 
@@ -224,11 +254,11 @@ func main() {
     // Hello Async Function!
 }
 
-// 注意：不要在 goroutine 中直接调用 Context，其它 QuickJS API 必须在 ctx.Schedule
-// 指定的函数内访问；该函数会在 Context 线程上运行，确保线程安全。
+// 注意：
+// - 不要在 goroutine 中直接调用 Context 或任何 QuickJS API。
+// - 所有 QuickJS 相关操作都应该通过 ctx.Schedule 调度回 Context 线程后再执行。
+// - ctx.Await 会在内部驱动 pending jobs 和调度器，直至 Promise 解决。
 ```
-
-`ctx.Await` 会在内部驱动 pending-job 循环，当你只是想拿到 Promise 结果时无需手动调用 `ctx.Loop()`。
 
 ### 错误处理
 
