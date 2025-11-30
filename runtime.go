@@ -260,6 +260,7 @@ func (r *Runtime) NewContext() *Context {
 		runtime:     r,
 		handleStore: newHandleStore(), // Initialize HandleStore for function management
 	}
+	ctx.initScheduler()
 
 	// Register context mapping for C callbacks
 	registerContext(ctx_ref, ctx)

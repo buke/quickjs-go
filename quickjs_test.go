@@ -2,6 +2,7 @@ package quickjs_test
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/buke/quickjs-go"
 )
@@ -73,31 +74,30 @@ func Example() {
 	defer go_ret.Free()
 	fmt.Println(go_ret.ToString())
 
-	// bind go function to Javascript async function using Function + Promise - UPDATED: function signature now uses pointers
+	// bind go function to Javascript async function using Function + Promise - UPDATED: the promise resolves asynchronously
 	ctx.Globals().Set("testAsync", ctx.NewFunction(func(ctx *quickjs.Context, this *quickjs.Value, args []*quickjs.Value) *quickjs.Value {
 		return ctx.NewPromise(func(resolve, reject func(*quickjs.Value)) {
-			resolve(ctx.NewString("Hello Async Function!"))
+			go func() {
+				time.Sleep(10 * time.Millisecond)
+				ctx.Schedule(func(inner *quickjs.Context) {
+					val := inner.NewString("Hello Async Function!")
+					resolve(val)
+					val.Free()
+				})
+			}()
 		})
 	}))
 
-	ret := ctx.Eval(`
-        var ret;
-        testAsync().then(v => ret = v)
-    `)
-	defer ret.Free()
-	// Check for exceptions instead of error
-	if ret.IsException() {
+	promiseResult := ctx.Eval(`testAsync()`)
+	defer promiseResult.Free()
+	if promiseResult.IsException() {
 		err := ctx.Exception()
 		fmt.Printf("Error: %v\n", err)
 		return
 	}
 
-	// wait for promise resolve
-	ctx.Loop()
-
-	asyncRet := ctx.Eval("ret")
+	asyncRet := ctx.Await(promiseResult)
 	defer asyncRet.Free()
-	// Check for exceptions instead of error
 	if asyncRet.IsException() {
 		err := ctx.Exception()
 		fmt.Printf("Error: %v\n", err)

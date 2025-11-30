@@ -137,6 +137,8 @@ package main
 
 import (
     "fmt"
+    "time"
+
     "github.com/buke/quickjs-go"
 )
 
@@ -189,28 +191,23 @@ func main() {
 
     // 使用 Function + Promise 将 Go 函数绑定为 JavaScript 异步函数
     ctx.Globals().Set("testAsync", ctx.NewFunction(func(ctx *quickjs.Context, this *quickjs.Value, args []*quickjs.Value) *quickjs.Value {
-        return ctx.Promise(func(resolve, reject func(*quickjs.Value)) {
-            resolve(ctx.NewString("Hello Async Function!"))
+        return ctx.NewPromise(func(resolve, reject func(*quickjs.Value)) {
+            go func() {
+                time.Sleep(10 * time.Millisecond)
+
+                ctx.Schedule(func(inner *quickjs.Context) {
+                    value := inner.NewString("Hello Async Function!")
+                    defer value.Free()
+                    resolve(value)
+                })
+            }()
         })
     }))
 
-    ret := ctx.Eval(`
-            var ret;
-            testAsync().then(v => ret = v)
-        `)
-    defer ret.Free()
+    promiseResult := ctx.Eval(`testAsync()`)
+    defer promiseResult.Free()
 
-    if ret.IsException() {
-        err := ctx.Exception()
-        fmt.Println("Error:", err.Error())
-        return
-    }
-
-    // 等待 promise 解析
-    ctx.Loop()
-
-    // 获取 promise 结果
-    asyncRet := ctx.Eval("ret")
+    asyncRet := ctx.Await(promiseResult)
     defer asyncRet.Free()
 
     if asyncRet.IsException() {
@@ -226,7 +223,12 @@ func main() {
     // Hello Golang!
     // Hello Async Function!
 }
+
+// 注意：不要在 goroutine 中直接调用 Context，其它 QuickJS API 必须在 ctx.Schedule
+// 指定的函数内访问；该函数会在 Context 线程上运行，确保线程安全。
 ```
+
+`ctx.Await` 会在内部驱动 pending-job 循环，当你只是想拿到 Promise 结果时无需手动调用 `ctx.Loop()`。
 
 ### 错误处理
 
