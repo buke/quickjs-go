@@ -3,6 +3,7 @@ package quickjs
 import (
 	"fmt"
 	"os"
+	"sync/atomic"
 	"unsafe"
 )
 
@@ -18,6 +19,127 @@ type Context struct {
 	ref         *C.JSContext
 	globals     *Value
 	handleStore *handleStore //  function handle storage
+	jobQueue    chan func(*Context)
+	jobClosed   chan struct{}
+}
+
+const defaultJobQueueSize = 1024
+
+// awaitPromiseStateHook and awaitExecutePendingJobHook are used only in tests to
+// force specific Await code paths; they must remain nil in production.
+var (
+	awaitPromiseStateHook      func(ctx *Context, promise *Value, current int) (int, bool)
+	awaitExecutePendingJobHook func(ctx *Context, promise *Value, current int) (int, bool)
+)
+
+func (ctx *Context) initScheduler() {
+	ctx.jobQueue = make(chan func(*Context), defaultJobQueueSize)
+	ctx.jobClosed = make(chan struct{})
+}
+
+// Schedule enqueues a job to be executed on the Context's thread.
+// Jobs run sequentially via ProcessJobs to keep QuickJS access single-threaded.
+func (ctx *Context) Schedule(job func(*Context)) bool {
+	if ctx == nil || ctx.jobQueue == nil || job == nil {
+		return false
+	}
+	select {
+	case <-ctx.jobClosed:
+		return false
+	default:
+	}
+	select {
+	case ctx.jobQueue <- job:
+		return true
+	case <-ctx.jobClosed:
+		return false
+	}
+}
+
+// ProcessJobs drains all pending scheduled jobs.
+// Call this regularly (e.g., inside Loop or Await) to allow resolve/reject handlers to run.
+func (ctx *Context) ProcessJobs() {
+	if ctx == nil || ctx.jobQueue == nil {
+		return
+	}
+	for {
+		select {
+		case job := <-ctx.jobQueue:
+			if job != nil {
+				job(ctx)
+			}
+		default:
+			return
+		}
+	}
+}
+
+func (ctx *Context) drainJobs() {
+	if ctx == nil || ctx.jobQueue == nil {
+		return
+	}
+	for {
+		select {
+		case <-ctx.jobQueue:
+			continue
+		default:
+			return
+		}
+	}
+}
+
+func (ctx *Context) duplicateValue(val *Value) *Value {
+	if val == nil || val.ctx == nil {
+		return nil
+	}
+	return &Value{ctx: ctx, ref: C.JS_DupValue_Go(ctx.ref, val.ref)}
+}
+
+func (ctx *Context) wrapPromiseCallback(fn *Value) (func(*Value), func()) {
+	if fn == nil {
+		noop := func(*Value) {}
+		return noop, func() {}
+	}
+	fnRef := ctx.duplicateValue(fn)
+	var consumed atomic.Bool
+	release := func() {
+		if !consumed.Swap(true) && fnRef != nil {
+			fnRef.Free()
+		}
+	}
+	callback := func(arg *Value) {
+		if consumed.Swap(true) {
+			return
+		}
+		dupArg := ctx.duplicateValue(arg)
+		job := func(inner *Context) {
+			defer fnRef.Free()
+			var callArg *Value
+			if dupArg != nil {
+				callArg = dupArg
+				defer dupArg.Free()
+			} else {
+				callArg = inner.NewUndefined()
+				defer callArg.Free()
+			}
+
+			thisVal := inner.NewUndefined()
+			defer thisVal.Free()
+
+			result := fnRef.Execute(thisVal, callArg)
+			if result != nil {
+				result.Free()
+			}
+		}
+
+		if !ctx.Schedule(job) {
+			if dupArg != nil {
+				dupArg.Free()
+			}
+			fnRef.Free()
+		}
+	}
+	return callback, release
 }
 
 // Runtime returns the runtime of the context.
@@ -27,6 +149,15 @@ func (ctx *Context) Runtime() *Runtime {
 
 // Free will free context and all associated objects.
 func (ctx *Context) Close() {
+	if ctx.jobClosed != nil {
+		select {
+		case <-ctx.jobClosed:
+		default:
+			close(ctx.jobClosed)
+		}
+	}
+	ctx.drainJobs()
+
 	if ctx.globals != nil {
 		ctx.globals.Free()
 	}
@@ -849,20 +980,89 @@ func (ctx *Context) Exception() error {
 
 // Loop runs the context's event loop.
 func (ctx *Context) Loop() {
+	ctx.ProcessJobs()
 	C.js_std_loop(ctx.ref)
+	ctx.ProcessJobs()
 }
 
 // Wait for a promise and execute pending jobs while waiting for it. Return the promise result or JS_EXCEPTION in case of promise rejection.
 func (ctx *Context) Await(v *Value) *Value {
-	if !v.IsPromise() {
-		// Not a promise, return as-is
+	if v == nil || !v.IsPromise() {
 		return v
 	}
-	return &Value{ctx: ctx, ref: C.js_std_await(ctx.ref, v.ref)}
+
+	// Transfer ownership of the JSValue so the original handle no longer leaks references.
+	promise := &Value{ctx: ctx, ref: v.ref}
+	v.ref = C.JS_NewUndefined()
+	defer promise.Free()
+
+	pendingState := C.JSPromiseStateEnum(C.GetPromisePending())
+	fulfilledState := C.JSPromiseStateEnum(C.GetPromiseFulfilled())
+	rejectedState := C.JSPromiseStateEnum(C.GetPromiseRejected())
+	runtimeRef := ctx.runtime.ref
+
+	for {
+		ctx.ProcessJobs()
+		state := C.JS_PromiseState(ctx.ref, promise.ref)
+		if hook := awaitPromiseStateHook; hook != nil {
+			if override, ok := hook(ctx, promise, int(state)); ok {
+				state = C.JSPromiseStateEnum(override)
+			}
+		}
+		switch state {
+		case fulfilledState:
+			return &Value{ctx: ctx, ref: C.JS_PromiseResult(ctx.ref, promise.ref)}
+		case rejectedState:
+			reason := C.JS_PromiseResult(ctx.ref, promise.ref)
+			return &Value{ctx: ctx, ref: C.JS_Throw(ctx.ref, reason)}
+		case pendingState:
+			executed := C.JS_ExecutePendingJob(runtimeRef, nil)
+			if hook := awaitExecutePendingJobHook; hook != nil {
+				if override, ok := hook(ctx, promise, int(executed)); ok {
+					executed = C.int(override)
+				}
+			}
+			if executed < 0 {
+				return ctx.ThrowInternalError("failed to execute pending job")
+			}
+			if executed == 0 {
+				C.js_std_loop(ctx.ref)
+			}
+		default:
+			return v
+		}
+	}
 }
 
-// NewPromise creates a new Promise with executor function
-// Executor runs synchronously in current thread for thread safety
+// NewPromise creates a new Promise with the provided executor function and
+// keeps all QuickJS interactions on the context thread.
+//
+// The executor itself runs synchronously, so you can resolve/reject
+// immediately:
+//
+//	ctx.NewPromise(func(resolve, reject func(*quickjs.Value)) {
+//	    resolve(ctx.NewString("sync value"))
+//	})
+//
+// For asynchronous work, perform the slow operation in another goroutine and
+// use ctx.Schedule inside that goroutine so the actual resolve happens on the
+// JS thread. Do not invoke other Context methods from the goroutine directly;
+// the function passed to ctx.Schedule runs on the context thread, which keeps
+// QuickJS access safe:
+//
+//	ctx.NewPromise(func(resolve, reject func(*quickjs.Value)) {
+//	    go func() {
+//	        result := doWork()
+//	        ctx.Schedule(func(inner *quickjs.Context) {
+//	            val := inner.NewString(result)
+//	            defer val.Free()
+//	            resolve(val)
+//	        })
+//	    }()
+//	})
+//
+// The resolver helpers ensure only the first resolve/reject wins, matching
+// native Promise semantics.
 func (ctx *Context) NewPromise(executor func(resolve, reject func(*Value))) *Value {
 	// Create Promise using JavaScript code to avoid complex C API reference management
 	promiseSetup := ctx.Eval(`
@@ -884,17 +1084,24 @@ func (ctx *Context) NewPromise(executor func(resolve, reject func(*Value))) *Val
 	defer resolveFunc.Free()
 	defer rejectFunc.Free()
 
-	// Create wrapper functions that call JavaScript resolve/reject
-	resolve := func(result *Value) {
-		resolveFunc.Execute(ctx.NewUndefined(), result)
+	// Create wrapper functions that schedule resolve/reject back onto the JS thread
+	settled := int32(0)
+	resolveCallback, releaseResolve := ctx.wrapPromiseCallback(resolveFunc)
+	rejectCallback, releaseReject := ctx.wrapPromiseCallback(rejectFunc)
+	wrap := func(target int32, callback func(*Value), releaseOther func()) func(*Value) {
+		return func(val *Value) {
+			if atomic.CompareAndSwapInt32(&settled, 0, target) {
+				callback(val)
+				releaseOther()
+			}
+		}
 	}
+	resolve := wrap(1, resolveCallback, releaseReject)
+	reject := wrap(2, rejectCallback, releaseResolve)
 
-	reject := func(reason *Value) {
-		rejectFunc.Execute(ctx.NewUndefined(), reason)
-	}
-
-	// Execute user function synchronously
+	// Execute user function synchronously and flush any immediate resolve/reject work
 	executor(resolve, reject)
+	ctx.ProcessJobs()
 
 	return promise
 }

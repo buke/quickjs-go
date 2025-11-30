@@ -12,6 +12,7 @@ extern JSValue JS_NewUninitialized();
 extern JSValue JS_NewException();
 extern JSValue JS_NewTrue();
 extern JSValue JS_NewFalse();
+extern JSValue JS_DupValue_Go(JSContext *ctx, JSValue v);
 
 // Error throwing functions
 extern JSValue ThrowSyntaxError(JSContext *ctx, const char *fmt);

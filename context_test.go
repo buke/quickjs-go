@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -65,6 +66,7 @@ func TestContextBasics(t *testing.T) {
 			})
 		}
 	})
+
 }
 
 func TestContextEvaluation(t *testing.T) {
@@ -762,6 +764,309 @@ func TestContextPromise(t *testing.T) {
 		defer errorResult.Free()
 		require.False(t, errorResult.IsException())
 		require.Equal(t, "Error: processing failed", errorResult.ToString())
+	})
+
+	t.Run("AwaitHandlesScheduledResolve", func(t *testing.T) {
+		scheduled := make(chan bool, 1)
+		promise := ctx.NewPromise(func(resolve, reject func(*Value)) {
+			go func() {
+				time.Sleep(10 * time.Millisecond)
+				ok := ctx.Schedule(func(inner *Context) {
+					val := inner.NewString("async scheduler value")
+					defer val.Free()
+					resolve(val)
+				})
+				scheduled <- ok
+			}()
+		})
+		defer promise.Free()
+
+		select {
+		case ok := <-scheduled:
+			require.True(t, ok, "failed to enqueue resolve job")
+		case <-time.After(2 * time.Second):
+			t.Fatal("resolve job was never scheduled")
+		}
+
+		// 主动驱动调度器，确保 resolve job 真正执行
+		ctx.ProcessJobs()
+
+		result := promise.Await()
+		defer result.Free()
+
+		require.False(t, result.IsException())
+		require.Equal(t, "async scheduler value", result.ToString())
+	})
+}
+
+func TestContextScheduler(t *testing.T) {
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	t.Run("LoopProcessesScheduledJobs", func(t *testing.T) {
+		results := make(chan struct {
+			sum int32
+			err error
+		}, 1)
+
+		require.True(t, ctx.Schedule(func(inner *Context) {
+			val := inner.Eval(`40 + 2`)
+			defer val.Free()
+
+			if val.IsException() {
+				results <- struct {
+					sum int32
+					err error
+				}{err: inner.Exception()}
+				return
+			}
+
+			results <- struct {
+				sum int32
+				err error
+			}{sum: int32(val.ToInt32())}
+		}))
+
+		ctx.Loop()
+
+		select {
+		case res := <-results:
+			require.NoError(t, res.err)
+			require.Equal(t, int32(42), res.sum)
+		case <-time.After(200 * time.Millisecond):
+			t.Fatal("scheduled job was not executed")
+		}
+	})
+}
+
+func TestContextInternalsCoverage(t *testing.T) {
+	t.Run("ScheduleEdgeCases", func(t *testing.T) {
+		var nilCtx *Context
+		require.False(t, nilCtx.Schedule(func(*Context) {}))
+
+		ctx := &Context{}
+		require.False(t, ctx.Schedule(func(*Context) {}))
+
+		ctx.initScheduler()
+		require.False(t, ctx.Schedule(nil))
+
+		close(ctx.jobClosed)
+		require.False(t, ctx.Schedule(func(*Context) {}))
+
+		blockingCtx := &Context{
+			jobQueue:  make(chan func(*Context), 1),
+			jobClosed: make(chan struct{}),
+		}
+		blockingCtx.jobQueue <- func(*Context) {}
+		done := make(chan struct{})
+		go func() {
+			time.Sleep(5 * time.Millisecond)
+			close(blockingCtx.jobClosed)
+			close(done)
+		}()
+		require.False(t, blockingCtx.Schedule(func(*Context) {}))
+		<-done
+	})
+
+	t.Run("ProcessJobsAndDrainJobs", func(t *testing.T) {
+		var nilCtx *Context
+		require.NotPanics(t, func() { nilCtx.ProcessJobs() })
+		require.NotPanics(t, func() { nilCtx.drainJobs() })
+
+		emptyCtx := &Context{}
+		require.NotPanics(t, func() { emptyCtx.ProcessJobs() })
+		require.NotPanics(t, func() { emptyCtx.drainJobs() })
+
+		emptyCtx.initScheduler()
+		var calls int
+		require.True(t, emptyCtx.Schedule(func(inner *Context) {
+			require.Same(t, emptyCtx, inner)
+			calls++
+		}))
+		emptyCtx.jobQueue <- nil
+		emptyCtx.ProcessJobs()
+		require.Equal(t, 1, calls)
+
+		emptyCtx.jobQueue <- func(*Context) {}
+		emptyCtx.jobQueue <- nil
+		emptyCtx.drainJobs()
+		require.Equal(t, 0, len(emptyCtx.jobQueue))
+	})
+
+	t.Run("DuplicateValue", func(t *testing.T) {
+		rt := NewRuntime()
+		defer rt.Close()
+		ctx := rt.NewContext()
+		defer ctx.Close()
+
+		original := ctx.NewString("duplicate-target")
+		defer original.Free()
+
+		dup := ctx.duplicateValue(original)
+		require.NotNil(t, dup)
+		require.Equal(t, "duplicate-target", dup.ToString())
+		dup.Free()
+
+		require.Nil(t, ctx.duplicateValue(nil))
+
+		orphan := &Value{}
+		require.Nil(t, ctx.duplicateValue(orphan))
+	})
+
+	t.Run("WrapPromiseCallback", func(t *testing.T) {
+		rt := NewRuntime()
+		defer rt.Close()
+		ctx := rt.NewContext()
+		defer ctx.Close()
+
+		noop, releaseNoop := ctx.wrapPromiseCallback(nil)
+		require.NotPanics(t, func() {
+			noop(nil)
+			releaseNoop()
+		})
+
+		initGlobals := ctx.Eval(`
+			globalThis.__promise_cb = "unset";
+			globalThis.__should_not_change = "initial";
+			globalThis.__promise_cb_nil = "unset";
+		`)
+		defer initGlobals.Free()
+
+		cbValue := ctx.Eval(`(value) => { globalThis.__promise_cb = value; }`)
+		defer cbValue.Free()
+
+		callback, releaseCallback := ctx.wrapPromiseCallback(cbValue)
+		arg := ctx.NewString("scheduled value")
+		callback(arg)
+		arg.Free()
+		ctx.ProcessJobs()
+		stored := ctx.Eval(`__promise_cb`)
+		require.Equal(t, "scheduled value", stored.ToString())
+		stored.Free()
+		releaseCallback()
+
+		cbValue2 := ctx.Eval(`(value) => { globalThis.__should_not_change = value; }`)
+		defer cbValue2.Free()
+		callback2, release2 := ctx.wrapPromiseCallback(cbValue2)
+		release2()
+		ignored := ctx.NewString("ignored")
+		callback2(ignored)
+		ignored.Free()
+		ctx.ProcessJobs()
+		unchanged := ctx.Eval(`__should_not_change`)
+		require.Equal(t, "initial", unchanged.ToString())
+		unchanged.Free()
+
+		cbNilArg := ctx.Eval(`(function (value) { globalThis.__promise_cb_nil = value === undefined ? "was-undefined" : "had-value"; })`)
+		defer cbNilArg.Free()
+		require.False(t, cbNilArg.IsException())
+		callbackNil, releaseNil := ctx.wrapPromiseCallback(cbNilArg)
+		callbackNil(nil)
+		ctx.ProcessJobs()
+		nilResult := ctx.Eval(`__promise_cb_nil`)
+		require.Equal(t, "was-undefined", nilResult.ToString())
+		nilResult.Free()
+		releaseNil()
+
+		ctxClosed := rt.NewContext()
+		defer ctxClosed.Close()
+		initClosed := ctxClosed.Eval(`globalThis.__closed_cb = "unset";`)
+		defer initClosed.Free()
+		cbClosed := ctxClosed.Eval(`(value) => { globalThis.__closed_cb = value; }`)
+		defer cbClosed.Free()
+		callbackClosed, releaseClosed := ctxClosed.wrapPromiseCallback(cbClosed)
+		close(ctxClosed.jobClosed)
+		argClosed := ctxClosed.NewString("should not run")
+		callbackClosed(argClosed)
+		argClosed.Free()
+		ctxClosed.ProcessJobs()
+		closedResult := ctxClosed.Eval(`__closed_cb`)
+		require.Equal(t, "unset", closedResult.ToString())
+		closedResult.Free()
+		releaseClosed()
+	})
+
+	t.Run("AwaitHandlesNilAndNonPromise", func(t *testing.T) {
+		rt := NewRuntime()
+		defer rt.Close()
+		ctx := rt.NewContext()
+		defer ctx.Close()
+
+		nonPromise := ctx.NewString("plain value")
+		defer nonPromise.Free()
+		require.Same(t, nonPromise, ctx.Await(nonPromise))
+
+		var nilPromise *Value
+		require.Nil(t, ctx.Await(nilPromise))
+	})
+
+	t.Run("AwaitDrivesStdLoopForTimeout", func(t *testing.T) {
+		rt := NewRuntime()
+		defer rt.Close()
+		ctx := rt.NewContext()
+		defer ctx.Close()
+
+		promise := ctx.Eval(`new Promise((resolve) => { setTimeout(() => resolve("timer result"), 0); })`)
+		defer promise.Free()
+		result := ctx.Await(promise)
+		defer result.Free()
+		require.Equal(t, "timer result", result.ToString())
+	})
+
+	t.Run("AwaitHandlesPendingJobFailure", func(t *testing.T) {
+		rt := NewRuntime()
+		defer rt.Close()
+		ctx := rt.NewContext()
+		defer ctx.Close()
+
+		promise := ctx.Eval(`new Promise(() => {})`)
+		defer promise.Free()
+
+		triggered := false
+		awaitExecutePendingJobHook = func(hookCtx *Context, _ *Value, current int) (int, bool) {
+			if hookCtx == ctx && !triggered {
+				triggered = true
+				return -1, true
+			}
+			return current, false
+		}
+		t.Cleanup(func() { awaitExecutePendingJobHook = nil })
+
+		result := ctx.Await(promise)
+		defer result.Free()
+		require.True(t, result.IsException())
+
+		err := ctx.Exception()
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "failed to execute pending job")
+	})
+
+	t.Run("AwaitFallsBackOnUnexpectedState", func(t *testing.T) {
+		rt := NewRuntime()
+		defer rt.Close()
+		ctxA := rt.NewContext()
+		defer ctxA.Close()
+		ctxB := rt.NewContext()
+		defer ctxB.Close()
+
+		promise := ctxA.Eval(`new Promise(() => {})`)
+		defer promise.Free()
+
+		forced := false
+		awaitPromiseStateHook = func(hookCtx *Context, _ *Value, current int) (int, bool) {
+			if hookCtx == ctxB && !forced {
+				forced = true
+				return current + 99, true
+			}
+			return current, false
+		}
+		t.Cleanup(func() { awaitPromiseStateHook = nil })
+
+		result := ctxB.Await(promise)
+		require.Same(t, promise, result)
+		require.True(t, result.IsUndefined())
 	})
 }
 
