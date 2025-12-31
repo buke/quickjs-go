@@ -151,7 +151,7 @@ jobs:
                   submodules: true
                   fetch-depth: 1
             - name: Set up MinGW
-              uses: egor-tensin/setup-mingw@v2.2.0
+              uses: egor-tensin/setup-mingw@v3
               with:
                   platform: x86
                   version: 12.2.0 
@@ -187,7 +187,7 @@ jobs:
                   submodules: true
                   fetch-depth: 1
             - name: Set up MinGW
-              uses: egor-tensin/setup-mingw@v2.2.0
+              uses: egor-tensin/setup-mingw@v3
               with:
                   platform: x64
                   version: 12.2.0 
