@@ -487,8 +487,16 @@ func goModuleInitProxy(ctx *C.JSContext, m *C.JSModuleDef) C.int {
 	// Step 2: Set all export values using JS_SetModuleExport
 	for _, export := range builder.exports {
 		exportName := C.CString(export.Name)
-		C.JS_SetModuleExport(ctx, m, exportName, export.Value.ref)
+		// JS_SetModuleExport takes ownership of the JSValue (it will free it on failure).
+		// To prevent Go-side double free (issue #688), invalidate the Go Value after
+		// handing it off so later export.Value.Free() becomes a no-op.
+		val := export.Value.ref
+		rc := C.JS_SetModuleExport(ctx, m, exportName, val)
+		export.Value.ref = C.JS_NewUndefined()
 		C.free(unsafe.Pointer(exportName))
+		if rc < 0 {
+			return C.int(-1)
+		}
 	}
 
 	// Step 3: Clean up HandleStore reference
@@ -497,6 +505,7 @@ func goModuleInitProxy(ctx *C.JSContext, m *C.JSModuleDef) C.int {
 	if C.JS_ToInt32(ctx, &builderID, privateValue) >= 0 {
 		goCtx.handleStore.Delete(int32(builderID))
 	}
+	C.JS_FreeValue(ctx, privateValue)
 
 	return C.int(0)
 }
