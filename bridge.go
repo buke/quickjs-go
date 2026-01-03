@@ -154,6 +154,7 @@ func getContextAndModuleBuilder(ctx *C.JSContext, m *C.JSModuleDef) (*Context, *
 	// Extract ModuleBuilder ID from private value using JS_ToInt32
 	var builderID C.int32_t
 	C.JS_ToInt32(ctx, &builderID, privateValue)
+	C.JS_FreeValue(ctx, privateValue)
 
 	goCtx, builderInterface, err := getContextAndObject(ctx, C.int(builderID), errFunctionNotFound)
 	if err != nil {
@@ -495,7 +496,7 @@ func goModuleInitProxy(ctx *C.JSContext, m *C.JSModuleDef) C.int {
 		export.Value.ref = C.JS_NewUndefined()
 		C.free(unsafe.Pointer(exportName))
 		if rc < 0 {
-			return C.int(-1)
+			return throwModuleError(ctx, fmt.Errorf("failed to set module export: %s", export.Name))
 		}
 	}
 

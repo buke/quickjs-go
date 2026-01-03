@@ -350,6 +350,30 @@ func TestModuleBuilder_ErrorBranches(t *testing.T) {
 		err = ctx.Exception()
 		require.Contains(t, err.Error(), "Function not found")
 	})
+
+	t.Run("ModuleInitSetModuleExportError", func(t *testing.T) {
+		fooFunc := ctx.NewFunction(func(ctx *Context, this *Value, args []*Value) *Value {
+			return ctx.NewUndefined()
+		})
+		defer fooFunc.Free()
+
+		module := NewModuleBuilder("error-test-3").Export("foo", fooFunc)
+		err := module.Build(ctx)
+		require.NoError(t, err)
+
+		// Force a mismatch between declared exports ("foo") and init-time exports.
+		// Build() declares exports based on the current builder.exports. Module init happens
+		// later during import; by mutating the builder, JS_SetModuleExport will fail.
+		require.GreaterOrEqual(t, len(module.exports), 1)
+		module.exports[0].Name = "bar"
+
+		result := ctx.Eval(`import('error-test-3')`, EvalAwait(true))
+		defer result.Free()
+
+		require.True(t, result.IsException())
+		err = ctx.Exception()
+		require.Contains(t, err.Error(), "failed to set module export")
+	})
 }
 
 // =============================================================================
