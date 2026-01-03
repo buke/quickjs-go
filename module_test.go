@@ -350,4 +350,72 @@ func TestModuleBuilder_ErrorBranches(t *testing.T) {
 		err = ctx.Exception()
 		require.Contains(t, err.Error(), "Function not found")
 	})
+
+	t.Run("ModuleInitSetModuleExportError", func(t *testing.T) {
+		fooFunc := ctx.NewFunction(func(ctx *Context, this *Value, args []*Value) *Value {
+			return ctx.NewUndefined()
+		})
+		defer fooFunc.Free()
+
+		module := NewModuleBuilder("error-test-3").Export("foo", fooFunc)
+		err := module.Build(ctx)
+		require.NoError(t, err)
+
+		// Force a mismatch between declared exports ("foo") and init-time exports.
+		// Build() declares exports based on the current builder.exports. Module init happens
+		// later during import; by mutating the builder, JS_SetModuleExport will fail.
+		require.GreaterOrEqual(t, len(module.exports), 1)
+		module.exports[0].Name = "bar"
+
+		result := ctx.Eval(`import('error-test-3')`, EvalAwait(true))
+		defer result.Free()
+
+		require.True(t, result.IsException())
+		err = ctx.Exception()
+		require.Contains(t, err.Error(), "failed to set module export")
+	})
+}
+
+// =============================================================================
+// MINIMAL REPRO TEST (ISSUE #688)
+// =============================================================================
+
+func TestModuleBuilder_RuntimeClosePanic_Minimal(t *testing.T) {
+	// Regression stress test for issue #688. Historically, closing the runtime after
+	// importing a native module could randomly trigger a QuickJS abort in rt.Close().
+	//
+	// If QuickJS triggers an assertion/abort during rt.Close(), `go test` will terminate.
+	const attempts = 50
+	for i := 1; i <= attempts; i++ {
+		t.Run(fmt.Sprintf("attempt_%d", i), func(t *testing.T) {
+			// Use an inner scope so defers run per-iteration.
+			rt := NewRuntime(WithModuleImport(true))
+			defer rt.Close()
+
+			ctx := rt.NewContext()
+			defer ctx.Close()
+
+			fooFunc := ctx.NewFunction(func(ctx *Context, this *Value, args []*Value) *Value {
+				fmt.Println("foo")
+				return ctx.NewUndefined()
+			})
+			defer fooFunc.Free()
+
+			module := NewModuleBuilder("testmodule")
+			module.Export("foo", fooFunc)
+			require.NoError(t, module.Build(ctx))
+
+			script := `
+import * as testmodule from "testmodule";
+
+testmodule.foo();
+`
+
+			result := ctx.Eval(script, EvalFlagStrict(true), EvalAwait(true))
+			defer result.Free()
+			if result.IsException() {
+				panic(ctx.Exception())
+			}
+		})
+	}
 }
