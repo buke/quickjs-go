@@ -26,6 +26,11 @@ type Context struct {
 
 const defaultJobQueueSize = 1024
 
+// awaitPollInterval is the duration the Await loop sleeps when no JS or Go
+// jobs are pending. Keeps CPU usage low while ensuring Go-scheduled work
+// (e.g., resolved Promises from goroutines) is picked up promptly.
+const awaitPollInterval = time.Millisecond
+
 // awaitPromiseStateHook and awaitExecutePendingJobHook are used only in tests to
 // force specific Await code paths; they must remain nil in production.
 var (
@@ -1051,7 +1056,7 @@ func (ctx *Context) Await(v *Value) *Value {
 				if ctx.jobQueue != nil && len(ctx.jobQueue) > 0 {
 					continue // more Go jobs to process
 				}
-				time.Sleep(time.Millisecond)
+				time.Sleep(awaitPollInterval)
 			}
 		default:
 			return v
