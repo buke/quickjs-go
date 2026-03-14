@@ -1053,7 +1053,7 @@ func (ctx *Context) Await(v *Value) *Value {
 				// Still pending. Check if there are pending Go jobs in the queue.
 				// If so, keep polling. If not, yield briefly — a goroutine will
 				// Schedule work soon (HTTP response, storage result, etc.)
-				if ctx.jobQueue != nil && len(ctx.jobQueue) > 0 {
+				if len(ctx.jobQueue) > 0 {
 					continue // more Go jobs to process
 				}
 				time.Sleep(awaitPollInterval)
