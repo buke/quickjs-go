@@ -1002,17 +1002,27 @@ func TestContextInternalsCoverage(t *testing.T) {
 		require.Nil(t, ctx.Await(nilPromise))
 	})
 
-	t.Run("AwaitDrivesStdLoopForTimeout", func(t *testing.T) {
+	t.Run("AwaitDrivesScheduleForResolve", func(t *testing.T) {
 		rt := NewRuntime()
 		defer rt.Close()
 		ctx := rt.NewContext()
 		defer ctx.Close()
 
-		promise := ctx.Eval(`new Promise((resolve) => { setTimeout(() => resolve("timer result"), 0); })`)
+		// Test that Await processes Go-scheduled work (via ctx.Schedule)
+		// instead of relying on js_std_loop for C-level timers.
+		promise := ctx.NewPromise(func(resolve, reject func(*Value)) {
+			go func() {
+				ctx.Schedule(func(ctx *Context) {
+					val := ctx.NewString("scheduled result")
+					defer val.Free()
+					resolve(val)
+				})
+			}()
+		})
 		defer promise.Free()
 		result := ctx.Await(promise)
 		defer result.Free()
-		require.Equal(t, "timer result", result.ToString())
+		require.Equal(t, "scheduled result", result.ToString())
 	})
 
 	t.Run("AwaitHandlesPendingJobFailure", func(t *testing.T) {
