@@ -1025,6 +1025,31 @@ func TestContextInternalsCoverage(t *testing.T) {
 		require.Equal(t, "scheduled result", result.ToString())
 	})
 
+	t.Run("AwaitPollsUntilDelayedResolve", func(t *testing.T) {
+		rt := NewRuntime()
+		defer rt.Close()
+		ctx := rt.NewContext()
+		defer ctx.Close()
+
+		// Test that the Await polling loop correctly yields and re-checks
+		// when the Promise is resolved after a delay from a goroutine.
+		// This exercises the time.Sleep path in Await's pending case.
+		promise := ctx.NewPromise(func(resolve, reject func(*Value)) {
+			go func() {
+				time.Sleep(5 * time.Millisecond) // force Await to poll a few times
+				ctx.Schedule(func(ctx *Context) {
+					val := ctx.NewString("delayed result")
+					defer val.Free()
+					resolve(val)
+				})
+			}()
+		})
+		defer promise.Free()
+		result := ctx.Await(promise)
+		defer result.Free()
+		require.Equal(t, "delayed result", result.ToString())
+	})
+
 	t.Run("AwaitHandlesPendingJobFailure", func(t *testing.T) {
 		rt := NewRuntime()
 		defer rt.Close()
