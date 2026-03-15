@@ -36,6 +36,7 @@ const awaitPollInterval = time.Millisecond
 var (
 	awaitPromiseStateHook      func(ctx *Context, promise *Value, current int) (int, bool)
 	awaitExecutePendingJobHook func(ctx *Context, promise *Value, current int) (int, bool)
+	awaitHasPendingGoJobsHook  func(ctx *Context, promise *Value, current bool) (bool, bool)
 )
 
 func (ctx *Context) initScheduler() {
@@ -1053,7 +1054,13 @@ func (ctx *Context) Await(v *Value) *Value {
 				// Still pending. Check if there are pending Go jobs in the queue.
 				// If so, keep polling. If not, yield briefly — a goroutine will
 				// Schedule work soon (HTTP response, storage result, etc.)
-				if len(ctx.jobQueue) > 0 {
+				hasPendingGoJobs := len(ctx.jobQueue) > 0
+				if hook := awaitHasPendingGoJobsHook; hook != nil {
+					if override, ok := hook(ctx, promise, hasPendingGoJobs); ok {
+						hasPendingGoJobs = override
+					}
+				}
+				if hasPendingGoJobs {
 					continue // more Go jobs to process
 				}
 				time.Sleep(awaitPollInterval)

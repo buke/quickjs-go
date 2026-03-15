@@ -1118,8 +1118,8 @@ func TestContextInternalsCoverage(t *testing.T) {
 		require.Equal(t, "resolved-via-recheck", result.ToString())
 	})
 
-	// Cover line 1056-1057: executed==0, ProcessJobs drains but promise
-	// stays pending, yet another Go job is already queued → continue.
+	// Cover line 1056-1057: force executed==0 and pending-go-jobs=true,
+	// then verify Await takes the continue path before next iteration resolves.
 	t.Run("AwaitContinuesWhenJobQueueNonEmpty", func(t *testing.T) {
 		rt := NewRuntime()
 		defer rt.Close()
@@ -1132,27 +1132,29 @@ func TestContextInternalsCoverage(t *testing.T) {
 		})
 		defer promise.Free()
 
-		callCount := 0
+		forcedPendingGoJobs := false
 		awaitExecutePendingJobHook = func(hookCtx *Context, _ *Value, current int) (int, bool) {
 			if hookCtx != ctx {
 				return current, false
 			}
-			callCount++
-			if callCount == 1 {
-				// First iteration: force executed=0, and enqueue two jobs.
-				// ProcessJobs at line 1045 drains the first, but the second
-				// remains → len(jobQueue) > 0 → continue (line 1056-1057).
-				ctx.Schedule(func(*Context) {}) // drained by ProcessJobs
-				ctx.Schedule(func(inner *Context) { // stays in queue → triggers continue
-					val := inner.NewString("after-queue-check")
-					defer val.Free()
-					resolvePromise(val)
-				})
-				return 0, true
-			}
-			return current, false
+			return 0, true
 		}
-		t.Cleanup(func() { awaitExecutePendingJobHook = nil })
+		awaitHasPendingGoJobsHook = func(hookCtx *Context, _ *Value, current bool) (bool, bool) {
+			if hookCtx != ctx || forcedPendingGoJobs {
+				return current, false
+			}
+			forcedPendingGoJobs = true
+			ctx.Schedule(func(inner *Context) {
+				val := inner.NewString("after-queue-check")
+				defer val.Free()
+				resolvePromise(val)
+			})
+			return true, true
+		}
+		t.Cleanup(func() {
+			awaitExecutePendingJobHook = nil
+			awaitHasPendingGoJobsHook = nil
+		})
 
 		result := ctx.Await(promise)
 		defer result.Free()
