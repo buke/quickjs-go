@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"sync/atomic"
+	"time"
 	"unsafe"
 )
 
@@ -24,6 +25,11 @@ type Context struct {
 }
 
 const defaultJobQueueSize = 1024
+
+// awaitPollInterval is the duration the Await loop sleeps when no JS or Go
+// jobs are pending. Keeps CPU usage low while ensuring Go-scheduled work
+// (e.g., resolved Promises from goroutines) is picked up promptly.
+const awaitPollInterval = time.Millisecond
 
 // awaitPromiseStateHook and awaitExecutePendingJobHook are used only in tests to
 // force specific Await code paths; they must remain nil in production.
@@ -985,7 +991,13 @@ func (ctx *Context) Loop() {
 	ctx.ProcessJobs()
 }
 
-// Wait for a promise and execute pending jobs while waiting for it. Return the promise result or JS_EXCEPTION in case of promise rejection.
+// Wait for a promise and execute pending jobs while waiting for it.
+// Return the promise result or JS_EXCEPTION in case of promise rejection.
+//
+// This implementation uses a polling loop instead of blocking in js_std_loop.
+// This allows Go-scheduled work (via ctx.Schedule) to be processed between
+// iterations, enabling async Go bridge functions (fetch, storage, etc.) to
+// resolve Promises from goroutines without blocking the event loop.
 func (ctx *Context) Await(v *Value) *Value {
 	if v == nil || !v.IsPromise() {
 		return v
@@ -1002,7 +1014,9 @@ func (ctx *Context) Await(v *Value) *Value {
 	runtimeRef := ctx.runtime.ref
 
 	for {
+		// Drain Go-scheduled work (resolve/reject from goroutines)
 		ctx.ProcessJobs()
+
 		state := C.JS_PromiseState(ctx.ref, promise.ref)
 		if hook := awaitPromiseStateHook; hook != nil {
 			if override, ok := hook(ctx, promise, int(state)); ok {
@@ -1016,6 +1030,7 @@ func (ctx *Context) Await(v *Value) *Value {
 			reason := C.JS_PromiseResult(ctx.ref, promise.ref)
 			return &Value{ctx: ctx, ref: C.JS_Throw(ctx.ref, reason)}
 		case pendingState:
+			// Process JS microtasks (Promise.then callbacks, queueMicrotask)
 			executed := C.JS_ExecutePendingJob(runtimeRef, nil)
 			if hook := awaitExecutePendingJobHook; hook != nil {
 				if override, ok := hook(ctx, promise, int(executed)); ok {
@@ -1026,7 +1041,22 @@ func (ctx *Context) Await(v *Value) *Value {
 				return ctx.ThrowInternalError("failed to execute pending job")
 			}
 			if executed == 0 {
-				C.js_std_loop(ctx.ref)
+				// No JS microtasks pending. Check for Go-scheduled work first.
+				ctx.ProcessJobs()
+
+				// Re-check promise state — Go jobs may have resolved it.
+				newState := C.JS_PromiseState(ctx.ref, promise.ref)
+				if newState != pendingState {
+					continue // resolved — loop back to handle it
+				}
+
+				// Still pending. Check if there are pending Go jobs in the queue.
+				// If so, keep polling. If not, yield briefly — a goroutine will
+				// Schedule work soon (HTTP response, storage result, etc.)
+				if len(ctx.jobQueue) > 0 {
+					continue // more Go jobs to process
+				}
+				time.Sleep(awaitPollInterval)
 			}
 		default:
 			return v
