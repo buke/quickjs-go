@@ -19,6 +19,7 @@ type Runtime struct {
 	ref              *C.JSRuntime
 	options          *Options
 	interruptHandler InterruptHandler // Store interrupt handler directly (no cgo.Handle)
+	handlersInit     bool
 }
 
 type Options struct {
@@ -114,7 +115,7 @@ func NewRuntime(opts ...Option) *Runtime {
 	rt.SetMaxStackSize(rt.options.maxStackSize)
 
 	if rt.options.canBlock {
-		C.JS_SetCanBlock(rt.ref, C.int(1))
+		C.SetCanBlock(rt.ref, C.int(1))
 	}
 
 	if rt.options.strip > 0 {
@@ -157,6 +158,10 @@ func (r *Runtime) Close() {
 	unregisterRuntime(r.ref)
 
 	// Step 4: Free QuickJS runtime
+	if r.handlersInit {
+		C.js_std_free_handlers(r.ref)
+		r.handlersInit = false
+	}
 	C.JS_FreeRuntime(r.ref)
 
 }
@@ -164,9 +169,9 @@ func (r *Runtime) Close() {
 // SetCanBlock will set the runtime's can block; default is true
 func (r *Runtime) SetCanBlock(canBlock bool) {
 	if canBlock {
-		C.JS_SetCanBlock(r.ref, C.int(1))
+		C.SetCanBlock(r.ref, C.int(1))
 	} else {
-		C.JS_SetCanBlock(r.ref, C.int(0))
+		C.SetCanBlock(r.ref, C.int(0))
 	}
 }
 
@@ -195,7 +200,7 @@ func (r *Runtime) SetExecuteTimeout(timeout uint64) {
 
 // SetStripInfo sets the strip info for the runtime.
 func (r *Runtime) SetStripInfo(strip int) {
-	C.JS_SetStripInfo(r.ref, C.int(strip))
+	C.SetStripInfo(r.ref, C.int(strip))
 }
 
 // SetModuleImport sets whether the runtime supports module import.
@@ -232,14 +237,21 @@ func (r *Runtime) callInterruptHandler() int {
 
 // NewContext creates a new JavaScript context.
 func (r *Runtime) NewContext() *Context {
-	C.js_std_init_handlers(r.ref)
+	if !r.handlersInit {
+		C.js_std_init_handlers(r.ref)
+		r.handlersInit = true
+	}
 
 	// create a new context (heap, global object and context stack
 	ctx_ref := C.JS_NewContext(r.ref)
 
 	// import the 'std' and 'os' modules
-	C.js_init_module_std(ctx_ref, C.CString("std"))
-	C.js_init_module_os(ctx_ref, C.CString("os"))
+	stdName := C.CString("std")
+	defer C.free(unsafe.Pointer(stdName))
+	osName := C.CString("os")
+	defer C.free(unsafe.Pointer(osName))
+	C.js_init_module_std(ctx_ref, stdName)
+	C.js_init_module_os(ctx_ref, osName)
 
 	// import setTimeout and clearTimeout from 'os' to globalThis
 	code := `
@@ -250,7 +262,11 @@ func (r *Runtime) NewContext() *Context {
 
 	// Replace evaluation flags with function calls
 	evalFlags := C.int(C.GetEvalTypeModule()) | C.int(C.GetEvalFlagCompileOnly())
-	init_compile := C.JS_Eval(ctx_ref, C.CString(code), C.size_t(len(code)), C.CString("init.js"), evalFlags)
+	codePtr := C.CString(code)
+	defer C.free(unsafe.Pointer(codePtr))
+	filenamePtr := C.CString("init.js")
+	defer C.free(unsafe.Pointer(filenamePtr))
+	init_compile := C.JS_Eval(ctx_ref, codePtr, C.size_t(len(code)), filenamePtr, evalFlags)
 	init_run := C.js_std_await(ctx_ref, C.JS_EvalFunction(ctx_ref, init_compile))
 	C.JS_FreeValue(ctx_ref, init_run)
 

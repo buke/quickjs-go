@@ -304,7 +304,7 @@ func goClassConstructorProxy(ctx *C.JSContext, newTarget C.JSValue,
 	}
 
 	// Check if instance creation failed
-	if C.JS_IsException(instance) != 0 {
+	if C.JS_IsException_Wrapper(instance) != 0 {
 		return instance // Return the exception
 	}
 

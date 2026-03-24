@@ -1,6 +1,7 @@
 package quickjs
 
 import (
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -96,7 +97,10 @@ func TestRuntimeLimitsAndErrors(t *testing.T) {
 
 		// Use Context.Exception() instead of result.ToError()
 		err := ctx.Exception()
-		require.Contains(t, err.Error(), "stack overflow")
+		require.True(t,
+			strings.Contains(err.Error(), "stack overflow") || strings.Contains(err.Error(), "Maximum call stack size exceeded"),
+			err.Error(),
+		)
 	})
 }
 

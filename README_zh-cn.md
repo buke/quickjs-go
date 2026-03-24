@@ -24,8 +24,34 @@ Go 语言的 QuickJS 绑定库：快速、小型、可嵌入的 ES2020 JavaScrip
 - **完整的 TypedArray 支持 (Int8Array, Uint8Array, Float32Array 等)**
 - **使用 ClassBuilder 从 Go 创建 JavaScript 类**
 - **使用 ModuleBuilder 从 Go 创建 JavaScript 模块**
-- **跨平台支持：** 提供预编译的 QuickJS 静态库，支持 Linux (x64/arm64)、Windows (x64/x86)、MacOS (x64/arm64)。  
-  *(详见 [deps/libs](deps/libs)。Windows 构建请参考：https://github.com/buke/quickjs-go/issues/151#issuecomment-2134307728)*
+- **跨平台支持：** 仓库内 vendored 了 [quickjs-ng](https://github.com/quickjs-ng/quickjs) 源码，并由 cgo 在 `go build` / `go test` 时直接编译。
+- **上游固定版本：** 当前运行时源码快照位于 [deps/quickjs](deps/quickjs)，按 [quickjs-ng](https://github.com/quickjs-ng/quickjs) release 进行跟踪。
+
+## 上游同步
+
+本项目已将上游运行时源码从 [bellard/quickjs](https://github.com/bellard/quickjs) 迁移到 [quickjs-ng/quickjs](https://github.com/quickjs-ng/quickjs)。
+
+这次迁移的主要原因是长期可维护性，而不是对 quickjs-go 的 Go API 做出调整。quickjs-ng 在社区协作、发布节奏、跨平台支持，以及测试和 CI 覆盖方面更适合作为绑定库项目的长期上游。对于一个需要将引擎源码 vendored 到仓库中、并通过 cgo 在 Linux、macOS 和 Windows 上持续构建与测试的 Go 绑定库来说，这些工程能力会直接影响日常维护成本和版本升级效率。
+
+此次迁移仅涉及底层 vendored JavaScript 引擎实现的上游切换；quickjs-go 对外提供的 Go API 设计与使用方式保持不变，现有 Go 侧集成代码无需因本次迁移而调整。
+
+[deps/quickjs](deps/quickjs) 中的运行时源码不再通过 git submodule 更新，而是按 [quickjs-ng](https://github.com/quickjs-ng/quickjs) GitHub release 进行同步。
+
+- 当前同步元数据记录在 [deps/quickjs-release.env](deps/quickjs-release.env)。
+- 手动更新可使用 [scripts/sync_quickjs_ng_release.sh](scripts/sync_quickjs_ng_release.sh)。
+- GitHub Actions 会通过 [/.github/workflows/sync_quickjs_ng_release.yml](.github/workflows/sync_quickjs_ng_release.yml) 每日检查新 release，并自动发起 PR。
+- 自动同步在发起 PR 前会执行 `go test ./...` 验证当前仓库。
+
+## Windows 构建环境
+
+Windows 下已经不再需要预编译的 QuickJS 静态库，但本地构建仍然需要一套 C 工具链，因为 vendored 的 quickjs-ng 源码会在 `go build` 和 `go test` 期间由 cgo 直接编译。
+
+- 推荐安装 MSYS2，并使用 `ucrt64` 或 `mingw64` 这类兼容 MinGW-w64 的环境。
+- 运行 Go 命令前，请确保该环境里的 `gcc` 或 `clang` 已经在 `PATH` 中可用。
+- 请确保 cgo 已启用；如有需要，可显式设置 `CGO_ENABLED=1`。
+- 在工具链就绪后，可在仓库根目录执行 `go test ./...` 作为最小验证步骤。
+
+也就是说，Windows 用户现在不再需要仓库内置的二进制静态库，但仍然需要一套可供 cgo 调用的本地 C 编译器工具链。
 
 ## 使用指南
 
@@ -41,7 +67,7 @@ Go 语言的 QuickJS 绑定库：快速、小型、可嵌入的 ES2020 JavaScrip
 - 谨慎使用 `runtime.SetFinalizer()`，因为它可能会干扰 QuickJS 的 GC。
 
 ### 性能建议
-- QuickJS 不是线程安全的。如需并发或隔离，建议使用线程池模式预初始化运行时，或为不同任务/用户管理独立的 Runtime/Context 实例（推荐使用：[https://github.com/buke/js-executor](https://github.com/buke/js-executor)）。
+- QuickJS 不是线程安全的。如需并发或隔离，建议使用线程池模式预初始化运行时，或为不同任务/用户管理独立的 Runtime/Context 实例。
 - 尽可能复用 Runtime 和 Context 对象
 - 避免频繁在 Go 和 JS 值之间转换
 - 对于频繁执行的脚本建议使用字节码编译
