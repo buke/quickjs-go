@@ -232,7 +232,7 @@ func (ctx *Context) NewBool(b bool) *Value {
 	if b {
 		bv = 1
 	}
-	return &Value{ctx: ctx, ref: C.JS_NewBool(ctx.ref, C.int(bv))}
+	return &Value{ctx: ctx, ref: C.JS_NewBool_Wrapper(ctx.ref, C.int(bv))}
 }
 
 // Bool returns a bool value with given bool.
@@ -770,7 +770,7 @@ func (ctx *Context) Eval(code string, opts ...EvalOption) *Value {
 	filenamePtr := C.CString(options.filename)
 	defer C.free(unsafe.Pointer(filenamePtr))
 
-	if C.JS_DetectModule(codePtr, C.size_t(len(code))) != 0 {
+	if C.JS_DetectModule_Wrapper(codePtr, C.size_t(len(code))) != 0 {
 		cFlag |= C.int(C.GetEvalTypeModule())
 	}
 
@@ -807,7 +807,7 @@ func (ctx *Context) LoadModule(code string, moduleName string, opts ...EvalOptio
 	codePtr := C.CString(code)
 	defer C.free(unsafe.Pointer(codePtr))
 
-	if C.JS_DetectModule(codePtr, C.size_t(len(code))) == 0 {
+	if C.JS_DetectModule_Wrapper(codePtr, C.size_t(len(code))) == 0 {
 		return ctx.ThrowSyntaxError("not a module: %s", moduleName)
 	}
 
@@ -975,7 +975,7 @@ func (ctx *Context) ThrowInternalError(format string, args ...interface{}) *Valu
 // HasException checks if the context has an exception set.
 func (ctx *Context) HasException() bool {
 	// Check if the context has an exception set
-	return C.JS_HasException(ctx.ref) == 1
+	return C.JS_HasException_Wrapper(ctx.ref) == 1
 }
 
 // Exception returns a context's exception value.
@@ -1032,7 +1032,7 @@ func (ctx *Context) Await(v *Value) *Value {
 			return &Value{ctx: ctx, ref: C.JS_Throw(ctx.ref, reason)}
 		case pendingState:
 			// Process JS microtasks (Promise.then callbacks, queueMicrotask)
-			executed := C.JS_ExecutePendingJob(runtimeRef, nil)
+			executed := C.JS_ExecutePendingJob_Wrapper(runtimeRef)
 			if hook := awaitExecutePendingJobHook; hook != nil {
 				if override, ok := hook(ctx, promise, int(executed)); ok {
 					executed = C.int(override)

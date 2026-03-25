@@ -10,6 +10,8 @@ on:
 jobs:
   build:
     name: ${{ matrix.os }} @ Go ${{ matrix.go }}
+    env:
+      CGO_ENABLED: '1'
     strategy:
         fail-fast: false
         matrix:
@@ -27,29 +29,45 @@ jobs:
       with:
         go-version: ${{ matrix.go }}
 
-    - name: Build
+    - name: Set up MSYS2 MinGW toolchain
+      if: runner.os == 'Windows'
+      uses: msys2/setup-msys2@v2
+      with:
+        msystem: MINGW64
+        update: true
+        install: >-
+          mingw-w64-x86_64-gcc
+
+    - name: Configure Windows cgo environment
+      if: runner.os == 'Windows'
+      run: |
+        echo "C:/msys64/mingw64/bin" >> $GITHUB_PATH
+        echo "CC=C:/msys64/mingw64/bin/gcc.exe" >> $GITHUB_ENV
+        echo "CXX=C:/msys64/mingw64/bin/g++.exe" >> $GITHUB_ENV
+
+    - name: Build (Unix)
+      if: runner.os != 'Windows'
       run: go build -v ./...
 
-    # Linux and macOS test step
-    - name: Test with coverage (Unix)
-      if: runner.os != 'Windows'
+    - name: Build (Windows)
+      if: runner.os == 'Windows'
+      run: go build -v ./...
+
+    - name: Test with coverage (Linux)
+      if: runner.os == 'Linux'
       run: |
         go test -v -race -coverprofile=coverage.out -covermode=atomic ./...
 
-    # Windows test step (separate to handle PowerShell issues)
+    - name: Test with coverage (macOS)
+      if: runner.os == 'macOS'
+      run: |
+        go test -v -race -coverprofile=coverage.out -covermode=atomic ./...
+
     - name: Test with coverage (Windows)
       if: runner.os == 'Windows'
       run: |
-        go test -v -race -coverprofile=coverage.out -covermode=atomic ./...
-      shell: cmd
+        go test --% -v -race -coverprofile=coverage.out -covermode=atomic ./...
 
-    # Alternative Windows approach using PowerShell with proper escaping
-    # - name: Test with coverage (Windows PowerShell)
-    #   if: runner.os == 'Windows'
-    #   run: |
-    #     go test -v -race "-coverprofile=coverage.out" "-covermode=atomic" ./...
-    #   shell: pwsh
-        
     - name: Upload coverage to Codecov
       uses: codecov/codecov-action@v5.5.3
       env:

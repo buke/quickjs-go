@@ -305,7 +305,7 @@ func (v *Value) propertyEnum() ([]*propertyEnum, error) {
 	names := make([]*propertyEnum, len(entries))
 	for i := 0; i < len(names); i++ {
 		names[i] = &propertyEnum{
-			IsEnumerable: entries[i].is_enumerable == 1,
+			IsEnumerable: bool(entries[i].is_enumerable),
 			atom:         &Atom{ctx: v.ctx, ref: entries[i].atom},
 		}
 		names[i].atom.Free()
@@ -619,10 +619,12 @@ func (v *Value) IsUninitialized() bool { return v != nil && C.JS_IsUninitialized
 func (v *Value) IsString() bool        { return v != nil && C.JS_IsString_Wrapper(v.ref) == 1 }
 func (v *Value) IsSymbol() bool        { return v != nil && C.JS_IsSymbol_Wrapper(v.ref) == 1 }
 func (v *Value) IsObject() bool        { return v != nil && C.JS_IsObject_Wrapper(v.ref) == 1 }
-func (v *Value) IsArray() bool         { return v != nil && C.JS_IsArray(v.ctx.ref, v.ref) == 1 }
-func (v *Value) IsError() bool         { return v != nil && C.JS_IsError(v.ctx.ref, v.ref) == 1 }
-func (v *Value) IsFunction() bool      { return v != nil && C.JS_IsFunction(v.ctx.ref, v.ref) == 1 }
-func (v *Value) IsConstructor() bool   { return v != nil && C.JS_IsConstructor(v.ctx.ref, v.ref) == 1 }
+func (v *Value) IsArray() bool         { return v != nil && C.JS_IsArray_Wrapper(v.ref) == 1 }
+func (v *Value) IsError() bool         { return v != nil && C.JS_IsError_Wrapper(v.ref) == 1 }
+func (v *Value) IsFunction() bool      { return v != nil && C.JS_IsFunction_Wrapper(v.ctx.ref, v.ref) == 1 }
+func (v *Value) IsConstructor() bool {
+	return v != nil && C.JS_IsConstructor_Wrapper(v.ctx.ref, v.ref) == 1
+}
 
 // =============================================================================
 // PROMISE SUPPORT METHODS (replaced constants with getter functions)
