@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -304,6 +305,19 @@ func TestContextModules(t *testing.T) {
 			}},
 			{"InvalidModule", func() bool {
 				result := ctx.LoadModule(`export { unclosed_brace`, "invalid_module")
+				defer result.Free()
+				return result.IsException()
+			}},
+			{"ModuleCompileError", func() bool {
+				// Use a dedicated runtime with a lowered memory limit to force Compile() error path.
+				rt2 := NewRuntime(WithModuleImport(true))
+				defer rt2.Close()
+				ctx2 := rt2.NewContext()
+				defer ctx2.Close()
+
+				rt2.SetMemoryLimit(512 * 1024)
+				code := "export const s = `" + strings.Repeat("a", 4*1024*1024) + "`;"
+				result := ctx2.LoadModule(code, "compile_error_module")
 				defer result.Free()
 				return result.IsException()
 			}},

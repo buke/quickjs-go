@@ -2,6 +2,7 @@
 #include "quickjs.h"
 #include "quickjs-libc.h"
 #include "cutils.h" 
+#include <string.h>
 #include <time.h>
 
 // ============================================================================
@@ -26,8 +27,9 @@ JSValue ThrowRangeError(JSContext *ctx, const char *fmt) { return JS_ThrowRangeE
 JSValue ThrowInternalError(JSContext *ctx, const char *fmt) { return JS_ThrowInternalError(ctx, "%s", fmt); }
 
 // Type checking macros -> functions (these are heavily used in Go code)
+JSValue JS_NewBool_Wrapper(JSContext *ctx, int val) { return JS_NewBool(ctx, val != 0); }
 int JS_IsNumber_Wrapper(JSValue val) { return JS_IsNumber(val); }
-int JS_IsBigInt_Wrapper(JSContext *ctx, JSValue val) { return JS_IsBigInt(ctx, val); }
+int JS_IsBigInt_Wrapper(JSContext *ctx, JSValue val) { (void)ctx; return JS_IsBigInt(val); }
 int JS_IsBool_Wrapper(JSValue val) { return JS_IsBool(val); }
 int JS_IsNull_Wrapper(JSValue val) { return JS_IsNull(val); }
 int JS_IsUndefined_Wrapper(JSValue val) { return JS_IsUndefined(val); }
@@ -36,6 +38,64 @@ int JS_IsUninitialized_Wrapper(JSValue val) { return JS_IsUninitialized(val); }
 int JS_IsString_Wrapper(JSValue val) { return JS_IsString(val); }
 int JS_IsSymbol_Wrapper(JSValue val) { return JS_IsSymbol(val); }
 int JS_IsObject_Wrapper(JSValue val) { return JS_IsObject(val); }
+int JS_IsArray_Wrapper(JSValue val) { return JS_IsArray(val); }
+int JS_IsError_Wrapper(JSValue val) { return JS_IsError(val); }
+int JS_IsFunction_Wrapper(JSContext *ctx, JSValue val) { return JS_IsFunction(ctx, val); }
+int JS_IsConstructor_Wrapper(JSContext *ctx, JSValue val) { return JS_IsConstructor(ctx, val); }
+int JS_DetectModule_Wrapper(const char *input, size_t input_len) {
+    JSRuntime *rt;
+    JSContext *ctx;
+    JSValue val;
+    int is_module = 0;
+
+    rt = JS_NewRuntime();
+    if (!rt) {
+        return 0;
+    }
+
+    ctx = JS_NewContext(rt);
+    if (!ctx) {
+        JS_FreeRuntime(rt);
+        return 0;
+    }
+
+    val = JS_Eval(ctx, input, input_len, "<unnamed>", JS_EVAL_TYPE_GLOBAL | JS_EVAL_FLAG_COMPILE_ONLY);
+    if (!JS_IsException(val)) {
+        JS_FreeValue(ctx, val);
+        JS_FreeContext(ctx);
+        JS_FreeRuntime(rt);
+        return 0;
+    }
+    JS_FreeValue(ctx, val);
+    {
+        JSValue exc = JS_GetException(ctx);
+        JS_FreeValue(ctx, exc);
+    }
+
+    val = JS_Eval(ctx, input, input_len, "<unnamed>", JS_EVAL_TYPE_MODULE | JS_EVAL_FLAG_COMPILE_ONLY);
+    if (!JS_IsException(val)) {
+        is_module = 1;
+    } else {
+        JSValue exc = JS_GetException(ctx);
+        const char *msg = JS_ToCString(ctx, exc);
+        if (msg != NULL && strstr(msg, "could not load module") != NULL) {
+            is_module = 1;
+        }
+        if (msg != NULL) {
+            JS_FreeCString(ctx, msg);
+        }
+        JS_FreeValue(ctx, exc);
+    }
+    JS_FreeValue(ctx, val);
+    JS_FreeContext(ctx);
+    JS_FreeRuntime(rt);
+    return is_module;
+}
+int JS_HasException_Wrapper(JSContext *ctx) { return JS_HasException(ctx); }
+int JS_ExecutePendingJob_Wrapper(JSRuntime *rt) {
+    JSContext *ctx = NULL;
+    return JS_ExecutePendingJob(rt, &ctx);
+}
 
 // Value tag access macro -> function
 int ValueGetTag(JSValueConst v) {
@@ -144,8 +204,17 @@ JSValue GoClassSetterProxy(JSContext *ctx, JSValueConst this_val,
 // Finalizer proxy - unified cleanup handler
 // Corresponds to QuickJS JSClassDef.finalizer
 // Called when JS object is garbage collected
-void GoClassFinalizerProxy(JSRuntime *rt, JSValue val) {
-    goClassFinalizerProxy(rt, val);
+void GoClassFinalizerProxy(JSRuntime *rt, JSValueConst val) {
+    goClassFinalizerProxy(rt, (JSValue)val);
+}
+
+void SetCanBlock(JSRuntime *rt, int can_block) {
+    JS_SetCanBlock(rt, can_block != 0);
+}
+
+void SetStripInfo(JSRuntime *rt, int flags) {
+    (void)rt;
+    (void)flags;
 }
 
 
@@ -251,8 +320,8 @@ JSValue CreateClass(JSContext *ctx,
         return JS_ThrowInternalError(ctx, "class_name cannot be empty");
     }
     
-    // Step 2: Allocate class_id internally (corresponds to point.c: JS_NewClassID(&js_point_class_id))
-    JS_NewClassID(class_id);
+    // Step 2: Allocate class_id internally
+    JS_NewClassID(rt, class_id);
     
     // Check QuickJS limits
     if (*class_id >= (1 << 16)) {
@@ -574,7 +643,7 @@ JSValue LoadModuleBytecode(JSContext *ctx, const uint8_t *buf, size_t buf_len, i
     
     if (load_only) {
         if (JS_VALUE_GET_TAG(obj) == JS_TAG_MODULE) {
-            js_module_set_import_meta(ctx, obj, FALSE, FALSE);
+            js_module_set_import_meta(ctx, obj, false, false);
         }
         return obj;
     } else {
@@ -583,7 +652,7 @@ JSValue LoadModuleBytecode(JSContext *ctx, const uint8_t *buf, size_t buf_len, i
                 JS_FreeValue(ctx, obj);
                 return JS_EXCEPTION;
             }
-            js_module_set_import_meta(ctx, obj, FALSE, FALSE);
+            js_module_set_import_meta(ctx, obj, false, false);
             val = JS_EvalFunction(ctx, obj);
             val = js_std_await(ctx, val);
         } else {

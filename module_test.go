@@ -396,7 +396,6 @@ func TestModuleBuilder_RuntimeClosePanic_Minimal(t *testing.T) {
 			defer ctx.Close()
 
 			fooFunc := ctx.NewFunction(func(ctx *Context, this *Value, args []*Value) *Value {
-				fmt.Println("foo")
 				return ctx.NewUndefined()
 			})
 			defer fooFunc.Free()

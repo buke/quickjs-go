@@ -416,7 +416,7 @@ func createClass(ctx *Context, builder *ClassBuilder) (*Value, uint32) {
 	)
 
 	// Step 10: Error handling - clean up all stored handlers on failure - unchanged logic
-	if C.JS_IsException(constructor) != 0 {
+	if C.JS_IsException_Wrapper(constructor) != 0 {
 		fmt.Printf("Failed to create class '%s'\n", builder.name)
 		// Clean up constructor handler (now stores ClassBuilder)
 		ctx.handleStore.Delete(constructorID)

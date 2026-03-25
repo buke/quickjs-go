@@ -22,9 +22,35 @@ Go bindings to QuickJS: a fast, small, and embeddable ES2020 JavaScript interpre
 - **Marshal/Unmarshal Go values to/from JavaScript values**
 - **Full TypedArray support (Int8Array, Uint8Array, Float32Array, etc.)**
 - **Create JavaScript Classes from Go with ClassBuilder**
-- **Create JavaScript Modules from Go with ModuleBuilder*o
-- **Cross-platform:** Prebuilt QuickJS static libraries for Linux (x64/arm64), Windows (x64/x86), MacOS (x64/arm64).  
-  *(See [deps/libs](deps/libs) for details. For Windows build tips, see: https://github.com/buke/quickjs-go/issues/151#issuecomment-2134307728)*
+- **Create JavaScript Modules from Go with ModuleBuilder**
+- **Cross-platform:** [quickjs-ng](https://github.com/quickjs-ng/quickjs) source is vendored in-tree and compiled by cgo during normal `go build` / `go test` workflows.
+- **Pinned upstream:** the runtime sources are tracked from [quickjs-ng](https://github.com/quickjs-ng/quickjs) releases in [deps/quickjs](deps/quickjs).
+
+## Upstream Sync
+
+This project has migrated from [bellard/quickjs](https://github.com/bellard/quickjs) to [quickjs-ng/quickjs](https://github.com/quickjs-ng/quickjs) as its upstream runtime source.
+
+The main reason for this change is long-term maintainability, not a redesign of the public Go API. quickjs-ng provides a more active community-driven development model, a steadier release cadence, broader cross-platform support, and stronger testing and CI coverage. For a Go binding that vendors the engine sources and builds them through cgo on Linux, macOS, and Windows, those engineering characteristics matter directly.
+
+This migration only changes the vendored upstream JavaScript engine implementation. The public Go API exposed by quickjs-go remains unchanged, and existing Go-side integration code should continue to work without migration-specific changes.
+
+The vendored runtime in [deps/quickjs](deps/quickjs) is synchronized from [quickjs-ng](https://github.com/quickjs-ng/quickjs) GitHub releases instead of a git submodule.
+
+- Release metadata is tracked in [deps/quickjs-release.env](deps/quickjs-release.env).
+- Manual refreshes use [scripts/sync_quickjs_ng_release.sh](scripts/sync_quickjs_ng_release.sh).
+- GitHub Actions checks for new releases daily and opens an automated PR through [/.github/workflows/sync_quickjs_ng_release.yml](.github/workflows/sync_quickjs_ng_release.yml).
+- Every automated sync runs `go test ./...` before opening a PR.
+
+## Windows Build Environment
+
+Windows builds no longer require prebuilt QuickJS static libraries, but they still require a C toolchain because the vendored quickjs-ng sources are compiled by cgo during `go build` and `go test`.
+
+- Recommended: install MSYS2 and use a MinGW-w64 compatible environment such as `ucrt64` or `mingw64`.
+- Ensure `gcc` or `clang` from that environment is available in `PATH` when running Go commands.
+- Ensure cgo is enabled. If needed, set `CGO_ENABLED=1` explicitly.
+- A minimal validation step on Windows is running `go test ./...` from the repository root after the toolchain is available.
+
+In other words, Windows users do not need vendored binary archives anymore, but they do need a local C compiler toolchain that cgo can invoke.
 
 
 ## Guidelines
@@ -41,7 +67,7 @@ Go bindings to QuickJS: a fast, small, and embeddable ES2020 JavaScript interpre
 - Use `runtime.SetFinalizer()` cautiously as it may interfere with QuickJS's GC.
 
 ### Performance Tips
-- QuickJS is not thread-safe. For concurrency or isolation, use a thread pool pattern with pre-initialized runtimes, or manage separate Runtime/Context instances for different tasks or users (such as : [https://github.com/buke/js-executor](https://github.com/buke/js-executor)).
+- QuickJS is not thread-safe. For concurrency or isolation, use a thread pool pattern with pre-initialized runtimes, or manage separate Runtime/Context instances for different tasks or users.
 - Reuse Runtime and Context objects when possible.
 - Avoid frequent conversion between Go and JS values.
 - Consider using bytecode compilation for frequently executed scripts.

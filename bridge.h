@@ -22,6 +22,7 @@ extern JSValue ThrowRangeError(JSContext *ctx, const char *fmt);
 extern JSValue ThrowInternalError(JSContext *ctx, const char *fmt);
 
 // Type checking functions
+extern JSValue JS_NewBool_Wrapper(JSContext *ctx, int val);
 extern int JS_IsNumber_Wrapper(JSValue val);
 extern int JS_IsBigInt_Wrapper(JSContext *ctx, JSValue val);
 extern int JS_IsBool_Wrapper(JSValue val);
@@ -32,6 +33,13 @@ extern int JS_IsUninitialized_Wrapper(JSValue val);
 extern int JS_IsString_Wrapper(JSValue val);
 extern int JS_IsSymbol_Wrapper(JSValue val);
 extern int JS_IsObject_Wrapper(JSValue val);
+extern int JS_IsArray_Wrapper(JSValue val);
+extern int JS_IsError_Wrapper(JSValue val);
+extern int JS_IsFunction_Wrapper(JSContext *ctx, JSValue val);
+extern int JS_IsConstructor_Wrapper(JSContext *ctx, JSValue val);
+extern int JS_DetectModule_Wrapper(const char *input, size_t input_len);
+extern int JS_HasException_Wrapper(JSContext *ctx);
+extern int JS_ExecutePendingJob_Wrapper(JSRuntime *rt);
 
 // Constant getters
 extern int GetPropertyWritableConfigurable();
@@ -120,7 +128,7 @@ extern JSValue GoClassSetterProxy(JSContext *ctx, JSValueConst this_val,
                                  JSValueConst val, int magic);
 
 // Finalizer proxy - unified cleanup handler
-extern void GoClassFinalizerProxy(JSRuntime *rt, JSValue val);
+extern void GoClassFinalizerProxy(JSRuntime *rt, JSValueConst val);
 
 
 // Complete class creation function
@@ -159,6 +167,8 @@ extern int ValueGetTag(JSValueConst v);
 extern JSValue LoadModuleBytecode(JSContext *ctx, const uint8_t *buf, size_t buf_len, int load_only);
 
 // Simplified interrupt handler interface (no handlerArgs complexity)
+extern void SetCanBlock(JSRuntime *rt, int can_block);
+extern void SetStripInfo(JSRuntime *rt, int flags);
 extern void SetInterruptHandler(JSRuntime *rt);
 extern void ClearInterruptHandler(JSRuntime *rt);
 extern void SetExecuteTimeout(JSRuntime *rt, time_t timeout);
