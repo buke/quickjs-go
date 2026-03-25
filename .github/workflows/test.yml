@@ -54,9 +54,13 @@ jobs:
       run: go build -v ./...
       shell: msys2 {0}
 
-    # Linux and macOS test step
-    - name: Test with coverage (Unix)
-      if: runner.os != 'Windows'
+    - name: Test with coverage (Linux)
+      if: runner.os == 'Linux'
+      run: |
+        go test -v -race -coverprofile=coverage.out -covermode=atomic ./...
+
+    - name: Test with coverage (macOS)
+      if: runner.os == 'macOS'
       run: |
         go test -v -race -coverprofile=coverage.out -covermode=atomic ./...
 

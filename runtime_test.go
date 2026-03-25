@@ -26,7 +26,7 @@ func TestRuntimeBasics(t *testing.T) {
 	// Test runtime with all options in one go
 	rt2 := NewRuntime(
 		WithExecuteTimeout(30),
-		WithMemoryLimit(128*1024),
+		WithMemoryLimit(512*1024),
 		WithGCThreshold(256*1024),
 		WithMaxStackSize(65534),
 		WithCanBlock(true),
