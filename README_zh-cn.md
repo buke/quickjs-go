@@ -64,6 +64,7 @@ Windows 下已经不再需要预编译的 QuickJS 静态库，但本地构建仍
 ### 内存管理
 - 对您创建或接收的 `*Value` 对象调用 `value.Free()`。QuickJS 使用引用计数进行内存管理，因此如果一个值被其他对象引用，您只需要确保引用对象被正确释放。
 - Runtime 和 Context 对象有自己的清理方法 (`Close()`)。使用完毕后立即关闭它们。
+- `Context.NewFunction()` 会注册 Go 回调 handle，并在 `Context.Close()` 时统一清理。对于长生命周期 Context 中的短生命周期回调，可在确认 JavaScript 不会再调用该函数后，显式调用 `ctx.ReleaseFunction(fn)` 提前回收。
 - 谨慎使用 `runtime.SetFinalizer()`，因为它可能会干扰 QuickJS 的 GC。
 
 ### 性能建议
@@ -71,6 +72,19 @@ Windows 下已经不再需要预编译的 QuickJS 静态库，但本地构建仍
 - 尽可能复用 Runtime 和 Context 对象
 - 避免频繁在 Go 和 JS 值之间转换
 - 对于频繁执行的脚本建议使用字节码编译
+
+### Runtime 线程归属约定
+- `Runtime` 具有线程归属约束，`Runtime.Close()` 必须在创建该 Runtime 的同一 goroutine/OS 线程上调用。
+- 从其他 goroutine 调用 `Runtime.Close()` 会被视为契约违例，并触发带明确信息的 panic。
+- 推荐模式：在同一个 worker goroutine 内完成 Runtime 的创建、使用和关闭。
+
+### Runtime 调试快照
+- `Context.SnapshotPromiseCleanupObservability()` 与 `Context.SnapshotAndResetPromiseCleanupObservability()` 可查看 Promise cleanup 触发来源：`cancel`、`finally`、`fallback`。
+- `Context.SnapshotCloseEnqueueObservability()` 与 `Context.SnapshotAndResetCloseEnqueueObservability()` 可查看 close 窗口 fallback 入队情况：总量 `Succeeded` / `Dropped`，以及来源分桶（`ValueFreeDropped`、`PromiseCallbackDropped`、`OtherDropped`）。
+- 高压调试建议流程：
+    1. 压测前抓取一次快照。
+    2. 执行负载与 close/recreate 循环。
+    3. 压测后抓取并对比快照差值，快速定位 dropped 或 fallback 增长来源。
 
 ### 最佳实践
 - 针对不同脚本类型使用合适的 `EvalOptions`
@@ -284,7 +298,32 @@ func main() {
 // - 不要在 goroutine 中直接调用 Context 或任何 QuickJS API。
 // - 所有 QuickJS 相关操作都应该通过 ctx.Schedule 调度回 Context 线程后再执行。
 // - ctx.Await 会在内部驱动 pending jobs 和调度器，直至 Promise 解决。
+// - 如果 Promise 可能长期 pending（甚至永不 settle），
+//   可使用 NewPromiseWithCancel，并在放弃等待时调用 cancel()
+//   主动释放内部 resolve/reject 回调引用。
+// - 如果 resolve 和 reject 并发竞争，只有先到达的回调会生效；
+//   后续回调会被忽略。
 ```
+
+### 可选的 Pending Promise 清理
+
+```go
+promise, cancel := ctx.NewPromiseWithCancel(func(resolve, reject func(*quickjs.Value)) {
+    // 可能永不 settle 的异步任务
+})
+defer promise.Free()
+
+// 当调用方决定放弃等待时，显式释放回调引用
+cancel()
+
+// cancel() 不会主动 resolve/reject Promise。
+// 如果业务逻辑不再触发 settle，Promise 仍可能保持 pending。
+```
+
+契约说明：
+- `cancel()` 幂等，可重复调用。
+- `cancel()` 只释放内部回调引用。
+- `cancel()` 不会改变 Promise 状态（`pending`/`fulfilled`/`rejected`）。
 
 ### 错误处理
 

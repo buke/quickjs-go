@@ -5,6 +5,14 @@ package quickjs
 */
 import "C"
 
+import "sync/atomic"
+
+var atomToStringForceNilPtrForTest atomic.Bool
+
+func setAtomToStringForceNilPtrForTest(enabled bool) {
+	atomToStringForceNilPtrForTest.Store(enabled)
+}
+
 // Atom represents a QuickJS atom - unique strings used for object property names.
 // Object property names and some strings are stored as Atoms (unique strings) to save memory and allow fast comparison.
 // Atoms are represented as a 32 bit integer. Half of the atom range is reserved for immediate integer literals from 0 to 2^{31}-1.
@@ -15,12 +23,25 @@ type Atom struct {
 
 // Free decrements the reference count of the atom.
 func (a *Atom) Free() {
+	if a == nil || a.ctx == nil || a.ctx.ref == nil {
+		return
+	}
 	C.JS_FreeAtom(a.ctx.ref, a.ref)
 }
 
 // ToString returns the string representation of the atom.
 func (a *Atom) ToString() string {
+	if a == nil || a.ctx == nil || a.ctx.ref == nil {
+		return ""
+	}
 	ptr := C.JS_AtomToCString(a.ctx.ref, a.ref)
+	if atomToStringForceNilPtrForTest.Load() && ptr != nil {
+		C.JS_FreeCString(a.ctx.ref, ptr)
+		ptr = nil
+	}
+	if ptr == nil {
+		return ""
+	}
 	defer C.JS_FreeCString(a.ctx.ref, ptr)
 	return C.GoString(ptr)
 }
@@ -34,6 +55,9 @@ func (a *Atom) String() string {
 
 // ToValue returns the value representation of the atom.
 func (a *Atom) ToValue() *Value {
+	if a == nil || a.ctx == nil || a.ctx.ref == nil {
+		return nil
+	}
 	return &Value{ctx: a.ctx, ref: C.JS_AtomToValue(a.ctx.ref, a.ref)}
 }
 
@@ -51,5 +75,8 @@ type propertyEnum struct {
 
 // ToString returns the atom string representation of the property.
 func (p *propertyEnum) ToString() string {
+	if p == nil || p.atom == nil {
+		return ""
+	}
 	return p.atom.ToString()
 }

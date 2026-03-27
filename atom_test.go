@@ -356,3 +356,64 @@ func TestAtomEdgeCases(t *testing.T) {
 		require.Equal(t, propName, atomValue.ToString()) // Changed: String() → ToString()
 	})
 }
+
+func TestAtomToStringNilSafety(t *testing.T) {
+	var nilAtom *Atom
+	require.Equal(t, "", nilAtom.ToString())
+
+	orphan := &Atom{}
+	require.Equal(t, "", orphan.ToString())
+
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	// ref=0 with valid context should hit JS_AtomToCString null-pointer path.
+	zeroRefAtom := &Atom{ctx: ctx, ref: 0}
+	require.Equal(t, "", zeroRefAtom.ToString())
+}
+
+func TestAtomNilSafety(t *testing.T) {
+	var nilAtom *Atom
+	require.NotPanics(t, func() { nilAtom.Free() })
+	require.Nil(t, nilAtom.ToValue())
+
+	orphan := &Atom{}
+	require.NotPanics(t, func() { orphan.Free() })
+	require.Nil(t, orphan.ToValue())
+
+	var nilProp *propertyEnum
+	require.Equal(t, "", nilProp.ToString())
+	require.Equal(t, "", (&propertyEnum{}).ToString())
+
+	t.Run("ClosedContextAtomSafety", func(t *testing.T) {
+		rt := NewRuntime()
+		defer rt.Close()
+
+		ctx := rt.NewContext()
+		atom := ctx.NewAtom("closed")
+		ctx.Close()
+
+		require.NotPanics(t, func() { atom.Free() })
+		require.Equal(t, "", atom.ToString())
+		require.Nil(t, atom.ToValue())
+	})
+}
+
+func TestAtomToStringNilPtrInjectedPath(t *testing.T) {
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	a := ctx.NewAtom("force-nil-ptr")
+	defer a.Free()
+
+	setAtomToStringForceNilPtrForTest(true)
+	t.Cleanup(func() {
+		setAtomToStringForceNilPtrForTest(false)
+	})
+
+	require.Equal(t, "", a.ToString())
+}

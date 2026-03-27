@@ -70,7 +70,11 @@ func Example() {
 	fmt.Println(js_ret.ToString())
 
 	// call js function by go
-	go_ret := ctx.Globals().Get("test").Call("hello", ctx.NewString("Golang!"))
+	testObj := ctx.Globals().Get("test")
+	defer testObj.Free()
+	goArg := ctx.NewString("Golang!")
+	go_ret := testObj.Call("hello", goArg)
+	goArg.Free()
 	defer go_ret.Free()
 	fmt.Println(go_ret.ToString())
 
@@ -185,4 +189,25 @@ func Example() {
 	// TypedArray: true
 	// Marshal: Alice avg: 91.6
 	// Class binding: 88.5
+}
+
+func ExampleContext_NewPromiseWithCancel() {
+	rt := quickjs.NewRuntime()
+	defer rt.Close()
+
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	promise, cancel := ctx.NewPromiseWithCancel(func(resolve, reject func(*quickjs.Value)) {
+		// Keep pending intentionally.
+	})
+	defer promise.Free()
+
+	fmt.Println(promise.PromiseState() == quickjs.PromisePending)
+	cancel()
+	fmt.Println(promise.PromiseState() == quickjs.PromisePending)
+
+	// Output:
+	// true
+	// true
 }

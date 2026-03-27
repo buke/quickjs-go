@@ -1,8 +1,10 @@
 package quickjs
 
 import (
+	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -132,13 +134,18 @@ func TestRuntimeConfiguration(t *testing.T) {
 
 // TestRuntimeInterruptHandler tests interrupt handler functionality and coverage
 func TestRuntimeInterruptHandler(t *testing.T) {
-	rt := NewRuntime()
-	defer rt.Close()
-
-	ctx := rt.NewContext()
-	defer ctx.Close()
+	newCtx := func(t *testing.T) (*Runtime, *Context) {
+		rt := NewRuntime()
+		ctx := rt.NewContext()
+		t.Cleanup(func() {
+			ctx.Close()
+			rt.Close()
+		})
+		return rt, ctx
+	}
 
 	t.Run("InterruptAfterDelay", func(t *testing.T) {
+		rt, ctx := newCtx(t)
 		startTime := time.Now()
 		rt.SetInterruptHandler(func() int {
 			if time.Since(startTime) > time.Second {
@@ -157,42 +164,24 @@ func TestRuntimeInterruptHandler(t *testing.T) {
 	})
 
 	t.Run("ClearBySettingNil", func(t *testing.T) {
+		rt, ctx := newCtx(t)
 		// Set then clear by nil (covers else branch in SetInterruptHandler)
 		rt.SetInterruptHandler(func() int { return 1 })
 		rt.SetInterruptHandler(nil)
 
-		done := make(chan bool, 1)
-		go func() {
-			result := ctx.Eval(`let sum = 0; for(let i = 0; i < 100000; i++) sum += i; sum`)
-			defer result.Free()
-			done <- !result.IsException() // Check for exceptions instead of error
-		}()
-
-		select {
-		case success := <-done:
-			require.True(t, success)
-		case <-time.After(3 * time.Second):
-			t.Fatal("Code took too long")
-		}
+		result := ctx.Eval(`let sum = 0; for(let i = 0; i < 100000; i++) sum += i; sum`)
+		defer result.Free()
+		require.False(t, result.IsException())
 	})
 
 	t.Run("ClearExplicitly", func(t *testing.T) {
+		rt, ctx := newCtx(t)
 		rt.SetInterruptHandler(func() int { return 1 })
 		rt.ClearInterruptHandler()
 
-		done := make(chan bool, 1)
-		go func() {
-			result := ctx.Eval(`let result = 42; result`)
-			defer result.Free()
-			done <- !result.IsException() // Check for exceptions instead of error
-		}()
-
-		select {
-		case success := <-done:
-			require.True(t, success)
-		case <-time.After(2 * time.Second):
-			t.Fatal("Code took too long")
-		}
+		result := ctx.Eval(`let result = 42; result`)
+		defer result.Free()
+		require.False(t, result.IsException())
 	})
 }
 
@@ -261,6 +250,265 @@ func TestRuntimeTimeoutVsInterruptHandler(t *testing.T) {
 		err := ctx.Exception()
 		require.Contains(t, err.Error(), "interrupted")
 		require.Less(t, elapsed, 3*time.Second)
+	})
+}
+
+func TestRuntimeTimeoutHandlerAllocationLifecycle(t *testing.T) {
+	require.Equal(t, 0, currentTimeoutAllocationCount())
+	require.Equal(t, 0, currentTimeoutRegistryEntryCount())
+
+	t.Run("ClearInterruptHandlerFreesTimeoutPayload", func(t *testing.T) {
+		rt := NewRuntime()
+
+		rt.SetExecuteTimeout(10)
+		require.Equal(t, 1, currentTimeoutAllocationCount())
+		require.Equal(t, 1, currentTimeoutRegistryEntryCount())
+
+		rt.ClearInterruptHandler()
+		require.Equal(t, 0, currentTimeoutAllocationCount())
+		require.Equal(t, 0, currentTimeoutRegistryEntryCount())
+
+		rt.Close()
+		require.Equal(t, 0, currentTimeoutAllocationCount())
+		require.Equal(t, 0, currentTimeoutRegistryEntryCount())
+	})
+
+	t.Run("UserHandlerOverrideFreesTimeoutPayload", func(t *testing.T) {
+		rt := NewRuntime()
+
+		rt.SetExecuteTimeout(10)
+		require.Equal(t, 1, currentTimeoutAllocationCount())
+		require.Equal(t, 1, currentTimeoutRegistryEntryCount())
+
+		rt.SetInterruptHandler(func() int { return 0 })
+		require.Equal(t, 0, currentTimeoutAllocationCount())
+		require.Equal(t, 0, currentTimeoutRegistryEntryCount())
+
+		rt.Close()
+		require.Equal(t, 0, currentTimeoutAllocationCount())
+		require.Equal(t, 0, currentTimeoutRegistryEntryCount())
+	})
+
+	t.Run("ReplacingTimeoutFreesPreviousPayload", func(t *testing.T) {
+		rt := NewRuntime()
+
+		rt.SetExecuteTimeout(10)
+		require.Equal(t, 1, currentTimeoutAllocationCount())
+		require.Equal(t, 1, currentTimeoutRegistryEntryCount())
+
+		rt.SetExecuteTimeout(20)
+		require.Equal(t, 1, currentTimeoutAllocationCount())
+		require.Equal(t, 1, currentTimeoutRegistryEntryCount())
+
+		rt.Close()
+		require.Equal(t, 0, currentTimeoutAllocationCount())
+		require.Equal(t, 0, currentTimeoutRegistryEntryCount())
+	})
+}
+
+func TestRuntimeCloseThreadOwnershipContract(t *testing.T) {
+	rt := NewRuntime()
+
+	ctx := rt.NewContext()
+	require.NotNil(t, ctx)
+
+	panicCh := make(chan interface{}, 1)
+	go func() {
+		defer func() {
+			panicCh <- recover()
+		}()
+		rt.Close()
+	}()
+
+	recovered := <-panicCh
+	require.NotNil(t, recovered)
+	require.Contains(t, fmt.Sprint(recovered), "Runtime.Close must be called on the runtime owner thread")
+
+	result := ctx.Eval(`1 + 2`)
+	defer result.Free()
+	require.False(t, result.IsException())
+	require.EqualValues(t, 3, result.ToInt32())
+
+	ctx.Close()
+	require.NotPanics(t, func() {
+		rt.Close()
+	})
+}
+
+func TestRuntimeOwnerThreadContractsParallel(t *testing.T) {
+	t.Run("CrossGoroutineFailFast", func(t *testing.T) {
+		t.Parallel()
+
+		rt := NewRuntime()
+		ctx := rt.NewContext()
+
+		assertPanicFromForeignGoroutine := func(op string, fn func()) {
+			t.Helper()
+			panicCh := make(chan interface{}, 1)
+			go func() {
+				defer func() {
+					panicCh <- recover()
+				}()
+				fn()
+			}()
+			recovered := <-panicCh
+			require.NotNil(t, recovered)
+			require.Contains(t, fmt.Sprint(recovered), op)
+			require.Contains(t, fmt.Sprint(recovered), "runtime owner thread")
+		}
+
+		assertPanicFromForeignGoroutine("Context.Eval", func() {
+			result := ctx.Eval(`1 + 1`)
+			if result != nil {
+				result.Free()
+			}
+		})
+		assertPanicFromForeignGoroutine("Context.Loop", func() { ctx.Loop() })
+		assertPanicFromForeignGoroutine("Context.Await", func() { _ = ctx.Await(nil) })
+		assertPanicFromForeignGoroutine("Runtime.RunGC", func() { rt.RunGC() })
+		assertPanicFromForeignGoroutine("Runtime.SetMemoryLimit", func() { rt.SetMemoryLimit(1024) })
+		assertPanicFromForeignGoroutine("Runtime.NewContext", func() {
+			child := rt.NewContext()
+			if child != nil {
+				child.Close()
+			}
+		})
+
+		result := ctx.Eval(`40 + 2`)
+		defer result.Free()
+		require.False(t, result.IsException())
+		require.EqualValues(t, 42, result.ToInt32())
+
+		ctx.Close()
+		rt.Close()
+	})
+
+	t.Run("MultiRuntimeCloseIsolation", func(t *testing.T) {
+		t.Parallel()
+
+		rtA := NewRuntime()
+		ctxA := rtA.NewContext()
+		ctorA, classIDA := NewClassBuilder("IsolationClassA").
+			Constructor(func(ctx *Context, instance *Value, args []*Value) (interface{}, error) {
+				return &Point{X: 1, Y: 1}, nil
+			}).
+			Build(ctxA)
+		require.False(t, ctorA.IsException())
+		ctorARef := ctorA.ref
+		keyA := runtimeKeyFromCRef(rtA.ref)
+
+		rtB := NewRuntime()
+		ctxB := rtB.NewContext()
+		ctorB, classIDB := NewClassBuilder("IsolationClassB").
+			Constructor(func(ctx *Context, instance *Value, args []*Value) (interface{}, error) {
+				return &Point{X: 2, Y: 2}, nil
+			}).
+			Build(ctxB)
+		require.False(t, ctorB.IsException())
+		ctorBRef := ctorB.ref
+		ctorBKey := jsValueToKey(ctorBRef)
+		keyB := runtimeKeyFromCRef(rtB.ref)
+
+		gotA, okA := getConstructorClassID(ctxA, ctorARef)
+		require.True(t, okA)
+		require.Equal(t, classIDA, gotA)
+
+		gotB, okB := getConstructorClassID(ctxB, ctorBRef)
+		require.True(t, okB)
+		require.Equal(t, classIDB, gotB)
+
+		ctorA.Free()
+
+		ctxA.Close()
+		rtA.Close()
+
+		_, existsA := constructorRegistryByRuntime.Load(keyA)
+		require.False(t, existsA)
+
+		bucketBAny, existsB := constructorRegistryByRuntime.Load(keyB)
+		require.True(t, existsB)
+		bucketB, ok := bucketBAny.(*sync.Map)
+		require.True(t, ok)
+		storedClassIDBAny, found := bucketB.Load(ctorBKey)
+		require.True(t, found)
+		require.Equal(t, classIDB, storedClassIDBAny.(uint32))
+
+		gotBAfter, okBAfter := getConstructorClassID(ctxB, ctorBRef)
+		require.True(t, okBAfter)
+		require.Equal(t, classIDB, gotBAfter)
+
+		ctorB.Free()
+
+		ctxB.Close()
+		rtB.Close()
+	})
+}
+
+func TestRuntimeTimeoutRegistryConcurrentAccess(t *testing.T) {
+	const workers = 16
+
+	var wg sync.WaitGroup
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			rt := NewRuntime()
+			rt.SetExecuteTimeout(uint64(1 + (i % 3)))
+			rt.SetInterruptHandler(func() int { return 0 })
+			rt.SetExecuteTimeout(uint64(2 + (i % 2)))
+			rt.ClearInterruptHandler()
+			rt.Close()
+		}(i)
+	}
+	wg.Wait()
+
+	require.Equal(t, 0, currentTimeoutAllocationCount())
+	require.Equal(t, 0, currentTimeoutRegistryEntryCount())
+}
+
+func TestRuntimeNilSafety(t *testing.T) {
+	t.Run("NilReceiver", func(t *testing.T) {
+		var nilRt *Runtime
+		require.NotPanics(t, func() { nilRt.RunGC() })
+		require.NotPanics(t, func() { nilRt.SetCanBlock(true) })
+		require.NotPanics(t, func() { nilRt.SetMemoryLimit(1) })
+		require.NotPanics(t, func() { nilRt.SetGCThreshold(1) })
+		require.NotPanics(t, func() { nilRt.SetMaxStackSize(1) })
+		require.NotPanics(t, func() { nilRt.SetExecuteTimeout(1) })
+		require.NotPanics(t, func() { nilRt.SetStripInfo(1) })
+		require.NotPanics(t, func() { nilRt.SetModuleImport(true) })
+		require.NotPanics(t, func() { nilRt.SetInterruptHandler(func() int { return 0 }) })
+		require.NotPanics(t, func() { nilRt.ClearInterruptHandler() })
+		require.Equal(t, 0, nilRt.callInterruptHandler())
+		require.Nil(t, nilRt.NewContext())
+		require.NotPanics(t, func() { nilRt.Close() })
+	})
+
+	t.Run("OrphanRuntime", func(t *testing.T) {
+		rt := &Runtime{}
+		require.NotPanics(t, func() { rt.RunGC() })
+		require.NotPanics(t, func() { rt.SetCanBlock(true) })
+		require.NotPanics(t, func() { rt.SetMemoryLimit(1) })
+		require.NotPanics(t, func() { rt.SetGCThreshold(1) })
+		require.NotPanics(t, func() { rt.SetMaxStackSize(1) })
+		require.NotPanics(t, func() { rt.SetExecuteTimeout(1) })
+		require.NotPanics(t, func() { rt.SetStripInfo(1) })
+		require.NotPanics(t, func() { rt.SetModuleImport(true) })
+		require.NotPanics(t, func() { rt.SetInterruptHandler(func() int { return 0 }) })
+		require.NotPanics(t, func() { rt.ClearInterruptHandler() })
+		require.Equal(t, 0, rt.callInterruptHandler())
+		require.Nil(t, rt.NewContext())
+		require.NotPanics(t, func() { rt.Close() })
+	})
+
+	t.Run("CloseIdempotent", func(t *testing.T) {
+		rt := NewRuntime()
+		ctx := rt.NewContext()
+		require.NotNil(t, ctx)
+		ctx.Close()
+		require.NotPanics(t, func() { rt.Close() })
+		require.NotPanics(t, func() { rt.Close() })
+		require.Nil(t, rt.NewContext())
 	})
 }
 
@@ -386,4 +634,403 @@ func TestRuntimeAdvancedOptions(t *testing.T) {
 	defer result4.Free()
 	require.False(t, result4.IsException()) // Check for exceptions instead of error
 	require.Equal(t, "GC test", result4.ToString())
+}
+
+func TestRuntimeCloseWithConcurrentSchedule(t *testing.T) {
+	const iterations = 40
+
+	for i := 0; i < iterations; i++ {
+		rt := NewRuntime()
+		ctx := rt.NewContext()
+		require.NotNil(t, ctx)
+
+		var executed atomic.Int32
+		stop := make(chan struct{})
+		done := make(chan struct{})
+
+		go func() {
+			defer close(done)
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+				}
+
+				_ = ctx.Schedule(func(*Context) {
+					executed.Add(1)
+				})
+				time.Sleep(100 * time.Microsecond)
+			}
+		}()
+
+		time.Sleep(2 * time.Millisecond)
+		require.NotPanics(t, func() { ctx.Close() })
+		require.False(t, ctx.Schedule(func(*Context) {}))
+
+		close(stop)
+		select {
+		case <-done:
+		case <-time.After(500 * time.Millisecond):
+			t.Fatal("scheduler goroutine did not stop after context close")
+		}
+
+		require.NotPanics(t, func() { rt.Close() })
+		require.GreaterOrEqual(t, executed.Load(), int32(0))
+	}
+}
+
+func TestRuntimePromiseCancelScheduleCloseInterleaving(t *testing.T) {
+	const iterations = 30
+
+	for i := 0; i < iterations; i++ {
+		rt := NewRuntime()
+		ctx := rt.NewContext()
+		require.NotNil(t, ctx)
+
+		done := make(chan struct{})
+		promise, cancel := ctx.NewPromiseWithCancel(func(resolve, reject func(*Value)) {
+			go func() {
+				defer close(done)
+				time.Sleep(200 * time.Microsecond)
+				_ = ctx.Schedule(func(inner *Context) {
+					val := inner.NewString("late-resolve")
+					if val != nil {
+						defer val.Free()
+					}
+					resolve(val)
+				})
+			}()
+		})
+
+		require.NotNil(t, promise)
+		require.NotPanics(t, func() { promise.Free() })
+
+		time.Sleep(100 * time.Microsecond)
+		require.NotPanics(t, func() { cancel() })
+		require.NotPanics(t, func() { ctx.Close() })
+		require.False(t, ctx.Schedule(func(*Context) {}))
+		require.NotPanics(t, func() { rt.Close() })
+
+		select {
+		case <-done:
+		case <-time.After(500 * time.Millisecond):
+			t.Fatal("promise scheduling goroutine did not finish")
+		}
+	}
+}
+
+func TestRuntimeInterruptHandlerToggleWithRunGCInterleaving(t *testing.T) {
+	rt := NewRuntime()
+	ctx := rt.NewContext()
+	require.NotNil(t, ctx)
+
+	// QuickJS context execution is single-threaded; use tight sequential interleaving
+	// to stress lifecycle paths without unsafe concurrent Eval/GC execution.
+	for i := 0; i < 300; i++ {
+		rt.SetInterruptHandler(func() int { return 0 })
+		rt.ClearInterruptHandler()
+		rt.SetExecuteTimeout(1)
+		rt.SetInterruptHandler(func() int { return 0 })
+		rt.RunGC()
+
+		result := ctx.Eval(`1 + 1`)
+		require.NotNil(t, result)
+		require.False(t, result.IsException())
+		require.Equal(t, int32(2), result.ToInt32())
+		result.Free()
+	}
+
+	require.NotPanics(t, func() { ctx.Close() })
+	require.NotPanics(t, func() { rt.Close() })
+}
+
+func TestRuntimeAndRegistryHelperGuards(t *testing.T) {
+	require.Equal(t, uintptr(0), runtimeKeyFromCRef(nil))
+	require.Equal(t, uintptr(0), constructorRegistryRuntimeKey(nil))
+	require.Nil(t, constructorRegistryBucketForContext(nil, false))
+	require.Nil(t, constructorRegistryBucketForContext(nil, true))
+
+	var nilRuntime *Runtime
+	require.NotPanics(t, func() { requireRuntimeOwnerThread(nilRuntime, "noop") })
+	require.NotPanics(t, func() { requireRuntimeOwnerThread(&Runtime{}, "noop") })
+
+	orphanCtx := &Context{}
+	require.Equal(t, uintptr(0), constructorRegistryRuntimeKey(orphanCtx))
+	require.Nil(t, constructorRegistryBucketForContext(orphanCtx, false))
+	require.Nil(t, constructorRegistryBucketForContext(orphanCtx, true))
+
+	rt := NewRuntime()
+	ctx := rt.NewContext()
+	require.NotNil(t, ctx)
+
+	key := constructorRegistryRuntimeKey(ctx)
+	require.NotZero(t, key)
+
+	// No bucket yet: !create branch should return nil.
+	require.Nil(t, constructorRegistryBucketForContext(ctx, false))
+
+	createdBucket := constructorRegistryBucketForContext(ctx, true)
+	require.NotNil(t, createdBucket)
+	reusedBucket := constructorRegistryBucketForContext(ctx, true)
+	require.NotNil(t, reusedBucket)
+	require.Same(t, createdBucket, reusedBucket)
+
+	readBucket := constructorRegistryBucketForContext(ctx, false)
+	require.NotNil(t, readBucket)
+	require.Same(t, createdBucket, readBucket)
+
+	constructorRegistryByRuntime.Store(key, "bad-bucket")
+	require.Nil(t, constructorRegistryBucketForContext(ctx, false))
+	_, exists := constructorRegistryByRuntime.Load(key)
+	require.False(t, exists)
+
+	constructorRegistryByRuntime.Store(key, "bad-bucket")
+	require.Nil(t, constructorRegistryBucketForContext(ctx, true))
+	_, exists = constructorRegistryByRuntime.Load(key)
+	require.False(t, exists)
+
+	bucket := constructorRegistryBucketForContext(ctx, true)
+	require.NotNil(t, bucket)
+
+	obj := ctx.NewObject()
+	require.NotNil(t, obj)
+
+	registerConstructorClassID(nil, obj.ref, 123)
+	storeConstructorRegistryEntryForTest(nil, obj.ref, uint32(1))
+	_, ok := loadConstructorRegistryEntryForTest(nil, obj.ref)
+	require.False(t, ok)
+	require.NotPanics(t, func() { deleteConstructorRegistryEntryForTest(nil, obj.ref) })
+
+	bucket.Store(jsValueToKey(obj.ref), uint32(42))
+	gotClassID, found := getConstructorClassID(ctx, obj.ref)
+	require.True(t, found)
+	require.Equal(t, uint32(42), gotClassID)
+
+	clearConstructorRegistryForRuntime(nil)
+	clearConstructorRegistryForRuntime(&Runtime{})
+	obj.Free()
+
+	ctx.Close()
+	clearConstructorRegistryForRuntime(rt)
+	_, exists = constructorRegistryByRuntime.Load(key)
+	require.False(t, exists)
+	rt.Close()
+}
+
+func TestRuntimeNewContextFailStageInjection(t *testing.T) {
+	t.Cleanup(func() {
+		setRuntimeNewContextFailStageForTest(runtimeNewContextFailStageNone)
+		setRuntimeNewContextInitCodeForTest("")
+	})
+
+	t.Run("CompileStage", func(t *testing.T) {
+		rt := NewRuntime()
+		defer rt.Close()
+
+		setRuntimeNewContextFailStageForTest(runtimeNewContextFailStageCompile)
+		require.Nil(t, rt.NewContext())
+
+		setRuntimeNewContextFailStageForTest(runtimeNewContextFailStageNone)
+		ctx := rt.NewContext()
+		require.NotNil(t, ctx)
+		ctx.Close()
+	})
+
+	t.Run("ExecStage", func(t *testing.T) {
+		rt := NewRuntime()
+		defer rt.Close()
+
+		setRuntimeNewContextFailStageForTest(runtimeNewContextFailStageExec)
+		require.Nil(t, rt.NewContext())
+
+		setRuntimeNewContextFailStageForTest(runtimeNewContextFailStageNone)
+		ctx := rt.NewContext()
+		require.NotNil(t, ctx)
+		ctx.Close()
+	})
+
+	t.Run("AwaitStage", func(t *testing.T) {
+		rt := NewRuntime()
+		defer rt.Close()
+
+		setRuntimeNewContextFailStageForTest(runtimeNewContextFailStageAwait)
+		require.Nil(t, rt.NewContext())
+
+		setRuntimeNewContextFailStageForTest(runtimeNewContextFailStageNone)
+		ctx := rt.NewContext()
+		require.NotNil(t, ctx)
+		ctx.Close()
+	})
+}
+
+func TestRuntimeNewContextInitCodeExceptionPaths(t *testing.T) {
+	t.Cleanup(func() {
+		setRuntimeNewContextInitCodeForTest("")
+	})
+
+	t.Run("CompileException", func(t *testing.T) {
+		rt := NewRuntime()
+		defer rt.Close()
+
+		setRuntimeNewContextInitCodeForTest(`import {`) // invalid syntax
+		require.Nil(t, rt.NewContext())
+
+		setRuntimeNewContextInitCodeForTest("")
+		ctx := rt.NewContext()
+		require.NotNil(t, ctx)
+		ctx.Close()
+	})
+
+	t.Run("ExecOrAwaitExceptionFromBadImport", func(t *testing.T) {
+		rt := NewRuntime()
+		defer rt.Close()
+
+		setRuntimeNewContextInitCodeForTest(`
+            import { definitely_missing_symbol } from "os";
+            globalThis.__qjs_tmp = definitely_missing_symbol;
+        `)
+		require.Nil(t, rt.NewContext())
+
+		setRuntimeNewContextInitCodeForTest("")
+		ctx := rt.NewContext()
+		require.NotNil(t, ctx)
+		ctx.Close()
+	})
+
+	t.Run("AwaitExceptionFromRejectedTopLevelAwait", func(t *testing.T) {
+		rt := NewRuntime()
+		defer rt.Close()
+
+		setRuntimeNewContextInitCodeForTest(`
+            await Promise.reject(new Error("await-init-fail"));
+        `)
+		require.Nil(t, rt.NewContext())
+
+		setRuntimeNewContextInitCodeForTest("")
+		ctx := rt.NewContext()
+		require.NotNil(t, ctx)
+		ctx.Close()
+	})
+}
+
+func TestFinalizerObservabilityHelperGuards(t *testing.T) {
+	rt := NewRuntime()
+	defer rt.Close()
+
+	require.Nil(t, getFinalizerObservabilityCounters(nil, false))
+	require.Nil(t, getFinalizerObservabilityCounters(nil, true))
+	require.NotPanics(t, func() { observeFinalizerCounter(nil, finalizerCounterCleaned) })
+
+	key := runtimeKeyFromCRef(rt.ref)
+	require.NotZero(t, key)
+
+	finalizerObservabilityByRuntime.Store(key, "bad-counters")
+	require.Nil(t, getFinalizerObservabilityCounters(rt.ref, false))
+	_, exists := finalizerObservabilityByRuntime.Load(key)
+	require.False(t, exists)
+
+	finalizerObservabilityByRuntime.Store(key, "bad-counters")
+	require.NotPanics(t, func() { setFinalizerObservabilityForTest(rt, true) })
+	_, exists = finalizerObservabilityByRuntime.Load(key)
+	require.False(t, exists)
+
+	finalizerObservabilityByRuntime.Store(key, "bad-counters")
+	require.NotPanics(t, func() { resetFinalizerObservabilityForTest(rt) })
+	_, exists = finalizerObservabilityByRuntime.Load(key)
+	require.False(t, exists)
+
+	finalizerObservabilityByRuntime.Store(key, "bad-counters")
+	require.Nil(t, getFinalizerObservabilityCounters(rt.ref, true))
+	_, exists = finalizerObservabilityByRuntime.Load(key)
+	require.False(t, exists)
+
+	setFinalizerObservabilityForTest(rt, true)
+	resetFinalizerObservabilityForTest(rt)
+	observeFinalizerCounter(rt.ref, -1)
+	snapshot := snapshotFinalizerObservabilityForTest(rt)
+	require.True(t, snapshot.Enabled)
+	require.Equal(t, uint64(0), snapshot.Cleaned)
+
+	setFinalizerObservabilityForTest(rt, false)
+	observeFinalizerCounter(rt.ref, finalizerCounterCleaned)
+	snapshot = snapshotFinalizerObservabilityForTest(rt)
+	require.False(t, snapshot.Enabled)
+	require.Equal(t, uint64(0), snapshot.Cleaned)
+
+	clearFinalizerObservabilityForRuntime(nil)
+	clearFinalizerObservabilityForRuntime(rt.ref)
+	_, exists = finalizerObservabilityByRuntime.Load(key)
+	require.False(t, exists)
+}
+
+func TestRuntimeNewRuntimeFailInjection(t *testing.T) {
+	setJSNewRuntimeFailForTest(true)
+	t.Cleanup(func() {
+		setJSNewRuntimeFailForTest(false)
+	})
+
+	rt := NewRuntime()
+	require.NotNil(t, rt)
+	require.Nil(t, rt.ref)
+
+	require.NotPanics(t, func() { rt.Close() })
+
+	setJSNewRuntimeFailForTest(false)
+	rt2 := NewRuntime()
+	require.NotNil(t, rt2)
+	require.NotNil(t, rt2.ref)
+	rt2.Close()
+}
+
+func TestFinalizerObservabilityCounterAllBranches(t *testing.T) {
+	var nilRuntime *Runtime
+	require.NotPanics(t, func() { setFinalizerObservabilityForTest(nilRuntime, true) })
+	require.NotPanics(t, func() { resetFinalizerObservabilityForTest(nilRuntime) })
+	require.Equal(t, finalizerObservabilitySnapshot{}, snapshotFinalizerObservabilityForTest(nilRuntime))
+	require.Equal(t, finalizerObservabilitySnapshot{}, snapshotAndResetFinalizerObservabilityForTest(nilRuntime))
+
+	orphan := &Runtime{}
+	require.NotPanics(t, func() { setFinalizerObservabilityForTest(orphan, true) })
+	require.NotPanics(t, func() { resetFinalizerObservabilityForTest(orphan) })
+	require.Equal(t, finalizerObservabilitySnapshot{}, snapshotFinalizerObservabilityForTest(orphan))
+	require.Equal(t, finalizerObservabilitySnapshot{}, snapshotAndResetFinalizerObservabilityForTest(orphan))
+
+	rt := NewRuntime()
+	defer rt.Close()
+
+	setFinalizerObservabilityForTest(rt, true)
+	resetFinalizerObservabilityForTest(rt)
+
+	observeFinalizerCounter(rt.ref, finalizerCounterOpaqueNil)
+	observeFinalizerCounter(rt.ref, finalizerCounterOpaqueInvalid)
+	observeFinalizerCounter(rt.ref, finalizerCounterHandleInvalid)
+	observeFinalizerCounter(rt.ref, finalizerCounterContextRefInvalid)
+	observeFinalizerCounter(rt.ref, finalizerCounterContextNotFound)
+	observeFinalizerCounter(rt.ref, finalizerCounterContextStateInvalid)
+	observeFinalizerCounter(rt.ref, finalizerCounterRuntimeMismatch)
+	observeFinalizerCounter(rt.ref, finalizerCounterHandleMissing)
+	observeFinalizerCounter(rt.ref, finalizerCounterCleaned)
+
+	snapshot := snapshotFinalizerObservabilityForTest(rt)
+	require.True(t, snapshot.Enabled)
+	require.Equal(t, uint64(1), snapshot.OpaqueNil)
+	require.Equal(t, uint64(1), snapshot.OpaqueInvalid)
+	require.Equal(t, uint64(1), snapshot.HandleInvalid)
+	require.Equal(t, uint64(1), snapshot.ContextRefInvalid)
+	require.Equal(t, uint64(1), snapshot.ContextNotFound)
+	require.Equal(t, uint64(1), snapshot.ContextStateInvalid)
+	require.Equal(t, uint64(1), snapshot.RuntimeMismatch)
+	require.Equal(t, uint64(1), snapshot.HandleMissing)
+	require.Equal(t, uint64(1), snapshot.Cleaned)
+
+	reset := snapshotAndResetFinalizerObservabilityForTest(rt)
+	require.True(t, reset.Enabled)
+	require.Equal(t, uint64(1), reset.OpaqueNil)
+	require.Equal(t, uint64(1), reset.Cleaned)
+
+	after := snapshotFinalizerObservabilityForTest(rt)
+	require.True(t, after.Enabled)
+	require.Equal(t, uint64(0), after.OpaqueNil)
+	require.Equal(t, uint64(0), after.Cleaned)
 }

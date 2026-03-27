@@ -5,6 +5,8 @@ on:
     branches: [ "main" ]
   pull_request_target:
     branches: [ "main" ]
+  schedule:
+    - cron: '23 2 * * *'
   workflow_dispatch:
 
 jobs:
@@ -22,7 +24,7 @@ jobs:
     - name: Checkout PR code
       uses: actions/checkout@v6
       with:
-        ref: ${{ github.event.pull_request.head.sha }}
+        ref: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.head.sha || github.sha }}
 
     - name: Set up Go
       uses: actions/setup-go@v6
@@ -78,5 +80,25 @@ jobs:
         name: codecov-${{ matrix.os }}-go${{ matrix.go }}
         fail_ci_if_error: true
         verbose: true
+
+  soak:
+    name: Nightly Soak (Linux)
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    env:
+      CGO_ENABLED: '1'
+      QUICKJS_SOAK: '1'
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v6
+
+    - name: Set up Go
+      uses: actions/setup-go@v6
+      with:
+        go-version: stable
+
+    - name: Run soak suite
+      run: |
+        go test -v -race -run 'TestRuntimeScopedInjectionAndObservabilitySoak|TestCallbackPanicSoak' ./...
 
 

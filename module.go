@@ -28,6 +28,12 @@ type ModuleBuilder struct {
 	exports []ModuleExportEntry // All exports (including default)
 }
 
+var createModuleResultHookForTest func(ctx *Context, builder *ModuleBuilder) (int, bool)
+
+func setCreateModuleResultHookForTest(hook func(ctx *Context, builder *ModuleBuilder) (int, bool)) {
+	createModuleResultHookForTest = hook
+}
+
 // =============================================================================
 // MODULE BUILDER API
 // =============================================================================
@@ -64,6 +70,10 @@ func (mb *ModuleBuilder) Build(ctx *Context) error {
 
 // validateModuleBuilder validates ModuleBuilder configuration
 func validateModuleBuilder(builder *ModuleBuilder) error {
+	if builder == nil {
+		return errors.New("module builder is nil")
+	}
+
 	if builder.name == "" {
 		return errors.New("module name cannot be empty")
 	}
@@ -73,6 +83,9 @@ func validateModuleBuilder(builder *ModuleBuilder) error {
 	for _, export := range builder.exports {
 		if export.Name == "" {
 			return errors.New("export name cannot be empty")
+		}
+		if export.Value == nil {
+			return fmt.Errorf("export value cannot be nil: %s", export.Name)
 		}
 		if nameSet[export.Name] {
 			return fmt.Errorf("duplicate export name: %s", export.Name)
@@ -89,6 +102,10 @@ func validateModuleBuilder(builder *ModuleBuilder) error {
 // 2. Module initialization phase: set actual export values via proxy
 // The module will be available for import in JavaScript code
 func createModule(ctx *Context, builder *ModuleBuilder) error {
+	if ctx == nil || ctx.ref == nil || ctx.handleStore == nil {
+		return errors.New("invalid context")
+	}
+
 	// Step 1: Validate module builder
 	if err := validateModuleBuilder(builder); err != nil {
 		return fmt.Errorf("module validation failed: %v", err)
@@ -114,13 +131,28 @@ func createModule(ctx *Context, builder *ModuleBuilder) error {
 	}
 
 	// Step 4: Call C function to create module
-	result := C.CreateModule(
-		ctx.ref,
-		moduleName,
-		exportNamesPtr,
-		C.int(exportCount),
-		C.int32_t(builderID),
-	)
+	var result C.int
+	if hook := createModuleResultHookForTest; hook != nil {
+		if override, ok := hook(ctx, builder); ok {
+			result = C.int(override)
+		} else {
+			result = C.CreateModule(
+				ctx.ref,
+				moduleName,
+				exportNamesPtr,
+				C.int(exportCount),
+				C.int32_t(builderID),
+			)
+		}
+	} else {
+		result = C.CreateModule(
+			ctx.ref,
+			moduleName,
+			exportNamesPtr,
+			C.int(exportCount),
+			C.int32_t(builderID),
+		)
+	}
 
 	// Step 5: Clean up C strings
 	C.free(unsafe.Pointer(moduleName))
@@ -132,7 +164,10 @@ func createModule(ctx *Context, builder *ModuleBuilder) error {
 	if result < 0 {
 		// Clean up HandleStore on failure
 		ctx.handleStore.Delete(builderID)
-		return ctx.Exception()
+		if err := ctx.Exception(); err != nil {
+			return err
+		}
+		return errors.New("failed to create module")
 	}
 
 	// Module is now created and registered, ready for import

@@ -10,12 +10,18 @@ import (
 // TestDeprecatedContextAPIs tests all deprecated Context methods to ensure they still work
 // Each deprecated method is called once for test coverage
 func TestDeprecatedContextAPIs(t *testing.T) {
-	rt := NewRuntime()
-	defer rt.Close()
-	ctx := rt.NewContext()
-	defer ctx.Close()
+	newDeprecatedContext := func(t *testing.T) *Context {
+		rt := NewRuntime()
+		ctx := rt.NewContext()
+		t.Cleanup(func() {
+			ctx.Close()
+			rt.Close()
+		})
+		return ctx
+	}
 
 	t.Run("DeprecatedValueCreation", func(t *testing.T) {
+		ctx := newDeprecatedContext(t)
 		// Test all deprecated value creation methods
 		val1 := ctx.Null()
 		defer val1.Free()
@@ -75,6 +81,7 @@ func TestDeprecatedContextAPIs(t *testing.T) {
 	})
 
 	t.Run("DeprecatedTypedArrays", func(t *testing.T) {
+		ctx := newDeprecatedContext(t)
 		// Test all deprecated TypedArray creation methods
 		val1 := ctx.Int8Array([]int8{1, 2, 3})
 		defer val1.Free()
@@ -122,6 +129,7 @@ func TestDeprecatedContextAPIs(t *testing.T) {
 	})
 
 	t.Run("DeprecatedFunctions", func(t *testing.T) {
+		ctx := newDeprecatedContext(t)
 		// Test deprecated Function method
 		fn := ctx.Function(func(ctx *Context, this *Value, args []*Value) *Value {
 			return ctx.NewString("hello")
@@ -157,6 +165,7 @@ func TestDeprecatedContextAPIs(t *testing.T) {
 	})
 
 	t.Run("DeprecatedAtomCreation", func(t *testing.T) {
+		ctx := newDeprecatedContext(t)
 		// Test deprecated Atom creation methods
 		atom1 := ctx.Atom("test")
 		defer atom1.Free()
@@ -168,6 +177,7 @@ func TestDeprecatedContextAPIs(t *testing.T) {
 	})
 
 	t.Run("DeprecatedInvoke", func(t *testing.T) {
+		ctx := newDeprecatedContext(t)
 		// Test deprecated Invoke method
 		fn := ctx.NewFunction(func(ctx *Context, this *Value, args []*Value) *Value {
 			if len(args) > 0 {
@@ -191,12 +201,18 @@ func TestDeprecatedContextAPIs(t *testing.T) {
 
 // TestDeprecatedContextComplexScenarios tests complex scenarios with deprecated Context APIs
 func TestDeprecatedContextComplexScenarios(t *testing.T) {
-	rt := NewRuntime()
-	defer rt.Close()
-	ctx := rt.NewContext()
-	defer ctx.Close()
+	newDeprecatedContext := func(t *testing.T) *Context {
+		rt := NewRuntime()
+		ctx := rt.NewContext()
+		t.Cleanup(func() {
+			ctx.Close()
+			rt.Close()
+		})
+		return ctx
+	}
 
 	t.Run("MixedDeprecatedAndNewAPIs", func(t *testing.T) {
+		ctx := newDeprecatedContext(t)
 		// Mix deprecated and new APIs to ensure compatibility
 		oldString := ctx.String("old api")    // deprecated
 		newString := ctx.NewString("new api") // new
@@ -212,6 +228,7 @@ func TestDeprecatedContextComplexScenarios(t *testing.T) {
 	})
 
 	t.Run("DeprecatedFunctionWithNewValues", func(t *testing.T) {
+		ctx := newDeprecatedContext(t)
 		// Use deprecated Function with new value creation methods
 		fn := ctx.Function(func(ctx *Context, this *Value, args []*Value) *Value {
 			// Use new API inside deprecated function
@@ -225,6 +242,7 @@ func TestDeprecatedContextComplexScenarios(t *testing.T) {
 	})
 
 	t.Run("DeprecatedTypedArrayConversions", func(t *testing.T) {
+		ctx := newDeprecatedContext(t)
 		// Test deprecated TypedArray creation with conversions
 		data := []int32{10, 20, 30, 40, 50}
 		arr := ctx.Int32Array(data) // deprecated

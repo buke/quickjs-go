@@ -121,10 +121,15 @@ func (t *TimeWrapper) UnmarshalJS(ctx *Context, val *Value) error {
 }
 
 func TestMarshalBasicTypes(t *testing.T) {
-	rt := NewRuntime()
-	defer rt.Close()
-	ctx := rt.NewContext()
-	defer ctx.Close()
+	newCtx := func(t *testing.T) *Context {
+		rt := NewRuntime()
+		ctx := rt.NewContext()
+		t.Cleanup(func() {
+			ctx.Close()
+			rt.Close()
+		})
+		return ctx
+	}
 
 	tests := []struct {
 		name     string
@@ -151,6 +156,7 @@ func TestMarshalBasicTypes(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			ctx := newCtx(t)
 			jsVal, err := ctx.Marshal(tt.input)
 			require.NoError(t, err)
 			defer jsVal.Free()
@@ -179,6 +185,7 @@ func TestMarshalBasicTypes(t *testing.T) {
 
 	// Test interface{} types to ensure rv.Elem() coverage
 	t.Run("InterfaceTypes", func(t *testing.T) {
+		ctx := newCtx(t)
 		var nilInterface interface{} = nil
 		jsVal, err := ctx.Marshal(nilInterface)
 		require.NoError(t, err)
@@ -195,6 +202,7 @@ func TestMarshalBasicTypes(t *testing.T) {
 
 	// Merged BigInt edge cases
 	t.Run("BigIntEdgeCases", func(t *testing.T) {
+		ctx := newCtx(t)
 		// Test valid BigInt that can be converted to int64
 		jsVal := ctx.Eval("BigInt('123456789')")
 		defer jsVal.Free()
@@ -227,12 +235,18 @@ func TestMarshalBasicTypes(t *testing.T) {
 }
 
 func TestFieldTagParsing(t *testing.T) {
-	rt := NewRuntime()
-	defer rt.Close()
-	ctx := rt.NewContext()
-	defer ctx.Close()
+	newCtx := func(t *testing.T) *Context {
+		rt := NewRuntime()
+		ctx := rt.NewContext()
+		t.Cleanup(func() {
+			ctx.Close()
+			rt.Close()
+		})
+		return ctx
+	}
 
 	t.Run("TagPriority", func(t *testing.T) {
+		ctx := newCtx(t)
 		data := TagParsingTestStruct{
 			JSTag:      "js_value",
 			JSONTag:    "json_value",
@@ -243,11 +257,10 @@ func TestFieldTagParsing(t *testing.T) {
 		require.NoError(t, err)
 		defer jsVal.Free()
 
-		// Test js tag takes priority over json tag
 		require.True(t, jsVal.Has("js_name"))
 		require.True(t, jsVal.Has("json_name"))
 		require.True(t, jsVal.Has("js_priority"))
-		require.False(t, jsVal.Has("json_priority")) // json should be ignored when js exists
+		require.False(t, jsVal.Has("json_priority"))
 
 		jsName := jsVal.Get("js_name")
 		defer jsName.Free()
@@ -259,6 +272,7 @@ func TestFieldTagParsing(t *testing.T) {
 	})
 
 	t.Run("EmptyTagNames", func(t *testing.T) {
+		ctx := newCtx(t)
 		data := TagParsingTestStruct{
 			EmptyJSTag:   "empty_js",
 			EmptyJSONTag: "empty_json",
@@ -271,14 +285,12 @@ func TestFieldTagParsing(t *testing.T) {
 		require.NoError(t, err)
 		defer jsVal.Free()
 
-		// Empty tag names should use camelCase field names
 		require.True(t, jsVal.Has("emptyJSTag"))
 		require.True(t, jsVal.Has("emptyJSONTag"))
 		require.True(t, jsVal.Has("commaJSTag"))
 		require.True(t, jsVal.Has("commaJSONTag"))
 		require.True(t, jsVal.Has("noTag"))
 
-		// Verify values
 		tests := []struct {
 			key      string
 			expected string
@@ -298,6 +310,7 @@ func TestFieldTagParsing(t *testing.T) {
 	})
 
 	t.Run("SkippedFields", func(t *testing.T) {
+		ctx := newCtx(t)
 		data := TagParsingTestStruct{
 			SkipJS:   "should_not_appear",
 			SkipJSON: "should_not_appear",
@@ -307,7 +320,6 @@ func TestFieldTagParsing(t *testing.T) {
 		require.NoError(t, err)
 		defer jsVal.Free()
 
-		// Fields with "-" tag should be skipped
 		require.False(t, jsVal.Has("SkipJS"))
 		require.False(t, jsVal.Has("SkipJSON"))
 		require.False(t, jsVal.Has("skipJS"))
@@ -315,7 +327,7 @@ func TestFieldTagParsing(t *testing.T) {
 	})
 
 	t.Run("OmitEmpty", func(t *testing.T) {
-		// Test with empty values - extended to cover all isEmptyValue branches
+		ctx := newCtx(t)
 		emptyData := TagParsingTestStruct{
 			OmitEmptyString:  "",
 			OmitEmptyInt:     0,
@@ -323,7 +335,7 @@ func TestFieldTagParsing(t *testing.T) {
 			OmitEmptySlice:   []string{},
 			OmitEmptyMap:     map[string]string{},
 			OmitEmptyPtr:     nil,
-			OmitEmptyArray:   [0]int{}, // Zero-length array
+			OmitEmptyArray:   [0]int{},
 			OmitEmptyUint:    0,
 			OmitEmptyUint8:   0,
 			OmitEmptyUint16:  0,
@@ -337,7 +349,6 @@ func TestFieldTagParsing(t *testing.T) {
 		require.NoError(t, err)
 		defer jsVal.Free()
 
-		// All empty values with omitempty should be omitted
 		expectedOmittedFields := []string{
 			"omit_str", "omit_int", "omit_bool", "omit_slice", "omit_map", "omit_ptr", "omit_array",
 			"omit_uint", "omit_uint8", "omit_uint16", "omit_uint32", "omit_uint64",
@@ -348,7 +359,6 @@ func TestFieldTagParsing(t *testing.T) {
 			require.False(t, jsVal.Has(field), "Field %s should be omitted", field)
 		}
 
-		// Test with non-empty values
 		nonEmptyValue := "test"
 		nonEmptyData := TagParsingTestStruct{
 			OmitEmptyString:  "not_empty",
@@ -364,14 +374,12 @@ func TestFieldTagParsing(t *testing.T) {
 			OmitEmptyUint64:  5,
 			OmitEmptyFloat32: 3.14,
 			OmitEmptyFloat64: 2.718,
-			// OmitEmptyArray remains [0]int{} - still empty
 		}
 
 		jsVal2, err := ctx.Marshal(nonEmptyData)
 		require.NoError(t, err)
 		defer jsVal2.Free()
 
-		// Non-empty values should be included
 		expectedIncludedFields := []string{
 			"omit_str", "omit_int", "omit_bool", "omit_slice", "omit_map", "omit_ptr",
 			"omit_uint", "omit_uint8", "omit_uint16", "omit_uint32", "omit_uint64",
@@ -382,36 +390,30 @@ func TestFieldTagParsing(t *testing.T) {
 			require.True(t, jsVal2.Has(field), "Field %s should be included", field)
 		}
 
-		// Array field should still be omitted as [0]int{} has length 0
 		require.False(t, jsVal2.Has("omit_array"))
 
-		// Test edge case: negative zero for floats
 		negativeZeroData := TagParsingTestStruct{
-			OmitEmptyFloat32: float32(math.Copysign(0, -1)), // -0.0
-			OmitEmptyFloat64: math.Copysign(0, -1),          // -0.0
+			OmitEmptyFloat32: float32(math.Copysign(0, -1)),
+			OmitEmptyFloat64: math.Copysign(0, -1),
 		}
 
 		jsVal3, err := ctx.Marshal(negativeZeroData)
 		require.NoError(t, err)
 		defer jsVal3.Free()
 
-		// Negative zero should still be considered empty
 		require.False(t, jsVal3.Has("omit_float32"))
 		require.False(t, jsVal3.Has("omit_float64"))
 	})
 
-	// Test fieldNameToCamelCase edge case coverage
 	t.Run("CamelCaseEdgeCases", func(t *testing.T) {
-		// Test the fieldNameToCamelCase function indirectly
-		// Since Go field names can't be empty, we test via tag parsing
 		testCases := []struct {
 			input    string
 			expected string
 		}{
-			{"", ""},                   // Cover len(fieldName) == 0 branch
-			{"A", "a"},                 // Single character
-			{"TestField", "testField"}, // Normal case
-			{"XMLParser", "xMLParser"}, // Acronym case
+			{"", ""},
+			{"A", "a"},
+			{"TestField", "testField"},
+			{"XMLParser", "xMLParser"},
 		}
 
 		for _, tc := range testCases {
@@ -531,14 +533,20 @@ func TestRoundTripWithNewTagParsing(t *testing.T) {
 }
 
 func TestTypedArrays(t *testing.T) {
-	rt := NewRuntime()
-	defer rt.Close()
-	ctx := rt.NewContext()
-	defer ctx.Close()
+	newCtx := func(t *testing.T) *Context {
+		rt := NewRuntime()
+		ctx := rt.NewContext()
+		t.Cleanup(func() {
+			ctx.Close()
+			rt.Close()
+		})
+		return ctx
+	}
 
 	// Helper function for TypedArray round-trip tests
 	testTypedArrayRoundTrip := func(t *testing.T, name string, data interface{}, checkFunc func(*Value) bool) {
 		t.Run(name, func(t *testing.T) {
+			ctx := newCtx(t)
 			jsVal, err := ctx.Marshal(data)
 			require.NoError(t, err)
 			defer jsVal.Free()
@@ -584,6 +592,7 @@ func TestTypedArrays(t *testing.T) {
 
 	// Test []byte -> ArrayBuffer (special case)
 	t.Run("ByteSliceToArrayBuffer", func(t *testing.T) {
+		ctx := newCtx(t)
 		data := []byte{1, 2, 3, 4, 5}
 		jsVal, err := ctx.Marshal(data)
 		require.NoError(t, err)
@@ -618,6 +627,7 @@ func TestTypedArrays(t *testing.T) {
 
 		for _, tt := range emptyTests {
 			t.Run(tt.name, func(t *testing.T) {
+				ctx := newCtx(t)
 				jsVal, err := ctx.Marshal(tt.data)
 				require.NoError(t, err)
 				defer jsVal.Free()
@@ -651,6 +661,7 @@ func TestTypedArrays(t *testing.T) {
 
 		for _, tt := range jsTests {
 			t.Run(tt.name, func(t *testing.T) {
+				ctx := newCtx(t)
 				jsVal := ctx.Eval(tt.jsCode)
 				defer jsVal.Free()
 				require.False(t, jsVal.IsException())
@@ -666,13 +677,18 @@ func TestTypedArrays(t *testing.T) {
 }
 
 func TestTypedArrayErrors(t *testing.T) {
-	rt := NewRuntime()
-	defer rt.Close()
-	ctx := rt.NewContext()
-	defer ctx.Close()
+	newCtx := func(t *testing.T) *Context {
+		rt := NewRuntime()
+		ctx := rt.NewContext()
+		t.Cleanup(func() {
+			ctx.Close()
+			rt.Close()
+		})
+		return ctx
+	}
 
 	// Helper function to create fake TypedArray objects
-	createFakeTypedArray := func(typeName string) *Value {
+	createFakeTypedArray := func(ctx *Context, typeName string) *Value {
 		jsCode := fmt.Sprintf(`
             var corrupted = Object.create(%s.prototype);
             Object.defineProperty(corrupted, 'constructor', {
@@ -707,7 +723,8 @@ func TestTypedArrayErrors(t *testing.T) {
 
 	for _, tt := range errorTests {
 		t.Run(tt.name, func(t *testing.T) {
-			fakeTypedArray := createFakeTypedArray(tt.typeName)
+			ctx := newCtx(t)
+			fakeTypedArray := createFakeTypedArray(ctx, tt.typeName)
 			defer fakeTypedArray.Free()
 
 			err := ctx.Unmarshal(fakeTypedArray, tt.target)
@@ -719,6 +736,7 @@ func TestTypedArrayErrors(t *testing.T) {
 
 	// Test specific error cases for byte arrays
 	t.Run("ByteArrayErrors", func(t *testing.T) {
+		ctx := newCtx(t)
 		fakeArrayBuffer := ctx.Eval(`
             var fakeBuffer = {
                 constructor: ArrayBuffer,
@@ -739,6 +757,7 @@ func TestTypedArrayErrors(t *testing.T) {
 
 	// Test fallback to regular array
 	t.Run("FallbackToRegularArray", func(t *testing.T) {
+		ctx := newCtx(t)
 		jsVal := ctx.Eval(`[1, 2, 3]`)
 		defer jsVal.Free()
 		require.False(t, jsVal.IsException())
@@ -751,12 +770,18 @@ func TestTypedArrayErrors(t *testing.T) {
 }
 
 func TestComplexTypes(t *testing.T) {
-	rt := NewRuntime()
-	defer rt.Close()
-	ctx := rt.NewContext()
-	defer ctx.Close()
+	newCtx := func(t *testing.T) *Context {
+		rt := NewRuntime()
+		ctx := rt.NewContext()
+		t.Cleanup(func() {
+			ctx.Close()
+			rt.Close()
+		})
+		return ctx
+	}
 
 	t.Run("Slices", func(t *testing.T) {
+		ctx := newCtx(t)
 		// Test generic slice (fallback to regular array)
 		data := []int{1, 2, 3}
 		jsVal, err := ctx.Marshal(data)
@@ -781,6 +806,7 @@ func TestComplexTypes(t *testing.T) {
 	})
 
 	t.Run("Arrays", func(t *testing.T) {
+		ctx := newCtx(t)
 		// Test array marshal/unmarshal to cover marshalArray
 		data := [3]int{1, 2, 3}
 		jsVal, err := ctx.Marshal(data)
@@ -810,6 +836,7 @@ func TestComplexTypes(t *testing.T) {
 
 		for _, tt := range tests {
 			t.Run(tt.name, func(t *testing.T) {
+				ctx := newCtx(t)
 				jsVal := ctx.Eval(tt.jsCode)
 				defer jsVal.Free()
 				require.False(t, jsVal.IsException())
@@ -824,6 +851,7 @@ func TestComplexTypes(t *testing.T) {
 	})
 
 	t.Run("Maps", func(t *testing.T) {
+		ctx := newCtx(t)
 		// String key map
 		stringMap := map[string]string{"key1": "value1", "key2": "value2"}
 		jsVal, err := ctx.Marshal(stringMap)
@@ -869,6 +897,7 @@ func TestComplexTypes(t *testing.T) {
 	})
 
 	t.Run("Pointers", func(t *testing.T) {
+		ctx := newCtx(t)
 		// Non-nil pointer
 		value := "test"
 		ptr := &value
@@ -897,12 +926,18 @@ func TestComplexTypes(t *testing.T) {
 }
 
 func TestStructsAndCustomTypes(t *testing.T) {
-	rt := NewRuntime()
-	defer rt.Close()
-	ctx := rt.NewContext()
-	defer ctx.Close()
+	newCtx := func(t *testing.T) *Context {
+		rt := NewRuntime()
+		ctx := rt.NewContext()
+		t.Cleanup(func() {
+			ctx.Close()
+			rt.Close()
+		})
+		return ctx
+	}
 
 	t.Run("Structs", func(t *testing.T) {
+		ctx := newCtx(t)
 		data := TestStruct{
 			ExportedField:    "exported",
 			unexportedField:  "should be ignored",
@@ -950,6 +985,7 @@ func TestStructsAndCustomTypes(t *testing.T) {
 	})
 
 	t.Run("CustomMarshalUnmarshal", func(t *testing.T) {
+		ctx := newCtx(t)
 		// Test custom marshal
 		data := CustomMarshalType{Value: "test"}
 		jsVal, err := ctx.Marshal(data)
@@ -979,10 +1015,15 @@ func TestStructsAndCustomTypes(t *testing.T) {
 }
 
 func TestUnmarshalInterface(t *testing.T) {
-	rt := NewRuntime()
-	defer rt.Close()
-	ctx := rt.NewContext()
-	defer ctx.Close()
+	newCtx := func(t *testing.T) *Context {
+		rt := NewRuntime()
+		ctx := rt.NewContext()
+		t.Cleanup(func() {
+			ctx.Close()
+			rt.Close()
+		})
+		return ctx
+	}
 
 	tests := []struct {
 		name     string
@@ -1003,6 +1044,7 @@ func TestUnmarshalInterface(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			ctx := newCtx(t)
 			var jsVal *Value
 
 			if tt.jsCode == "undefined" {
@@ -1022,6 +1064,7 @@ func TestUnmarshalInterface(t *testing.T) {
 
 	// Test special cases
 	t.Run("SpecialCases", func(t *testing.T) {
+		ctx := newCtx(t)
 		// BigInt
 		testValue := uint64(1 << 62)
 		jsVal := ctx.NewBigUint64(testValue)
@@ -1048,10 +1091,15 @@ func TestUnmarshalInterface(t *testing.T) {
 }
 
 func TestErrorCases(t *testing.T) {
-	rt := NewRuntime()
-	defer rt.Close()
-	ctx := rt.NewContext()
-	defer ctx.Close()
+	newCtx := func(t *testing.T) *Context {
+		rt := NewRuntime()
+		ctx := rt.NewContext()
+		t.Cleanup(func() {
+			ctx.Close()
+			rt.Close()
+		})
+		return ctx
+	}
 
 	t.Run("MarshalErrors", func(t *testing.T) {
 		errorTests := []interface{}{
@@ -1068,6 +1116,7 @@ func TestErrorCases(t *testing.T) {
 
 		for i, data := range errorTests {
 			t.Run(fmt.Sprintf("Case%d", i), func(t *testing.T) {
+				ctx := newCtx(t)
 				_, err := ctx.Marshal(data)
 				require.Error(t, err)
 				require.Contains(t, err.Error(), "unsupported type")
@@ -1117,6 +1166,7 @@ func TestErrorCases(t *testing.T) {
 
 		for _, tt := range tests {
 			t.Run(tt.name, func(t *testing.T) {
+				ctx := newCtx(t)
 				jsVal := ctx.Eval(tt.jsCode)
 				defer jsVal.Free()
 				require.False(t, jsVal.IsException())
@@ -1129,6 +1179,7 @@ func TestErrorCases(t *testing.T) {
 	})
 
 	t.Run("SpecificErrorPaths", func(t *testing.T) {
+		ctx := newCtx(t)
 		// PropertyNames error
 		jsVal := ctx.Eval(`
             new Proxy({}, {
@@ -1209,6 +1260,7 @@ func TestErrorCases(t *testing.T) {
 
 		for _, tt := range errorCases {
 			t.Run(tt.name, func(t *testing.T) {
+				ctx := newCtx(t)
 				jsVal := ctx.Eval(tt.jsCode)
 				defer jsVal.Free()
 				require.False(t, jsVal.IsException())
@@ -1222,6 +1274,7 @@ func TestErrorCases(t *testing.T) {
 
 	// Test ToByteArray error in unmarshalInterface
 	t.Run("ToByteArrayErrorInInterface", func(t *testing.T) {
+		ctx := newCtx(t)
 		fakeArrayBuffer := ctx.Eval(`
             var fakeArrayBuffer = {
                 constructor: ArrayBuffer,
@@ -1326,4 +1379,46 @@ func TestMarshalNilAndInvalidValues(t *testing.T) {
 	val3, err := ctx.marshal(reflect.Value{})
 	require.NoError(t, err)
 	require.True(t, val3.IsNull())
+
+	t.Run("ContextNilOrClosedSafety", func(t *testing.T) {
+		ctx := NewRuntime().NewContext()
+		defer ctx.Close()
+
+		var nilCtx *Context
+		sample := ctx.NewString("x")
+		defer sample.Free()
+
+		v, err := nilCtx.Marshal("x")
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "invalid context")
+		require.Nil(t, v)
+
+		err = nilCtx.Unmarshal(sample, new(string))
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "invalid context")
+
+		rt2 := NewRuntime()
+		ctx2 := rt2.NewContext()
+		ctx2.Close()
+
+		v2, err := ctx2.Marshal("x")
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "invalid context")
+		require.Nil(t, v2)
+
+		err = ctx2.Unmarshal(sample, new(string))
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "invalid context")
+
+		rt2.Close()
+	})
+
+	t.Run("UnmarshalNilValue", func(t *testing.T) {
+		ctx := NewRuntime().NewContext()
+		defer ctx.Close()
+
+		err := ctx.Unmarshal(nil, new(string))
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "invalid JavaScript value")
+	})
 }

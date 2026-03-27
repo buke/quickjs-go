@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"runtime"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -155,6 +156,47 @@ func TestBasicClassCreation(t *testing.T) {
 	expected := 5.0                                    // sqrt(3^2 + 4^2) = 5
 	if math.Abs(result.ToFloat64()-expected) > 0.001 { // Updated: Use ToFloat64()
 		t.Errorf("Expected norm to be %f, got %f", expected, result.ToFloat64())
+	}
+}
+
+// TestClassBuildCStringLifecycleRegression ensures class member name C strings are managed safely.
+func TestClassBuildCStringLifecycleRegression(t *testing.T) {
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	for i := 0; i < 200; i++ {
+		className := fmt.Sprintf("LeakCheckClass%d", i)
+		constructor, _ := NewClassBuilder(className).
+			Constructor(func(ctx *Context, instance *Value, args []*Value) (interface{}, error) {
+				return &Point{X: 1, Y: 2}, nil
+			}).
+			Method("sum", func(ctx *Context, this *Value, args []*Value) *Value {
+				return ctx.NewInt32(3)
+			}).
+			Accessor("x",
+				func(ctx *Context, this *Value) *Value {
+					return ctx.NewInt32(1)
+				},
+				nil,
+			).
+			Property("p", ctx.NewString("v")).
+			StaticProperty("sp", ctx.NewInt32(7)).
+			Build(ctx)
+
+		require.False(t, constructor.IsException())
+		ctx.Globals().Set(className, constructor)
+
+		result := ctx.Eval(fmt.Sprintf(`
+			(() => {
+				const o = new %s();
+				return o.sum() + o.x + %s.sp;
+			})();
+		`, className, className))
+		require.False(t, result.IsException())
+		require.Equal(t, int32(11), result.ToInt32())
+		result.Free()
 	}
 }
 
@@ -935,6 +977,7 @@ func TestErrorHandling(t *testing.T) {
 
 	context := rt.NewContext()
 	defer context.Close()
+	baseHandles := context.handleStore.Count()
 
 	// Test creating class with empty name
 	ctor, _ := NewClassBuilder("").
@@ -969,6 +1012,7 @@ func TestErrorHandling(t *testing.T) {
 		err := context.Exception()
 		require.Contains(t, err.Error(), "class_name cannot be empty")
 	}
+	assertClassHandleCountStable(t, context, baseHandles)
 
 	// Test creating class without constructor
 	ctor2, _ := NewClassBuilder("TestClass").Build(context)
@@ -977,6 +1021,145 @@ func TestErrorHandling(t *testing.T) {
 		err := context.Exception()
 		require.Contains(t, err.Error(), "constructor function is required")
 	}
+	assertClassHandleCountStable(t, context, baseHandles)
+
+	// Test nil class builder receiver
+	var nilBuilder *ClassBuilder
+	ctorNilBuilder, classIDNilBuilder := nilBuilder.Build(context)
+	require.Zero(t, classIDNilBuilder)
+	require.NotNil(t, ctorNilBuilder)
+	require.True(t, ctorNilBuilder.IsException())
+	require.Contains(t, context.Exception().Error(), "class builder is nil")
+	assertClassHandleCountStable(t, context, baseHandles)
+
+	// Test nil context (must return nil constructor and never panic)
+	ctorNilCtx, classIDNilCtx := NewClassBuilder("NilContextClass").
+		Constructor(func(ctx *Context, instance *Value, args []*Value) (interface{}, error) {
+			return &Point{}, nil
+		}).
+		Build(nil)
+	require.Nil(t, ctorNilCtx)
+	require.Zero(t, classIDNilCtx)
+
+	// Test closed context (must not call into C layer)
+	rtClosed := NewRuntime()
+	ctxClosed := rtClosed.NewContext()
+	ctxClosed.Close()
+	ctorClosed, classIDClosed := NewClassBuilder("ClosedContextClass").
+		Constructor(func(ctx *Context, instance *Value, args []*Value) (interface{}, error) {
+			return &Point{}, nil
+		}).
+		Build(ctxClosed)
+	require.Nil(t, ctorClosed)
+	require.Zero(t, classIDClosed)
+	rtClosed.Close()
+
+	// Test creating class with empty method name
+	ctorMethodName, _ := NewClassBuilder("BadMethodNameClass").
+		Constructor(func(ctx *Context, instance *Value, args []*Value) (interface{}, error) {
+			return &Point{}, nil
+		}).
+		Method("", func(ctx *Context, this *Value, args []*Value) *Value {
+			return ctx.NewUndefined()
+		}).
+		Build(context)
+	defer ctorMethodName.Free()
+	if ctorMethodName.IsException() {
+		err := context.Exception()
+		require.Contains(t, err.Error(), "method name cannot be empty")
+	}
+	assertClassHandleCountStable(t, context, baseHandles)
+
+	// Test creating class with nil method function
+	ctorMethodNil, _ := NewClassBuilder("BadMethodNilClass").
+		Constructor(func(ctx *Context, instance *Value, args []*Value) (interface{}, error) {
+			return &Point{}, nil
+		}).
+		Method("badMethod", nil).
+		Build(context)
+	defer ctorMethodNil.Free()
+	if ctorMethodNil.IsException() {
+		err := context.Exception()
+		require.Contains(t, err.Error(), "method function cannot be nil: badMethod")
+	}
+	assertClassHandleCountStable(t, context, baseHandles)
+
+	// Test creating class with accessor missing both getter and setter.
+	ctorAccessorInvalid, _ := NewClassBuilder("BadAccessorClass").
+		Constructor(func(ctx *Context, instance *Value, args []*Value) (interface{}, error) {
+			return &Point{}, nil
+		}).
+		Accessor("badAccessor", nil, nil).
+		Build(context)
+	defer ctorAccessorInvalid.Free()
+	if ctorAccessorInvalid.IsException() {
+		err := context.Exception()
+		require.Contains(t, err.Error(), "accessor must define getter or setter: badAccessor")
+	}
+	assertClassHandleCountStable(t, context, baseHandles)
+
+	// Test creating class with empty accessor name.
+	ctorAccessorName, _ := NewClassBuilder("BadAccessorNameClass").
+		Constructor(func(ctx *Context, instance *Value, args []*Value) (interface{}, error) {
+			return &Point{}, nil
+		}).
+		Accessor("", func(ctx *Context, this *Value) *Value {
+			return ctx.NewUndefined()
+		}, nil).
+		Build(context)
+	defer ctorAccessorName.Free()
+	if ctorAccessorName.IsException() {
+		err := context.Exception()
+		require.Contains(t, err.Error(), "accessor name cannot be empty")
+	}
+	assertClassHandleCountStable(t, context, baseHandles)
+
+	// Test creating class with nil property value (must fail before C bridge usage)
+	ctor3, _ := NewClassBuilder("NilPropertyClass").
+		Constructor(func(ctx *Context, instance *Value, args []*Value) (interface{}, error) {
+			return &Point{}, nil
+		}).
+		Property("badProp", nil).
+		Build(context)
+	defer ctor3.Free()
+	if ctor3.IsException() {
+		err := context.Exception()
+		require.Contains(t, err.Error(), "property value cannot be nil: badProp")
+	}
+	assertClassHandleCountStable(t, context, baseHandles)
+
+	// Test creating class with empty property name.
+	ctorPropertyName, _ := NewClassBuilder("BadPropertyNameClass").
+		Constructor(func(ctx *Context, instance *Value, args []*Value) (interface{}, error) {
+			return &Point{}, nil
+		}).
+		Property("", context.NewString("x")).
+		Build(context)
+	defer ctorPropertyName.Free()
+	if ctorPropertyName.IsException() {
+		err := context.Exception()
+		require.Contains(t, err.Error(), "property name cannot be empty")
+	}
+	assertClassHandleCountStable(t, context, baseHandles)
+
+	// Test cross-context property value is rejected to avoid invalid JSValue ownership.
+	foreignCtx := rt.NewContext()
+	defer foreignCtx.Close()
+	foreignValue := foreignCtx.NewString("foreign")
+	defer foreignValue.Free()
+
+	ctor4, _ := NewClassBuilder("ForeignPropertyClass").
+		Constructor(func(ctx *Context, instance *Value, args []*Value) (interface{}, error) {
+			return &Point{}, nil
+		}).
+		StaticProperty("badForeign", foreignValue).
+		Build(context)
+	defer ctor4.Free()
+	if ctor4.IsException() {
+		err := context.Exception()
+		require.Contains(t, err.Error(), "property value must belong to current context: badForeign")
+	}
+	assertClassHandleCountStable(t, context, baseHandles)
 
 	// Test GetGoObject on non-class object
 	regularObj := context.Eval(`({})`)
@@ -1002,6 +1185,103 @@ func TestErrorHandling(t *testing.T) {
 	if err == nil {
 		t.Errorf("Expected error when getting instance data from number")
 	}
+}
+
+func TestClassBuildUnderMemoryPressure(t *testing.T) {
+	rt := NewRuntime(WithMemoryLimit(512 * 1024))
+	defer rt.Close()
+
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	for i := 0; i < 20; i++ {
+		ctor, _ := NewClassBuilder(fmt.Sprintf("OOMClass%d", i)).
+			Constructor(func(ctx *Context, instance *Value, args []*Value) (interface{}, error) {
+				return &Point{}, nil
+			}).
+			Method("m", func(ctx *Context, this *Value, args []*Value) *Value {
+				return ctx.NewInt32(1)
+			}).
+			Accessor("x",
+				func(ctx *Context, this *Value) *Value { return ctx.NewInt32(1) },
+				func(ctx *Context, this *Value, value *Value) *Value { return ctx.NewUndefined() },
+			).
+			StaticProperty("huge", ctx.NewString(strings.Repeat("x", 128*1024))).
+			Build(ctx)
+
+		if !ctor.IsException() {
+			ctor.Free()
+			continue
+		}
+
+		err := ctx.Exception()
+		require.Error(t, err)
+		ctor.Free()
+		return
+	}
+}
+
+func TestClassBuildErrorBranchStressNoHandleLeak(t *testing.T) {
+	rt := NewRuntime()
+	defer rt.Close()
+
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	baseHandles := ctx.handleStore.Count()
+
+	for i := 0; i < 100; i++ {
+		ctor, _ := NewClassBuilder(fmt.Sprintf("StressInvalidClass%d", i)).
+			Constructor(func(ctx *Context, instance *Value, args []*Value) (interface{}, error) {
+				return &Point{}, nil
+			}).
+			Accessor("broken", nil, nil).
+			Build(ctx)
+
+		require.True(t, ctor.IsException())
+		err := ctx.Exception()
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "accessor must define getter or setter: broken")
+		ctor.Free()
+
+		assertClassHandleCountStable(t, ctx, baseHandles)
+	}
+}
+
+func TestClassBuilder_InvalidHandleIDContracts(t *testing.T) {
+	obj, perr := loadObjectByHandleID(nil, 1, errConstructorNotFound)
+	require.Nil(t, obj)
+	require.NotNil(t, perr)
+	require.Equal(t, errContextNotFound.message, perr.message)
+
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	obj, perr = loadObjectByHandleID(ctx, 0, errConstructorNotFound)
+	require.Nil(t, obj)
+	require.NotNil(t, perr)
+	require.Equal(t, errConstructorNotFound.message, perr.message)
+
+	obj, perr = loadObjectByHandleID(ctx, -1, errConstructorNotFound)
+	require.Nil(t, obj)
+	require.NotNil(t, perr)
+	require.Equal(t, errConstructorNotFound.message, perr.message)
+
+	originalStore := ctx.handleStore
+	ctx.handleStore = nil
+	defer func() { ctx.handleStore = originalStore }()
+
+	obj, perr = loadObjectByHandleID(ctx, 0, errConstructorNotFound)
+	require.Nil(t, obj)
+	require.NotNil(t, perr)
+	require.Equal(t, errHandleStoreUnavailable.message, perr.message)
+
+	obj, perr = loadObjectByHandleID(ctx, -1, errConstructorNotFound)
+	require.Nil(t, obj)
+	require.NotNil(t, perr)
+	require.Equal(t, errHandleStoreUnavailable.message, perr.message)
 }
 
 // TestMemoryManagement tests proper cleanup and memory management
@@ -1209,7 +1489,7 @@ func TestUnifiedConstructorMapping(t *testing.T) {
 	}
 
 	// Verify both constructors are registered in the unified mapping
-	manualRetrievedID, exists := getConstructorClassID(manualConstructor.ref)
+	manualRetrievedID, exists := getConstructorClassID(ctx, manualConstructor.ref)
 	if !exists {
 		t.Errorf("Manual constructor not found in unified mapping")
 	}
@@ -1217,7 +1497,7 @@ func TestUnifiedConstructorMapping(t *testing.T) {
 		t.Errorf("Manual constructor classID mismatch: expected %d, got %d", manualClassID, manualRetrievedID)
 	}
 
-	reflectRetrievedID, exists := getConstructorClassID(reflectConstructor.ref)
+	reflectRetrievedID, exists := getConstructorClassID(ctx, reflectConstructor.ref)
 	if !exists {
 		t.Errorf("Reflection constructor not found in unified mapping")
 	}
@@ -1250,6 +1530,57 @@ func TestUnifiedConstructorMapping(t *testing.T) {
 		t.Errorf("Reflection constructor instance incorrect: got (%f, %f)",
 			result.GetIdx(2).ToFloat64(), result.GetIdx(3).ToFloat64())
 	}
+}
+
+func TestUnifiedConstructorMapping_CorruptedRegistryTypeFailClosed(t *testing.T) {
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	constructor, _ := createPointClass(ctx)
+	require.False(t, constructor.IsException())
+	defer constructor.Free()
+
+	original, hadOriginal := loadConstructorRegistryEntryForTest(ctx, constructor.ref)
+	storeConstructorRegistryEntryForTest(ctx, constructor.ref, "not-a-classid")
+
+	retrievedID, ok := getConstructorClassID(ctx, constructor.ref)
+	require.False(t, ok)
+	require.Equal(t, uint32(0), retrievedID)
+
+	_, stillExists := loadConstructorRegistryEntryForTest(ctx, constructor.ref)
+	require.False(t, stillExists)
+
+	if hadOriginal {
+		storeConstructorRegistryEntryForTest(ctx, constructor.ref, original)
+	}
+}
+
+func TestUnifiedConstructorMapping_MissingKeyInExistingBucket(t *testing.T) {
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	constructor, _ := createPointClass(ctx)
+	require.False(t, constructor.IsException())
+	defer constructor.Free()
+
+	// Ensure runtime bucket exists via one successful registration.
+	registerConstructorClassID(ctx, constructor.ref, uint32(123))
+
+	other := ctx.NewObject()
+	defer other.Free()
+
+	retrievedID, ok := getConstructorClassID(ctx, other.ref)
+	require.False(t, ok)
+	require.Equal(t, uint32(0), retrievedID)
+
+	var nilCtx *Context
+	retrievedID, ok = getConstructorClassID(nilCtx, constructor.ref)
+	require.False(t, ok)
+	require.Equal(t, uint32(0), retrievedID)
 }
 
 // TestReadOnlyAndWriteOnlyAccessors tests readonly and writeonly accessor functionality

@@ -138,6 +138,10 @@ func isEmptyValue(v reflect.Value) bool {
 //
 // Types implementing the Marshaler interface are marshaled using their MarshalJS method.
 func (ctx *Context) Marshal(v interface{}) (*Value, error) {
+	if ctx == nil || ctx.ref == nil {
+		return nil, fmt.Errorf("invalid context")
+	}
+
 	if v == nil {
 		return ctx.NewNull(), nil
 	}
@@ -175,6 +179,13 @@ func (ctx *Context) Marshal(v interface{}) (*Value, error) {
 //
 // Types implementing the Unmarshaler interface are unmarshaled using their UnmarshalJS method.
 func (ctx *Context) Unmarshal(jsVal *Value, v interface{}) error {
+	if ctx == nil || ctx.ref == nil {
+		return fmt.Errorf("invalid context")
+	}
+	if jsVal == nil {
+		return fmt.Errorf("invalid JavaScript value")
+	}
+
 	rv := reflect.ValueOf(v)
 	if rv.Kind() != reflect.Ptr || rv.IsNil() {
 		return fmt.Errorf("unmarshal target must be a non-nil pointer")

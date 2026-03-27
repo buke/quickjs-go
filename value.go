@@ -22,14 +22,41 @@ type Value struct {
 
 // Free the value.
 func (v *Value) Free() {
-	if v.ctx == nil || C.JS_IsUndefined_Wrapper(v.ref) == 1 {
+	if v == nil {
+		return
+	}
+	if v.ctx == nil || v.ctx.ref == nil || C.JS_IsUndefined_Wrapper(v.ref) == 1 {
 		return // No context or undefined value, nothing to free
 	}
-	C.JS_FreeValue(v.ctx.ref, v.ref)
+
+	// Invalidate first to make Free idempotent even if actual C release is deferred.
+	ref := v.ref
+	v.ref = C.JS_NewUndefined()
+
+	freeOnOwner := func(inner *Context) {
+		if inner == nil || inner.ref == nil {
+			return
+		}
+		C.JS_FreeValue(inner.ref, ref)
+	}
+
+	if v.ctx.runtime == nil || v.ctx.runtime.ref == nil || C.IsRuntimeOwnerThread(v.ctx.runtime.ref) != 0 {
+		freeOnOwner(v.ctx)
+		return
+	}
+
+	if !v.ctx.Schedule(freeOnOwner) {
+		// Context is closing/closed. Best-effort enqueue for close-phase drain.
+		_ = v.ctx.enqueueJobDuringCloseWithSource(freeOnOwner, closeEnqueueSourceValueFree)
+		return
+	}
 }
 
 // Context returns the context of the value.
 func (v *Value) Context() *Context {
+	if v == nil {
+		return nil
+	}
 	return v.ctx
 }
 
@@ -40,6 +67,9 @@ func (v *Value) Bool() bool {
 
 // ToBool returns the boolean value of the value.
 func (v *Value) ToBool() bool {
+	if v == nil || v.ctx == nil || v.ctx.ref == nil {
+		return false
+	}
 	return C.JS_ToBool(v.ctx.ref, v.ref) == 1
 }
 
@@ -51,20 +81,36 @@ func (v *Value) String() string {
 
 // ToString returns the string representation of the value.
 func (v *Value) ToString() string {
+	if v == nil || v.ctx == nil || v.ctx.ref == nil {
+		return ""
+	}
 	ptr := C.JS_ToCString(v.ctx.ref, v.ref)
+	if ptr == nil {
+		return ""
+	}
 	defer C.JS_FreeCString(v.ctx.ref, ptr)
 	return C.GoString(ptr)
 }
 
 // JSONStringify returns the JSON string representation of the value.
 func (v *Value) JSONStringify() string {
+	if v == nil || v.ctx == nil || v.ctx.ref == nil {
+		return ""
+	}
 	ref := C.JS_JSONStringify(v.ctx.ref, v.ref, C.JS_NewNull(), C.JS_NewNull())
+	defer C.JS_FreeValue(v.ctx.ref, ref)
 	ptr := C.JS_ToCString(v.ctx.ref, ref)
+	if ptr == nil {
+		return ""
+	}
 	defer C.JS_FreeCString(v.ctx.ref, ptr)
 	return C.GoString(ptr)
 }
 
 func (v *Value) ToByteArray(size uint) ([]byte, error) {
+	if v == nil || v.ctx == nil || v.ctx.ref == nil {
+		return nil, errors.New("invalid value context")
+	}
 	if v.ByteLen() < int64(size) {
 		return nil, errors.New("exceeds the maximum length of the current binary array")
 	}
@@ -85,6 +131,9 @@ func (v *Value) Int64() int64 {
 
 // ToInt64 returns the int64 value of the value.
 func (v *Value) ToInt64() int64 {
+	if v == nil || v.ctx == nil || v.ctx.ref == nil {
+		return 0
+	}
 	val := C.int64_t(0)
 	C.JS_ToInt64(v.ctx.ref, &val, v.ref)
 	return int64(val)
@@ -97,6 +146,9 @@ func (v *Value) Int32() int32 {
 
 // ToInt32 returns the int32 value of the value.
 func (v *Value) ToInt32() int32 {
+	if v == nil || v.ctx == nil || v.ctx.ref == nil {
+		return 0
+	}
 	val := C.int32_t(0)
 	C.JS_ToInt32(v.ctx.ref, &val, v.ref)
 	return int32(val)
@@ -109,6 +161,9 @@ func (v *Value) Uint32() uint32 {
 
 // ToUint32 returns the uint32 value of the value.
 func (v *Value) ToUint32() uint32 {
+	if v == nil || v.ctx == nil || v.ctx.ref == nil {
+		return 0
+	}
 	val := C.uint32_t(0)
 	C.JS_ToUint32(v.ctx.ref, &val, v.ref)
 	return uint32(val)
@@ -121,6 +176,9 @@ func (v *Value) Float64() float64 {
 
 // ToFloat64 returns the float64 value of the value.
 func (v *Value) ToFloat64() float64 {
+	if v == nil || v.ctx == nil || v.ctx.ref == nil {
+		return 0
+	}
 	val := C.double(0)
 	C.JS_ToFloat64(v.ctx.ref, &val, v.ref)
 	return float64(val)
@@ -133,6 +191,9 @@ func (v *Value) BigInt() *big.Int {
 
 // ToBigInt returns the big.Int value of the value.
 func (v *Value) ToBigInt() *big.Int {
+	if v == nil || v.ctx == nil || v.ctx.ref == nil {
+		return nil
+	}
 	if !v.IsBigInt() {
 		return nil
 	}
@@ -142,6 +203,9 @@ func (v *Value) ToBigInt() *big.Int {
 
 // Len returns the length of the array.
 func (v *Value) Len() int64 {
+	if v == nil || v.ctx == nil || v.ctx.ref == nil {
+		return 0
+	}
 	length := v.Get("length")
 	defer length.Free()
 	return length.ToInt64()
@@ -149,6 +213,9 @@ func (v *Value) Len() int64 {
 
 // ByteLen returns the length of the ArrayBuffer.
 func (v *Value) ByteLen() int64 {
+	if v == nil || v.ctx == nil || v.ctx.ref == nil {
+		return 0
+	}
 	byteLength := v.Get("byteLength")
 	defer byteLength.Free()
 	return byteLength.ToInt64()
@@ -156,18 +223,37 @@ func (v *Value) ByteLen() int64 {
 
 // Set sets the value of the property with the given name.
 func (v *Value) Set(name string, val *Value) {
+	if v == nil || v.ctx == nil || v.ctx.ref == nil || val == nil {
+		return
+	}
+	if val.ctx == nil || val.ctx.ref == nil || val.ctx != v.ctx {
+		return
+	}
 	namePtr := C.CString(name)
 	defer C.free(unsafe.Pointer(namePtr))
 	C.JS_SetPropertyStr(v.ctx.ref, v.ref, namePtr, val.ref)
+	// JS_SetPropertyStr consumes val (success or failure path), invalidate source handle.
+	val.ref = C.JS_NewUndefined()
 }
 
 // SetIdx sets the value of the property with the given index.
 func (v *Value) SetIdx(idx int64, val *Value) {
+	if v == nil || v.ctx == nil || v.ctx.ref == nil || val == nil {
+		return
+	}
+	if val.ctx == nil || val.ctx.ref == nil || val.ctx != v.ctx {
+		return
+	}
 	C.JS_SetPropertyUint32(v.ctx.ref, v.ref, C.uint32_t(idx), val.ref)
+	// JS_SetPropertyUint32 consumes val (success or failure path), invalidate source handle.
+	val.ref = C.JS_NewUndefined()
 }
 
 // Get returns the value of the property with the given name.
 func (v *Value) Get(name string) *Value {
+	if v == nil || v.ctx == nil || v.ctx.ref == nil {
+		return nil
+	}
 	namePtr := C.CString(name)
 	defer C.free(unsafe.Pointer(namePtr))
 	return &Value{ctx: v.ctx, ref: C.JS_GetPropertyStr(v.ctx.ref, v.ref, namePtr)}
@@ -175,16 +261,33 @@ func (v *Value) Get(name string) *Value {
 
 // GetIdx returns the value of the property with the given index.
 func (v *Value) GetIdx(idx int64) *Value {
+	if v == nil || v.ctx == nil || v.ctx.ref == nil {
+		return nil
+	}
 	return &Value{ctx: v.ctx, ref: C.JS_GetPropertyUint32(v.ctx.ref, v.ref, C.uint32_t(idx))}
 }
 
 // Call calls the function with the given arguments.
 func (v *Value) Call(fname string, args ...*Value) *Value {
+	if v == nil || v.ctx == nil || v.ctx.ref == nil {
+		return nil
+	}
 	fn := v.Get(fname) // get the function by name
 	defer fn.Free()
 
 	cargs := []C.JSValue{}
 	for _, x := range args {
+		if x == nil {
+			cargs = append(cargs, C.JS_NewUndefined())
+			continue
+		}
+		if x.ctx == nil || x.ctx.ref == nil {
+			cargs = append(cargs, C.JS_NewUndefined())
+			continue
+		}
+		if x.ctx != v.ctx {
+			return v.ctx.ThrowTypeError("cross-context argument")
+		}
 		cargs = append(cargs, x.ref)
 	}
 	var val *Value
@@ -199,15 +302,40 @@ func (v *Value) Call(fname string, args ...*Value) *Value {
 
 // Execute the function with the given arguments.
 func (v *Value) Execute(this *Value, args ...*Value) *Value {
+	if v == nil || v.ctx == nil || v.ctx.ref == nil {
+		return nil
+	}
 	cargs := []C.JSValue{}
 	for _, x := range args {
+		if x == nil {
+			cargs = append(cargs, C.JS_NewUndefined())
+			continue
+		}
+		if x.ctx == nil || x.ctx.ref == nil {
+			cargs = append(cargs, C.JS_NewUndefined())
+			continue
+		}
+		if x.ctx != v.ctx {
+			return v.ctx.ThrowTypeError("cross-context argument")
+		}
 		cargs = append(cargs, x.ref)
+	}
+	thisRef := C.JS_NewUndefined()
+	if this != nil {
+		if this.ctx != nil && this.ctx.ref != nil {
+			if this.ctx != v.ctx {
+				return v.ctx.ThrowTypeError("cross-context this value")
+			}
+			thisRef = this.ref
+		}
+	} else {
+		thisRef = C.JS_NewUndefined()
 	}
 	var val *Value
 	if len(cargs) == 0 {
-		val = &Value{ctx: v.ctx, ref: C.JS_Call(v.ctx.ref, v.ref, this.ref, C.int(0), nil)}
+		val = &Value{ctx: v.ctx, ref: C.JS_Call(v.ctx.ref, v.ref, thisRef, C.int(0), nil)}
 	} else {
-		val = &Value{ctx: v.ctx, ref: C.JS_Call(v.ctx.ref, v.ref, this.ref, C.int(len(cargs)), &cargs[0])}
+		val = &Value{ctx: v.ctx, ref: C.JS_Call(v.ctx.ref, v.ref, thisRef, C.int(len(cargs)), &cargs[0])}
 	}
 
 	return val
@@ -231,8 +359,22 @@ func (v *Value) New(args ...*Value) *Value {
 // This replaces the previous NewInstance method and provides automatic property binding
 // and simplified constructor semantics where constructors work with pre-created instances.
 func (v *Value) CallConstructor(args ...*Value) *Value {
+	if v == nil || v.ctx == nil || v.ctx.ref == nil {
+		return nil
+	}
 	cargs := []C.JSValue{}
 	for _, x := range args {
+		if x == nil {
+			cargs = append(cargs, C.JS_NewUndefined())
+			continue
+		}
+		if x.ctx == nil || x.ctx.ref == nil {
+			cargs = append(cargs, C.JS_NewUndefined())
+			continue
+		}
+		if x.ctx != v.ctx {
+			return v.ctx.ThrowTypeError("cross-context argument")
+		}
 		cargs = append(cargs, x.ref)
 	}
 	var val *Value
@@ -292,6 +434,9 @@ func (v *Value) ToError() error {
 
 // propertyEnum is a wrapper around JSValue.
 func (v *Value) propertyEnum() ([]*propertyEnum, error) {
+	if v == nil || v.ctx == nil || v.ctx.ref == nil {
+		return nil, errors.New("invalid value context")
+	}
 	var ptr *C.JSPropertyEnum
 	var size C.uint32_t
 
@@ -308,7 +453,6 @@ func (v *Value) propertyEnum() ([]*propertyEnum, error) {
 			IsEnumerable: bool(entries[i].is_enumerable),
 			atom:         &Atom{ctx: v.ctx, ref: entries[i].atom},
 		}
-		names[i].atom.Free()
 	}
 
 	return names, nil
@@ -323,12 +467,16 @@ func (v *Value) PropertyNames() ([]string, error) {
 	names := make([]string, len(pList))
 	for i := 0; i < len(names); i++ {
 		names[i] = pList[i].ToString()
+		pList[i].atom.Free()
 	}
 	return names, nil
 }
 
 // Has returns true if the value has the property with the given name.
 func (v *Value) Has(name string) bool {
+	if v == nil || v.ctx == nil || v.ctx.ref == nil {
+		return false
+	}
 	prop := v.ctx.NewAtom(name)
 	defer prop.Free()
 	return C.JS_HasProperty(v.ctx.ref, v.ref, prop.ref) == 1
@@ -336,6 +484,9 @@ func (v *Value) Has(name string) bool {
 
 // HasIdx returns true if the value has the property with the given index.
 func (v *Value) HasIdx(idx uint32) bool {
+	if v == nil || v.ctx == nil || v.ctx.ref == nil {
+		return false
+	}
 	prop := v.ctx.NewAtomIdx(idx)
 	defer prop.Free()
 	return C.JS_HasProperty(v.ctx.ref, v.ref, prop.ref) == 1
@@ -343,6 +494,9 @@ func (v *Value) HasIdx(idx uint32) bool {
 
 // Delete deletes the property with the given name.
 func (v *Value) Delete(name string) bool {
+	if v == nil || v.ctx == nil || v.ctx.ref == nil {
+		return false
+	}
 	if !v.Has(name) {
 		return false // Property does not exist, nothing to delete
 	}
@@ -353,6 +507,9 @@ func (v *Value) Delete(name string) bool {
 
 // DeleteIdx deletes the property with the given index.
 func (v *Value) DeleteIdx(idx uint32) bool {
+	if v == nil || v.ctx == nil || v.ctx.ref == nil {
+		return false
+	}
 	if !v.HasIdx(idx) {
 		return false // Property does not exist, nothing to delete
 	}
@@ -361,6 +518,9 @@ func (v *Value) DeleteIdx(idx uint32) bool {
 
 // GlobalInstanceof checks if the value is an instance of the given global constructor
 func (v *Value) GlobalInstanceof(name string) bool {
+	if v == nil || v.ctx == nil || v.ctx.ref == nil {
+		return false
+	}
 	ctor := v.ctx.Globals().Get(name)
 	defer ctor.Free()
 	if ctor.IsUndefined() {
@@ -371,6 +531,9 @@ func (v *Value) GlobalInstanceof(name string) bool {
 
 // getTypedArrayInfo is a helper function to extract TypedArray information using C API
 func (v *Value) getTypedArrayInfo() (buffer *Value, byteOffset, byteLength, bytesPerElement int) {
+	if v == nil || v.ctx == nil || v.ctx.ref == nil {
+		return nil, 0, 0, 0
+	}
 	var cByteOffset, cByteLength, cBytesPerElement C.size_t
 	bufferRef := C.JS_GetTypedArrayBuffer(v.ctx.ref, v.ref, &cByteOffset, &cByteLength, &cBytesPerElement)
 
@@ -609,8 +772,10 @@ func (v *Value) ToBigUint64Array() ([]uint64, error) {
 // BASIC TYPE CHECKING METHODS (replaced macros with wrapper functions)
 // =============================================================================
 
-func (v *Value) IsNumber() bool        { return v != nil && C.JS_IsNumber_Wrapper(v.ref) == 1 }
-func (v *Value) IsBigInt() bool        { return v != nil && C.JS_IsBigInt_Wrapper(v.ctx.ref, v.ref) == 1 }
+func (v *Value) IsNumber() bool { return v != nil && C.JS_IsNumber_Wrapper(v.ref) == 1 }
+func (v *Value) IsBigInt() bool {
+	return v != nil && v.ctx != nil && v.ctx.ref != nil && C.JS_IsBigInt_Wrapper(v.ctx.ref, v.ref) == 1
+}
 func (v *Value) IsBool() bool          { return v != nil && C.JS_IsBool_Wrapper(v.ref) == 1 }
 func (v *Value) IsNull() bool          { return v != nil && C.JS_IsNull_Wrapper(v.ref) == 1 }
 func (v *Value) IsUndefined() bool     { return v != nil && C.JS_IsUndefined_Wrapper(v.ref) == 1 }
@@ -621,9 +786,11 @@ func (v *Value) IsSymbol() bool        { return v != nil && C.JS_IsSymbol_Wrappe
 func (v *Value) IsObject() bool        { return v != nil && C.JS_IsObject_Wrapper(v.ref) == 1 }
 func (v *Value) IsArray() bool         { return v != nil && C.JS_IsArray_Wrapper(v.ref) == 1 }
 func (v *Value) IsError() bool         { return v != nil && C.JS_IsError_Wrapper(v.ref) == 1 }
-func (v *Value) IsFunction() bool      { return v != nil && C.JS_IsFunction_Wrapper(v.ctx.ref, v.ref) == 1 }
+func (v *Value) IsFunction() bool {
+	return v != nil && v.ctx != nil && v.ctx.ref != nil && C.JS_IsFunction_Wrapper(v.ctx.ref, v.ref) == 1
+}
 func (v *Value) IsConstructor() bool {
-	return v != nil && C.JS_IsConstructor_Wrapper(v.ctx.ref, v.ref) == 1
+	return v != nil && v.ctx != nil && v.ctx.ref != nil && C.JS_IsConstructor_Wrapper(v.ctx.ref, v.ref) == 1
 }
 
 // =============================================================================
@@ -631,7 +798,7 @@ func (v *Value) IsConstructor() bool {
 // =============================================================================
 
 func (v *Value) IsPromise() bool {
-	if v == nil {
+	if v == nil || v.ctx == nil || v.ctx.ref == nil {
 		return false
 	}
 	state := C.JS_PromiseState(v.ctx.ref, v.ref)
@@ -653,7 +820,7 @@ const (
 
 // PromiseState returns the state of the Promise
 func (v *Value) PromiseState() PromiseState {
-	if !v.IsPromise() {
+	if v == nil || v.ctx == nil || v.ctx.ref == nil || !v.IsPromise() {
 		return PromisePending
 	}
 
@@ -671,6 +838,9 @@ func (v *Value) PromiseState() PromiseState {
 // Await waits for promise resolution and executes pending jobs
 // Similar to Context.Await but called on Value directly
 func (v *Value) Await() *Value {
+	if v == nil || v.ctx == nil || v.ctx.ref == nil {
+		return nil
+	}
 	return v.ctx.Await(v)
 }
 
@@ -687,7 +857,10 @@ func (v *Value) IsClassInstance() bool {
 // HasInstanceData checks if the value has associated Go object data
 // This is the most reliable way to identify our class instances
 func (v *Value) HasInstanceData() bool {
-	if v == nil || !v.IsObject() {
+	if v == nil || v.ctx == nil || v.ctx.ref == nil || !v.IsObject() {
+		return false
+	}
+	if v.ctx.handleStore == nil {
 		return false
 	}
 
@@ -699,9 +872,15 @@ func (v *Value) HasInstanceData() bool {
 	if opaque == nil {
 		return false
 	}
+	if C.ClassOpaqueIsValid(opaque) == 0 {
+		return false
+	}
 
-	// Validate that the handle ID exists in our HandleStore
-	handleID := int32(C.OpaqueToInt(opaque))
+	// Validate that the class opaque payload points to a live handle.
+	handleID := int32(C.ClassOpaqueHandleID(opaque))
+	if handleID <= 0 {
+		return false
+	}
 	_, exists := v.ctx.handleStore.Load(handleID)
 	return exists
 }
@@ -721,12 +900,22 @@ func (v *Value) IsInstanceOfClassID(expectedClassID uint32) bool {
 // GetClassID returns the class ID of the value if it's a class instance
 // Returns JS_INVALID_CLASS_ID (0) if not a class instance
 func (v *Value) GetClassID() uint32 {
+	if v == nil {
+		return 0
+	}
 	return uint32(C.JS_GetClassID(v.ref))
 }
 
 // GetGoObject retrieves Go object from JavaScript class instance
 // This method extracts the opaque data stored by the constructor proxy
 func (v *Value) GetGoObject() (interface{}, error) {
+	if v == nil || v.ctx == nil || v.ctx.ref == nil {
+		return nil, errors.New("invalid value context")
+	}
+	if v.ctx.handleStore == nil {
+		return nil, errors.New("invalid handle store")
+	}
+
 	// First check if the value is an object
 	if !v.IsObject() {
 		return nil, errors.New("value is not an object")
@@ -741,9 +930,14 @@ func (v *Value) GetGoObject() (interface{}, error) {
 	if opaque == nil {
 		return nil, errors.New("no instance data found")
 	}
+	if C.ClassOpaqueIsValid(opaque) == 0 {
+		return nil, errors.New("instance data not found in handle store")
+	}
 
-	// Use C helper function to safely convert opaque pointer back to int32
-	handleID := int32(C.OpaqueToInt(opaque))
+	handleID := int32(C.ClassOpaqueHandleID(opaque))
+	if handleID <= 0 {
+		return nil, errors.New("instance data not found in handle store")
+	}
 
 	// Retrieve Go object from HandleStore
 	if obj, exists := v.ctx.handleStore.Load(handleID); exists {
@@ -760,7 +954,7 @@ func (v *Value) GetGoObject() (interface{}, error) {
 // IsInstanceOfConstructor checks if the value is an instance of a specific constructor
 // This uses JavaScript's instanceof operator semantics
 func (v *Value) IsInstanceOfConstructor(constructor *Value) bool {
-	return v != nil && constructor != nil && v.IsObject() && constructor.IsFunction() &&
+	return v != nil && v.ctx != nil && v.ctx.ref != nil && constructor != nil && v.IsObject() && constructor.IsFunction() &&
 		C.JS_IsInstanceOf(v.ctx.ref, v.ref, constructor.ref) == 1
 }
 
@@ -802,9 +996,57 @@ func (v *Value) IsByteArray() bool {
 	return v != nil && v.IsObject() && (v.GlobalInstanceof("ArrayBuffer") || v.ToString() == "[object ArrayBuffer]")
 }
 
+func (v *Value) classOpaqueContextKeyAndHandleIDForTest() (uintptr, int32, bool) {
+	if v == nil || v.ctx == nil || v.ctx.ref == nil || !v.IsObject() {
+		return 0, 0, false
+	}
+
+	classID := C.JS_GetClassID(v.ref)
+	opaque := C.JS_GetOpaque(v.ref, classID)
+	if opaque == nil {
+		return 0, 0, false
+	}
+	if C.ClassOpaqueIsValid(opaque) == 0 {
+		return 0, 0, false
+	}
+
+	ctxRef := C.ClassOpaqueContext(opaque)
+	handleID := int32(C.ClassOpaqueHandleID(opaque))
+	if ctxRef == nil || handleID <= 0 {
+		return 0, 0, false
+	}
+
+	return uintptr(unsafe.Pointer(ctxRef)), handleID, true
+}
+
+func (v *Value) corruptClassOpaqueMagicForTest() bool {
+	if v == nil || v.ctx == nil || v.ctx.ref == nil || !v.IsObject() {
+		return false
+	}
+	return C.CorruptClassOpaqueMagicForTest(v.ref) != 0
+}
+
+func (v *Value) setClassOpaqueHandleIDForTest(handleID int32) bool {
+	if v == nil || v.ctx == nil || v.ctx.ref == nil || !v.IsObject() {
+		return false
+	}
+	return C.SetClassOpaqueHandleIDForTest(v.ref, C.int32_t(handleID)) != 0
+}
+
+func (v *Value) setClassOpaqueContextNullForTest() bool {
+	if v == nil || v.ctx == nil || v.ctx.ref == nil || !v.IsObject() {
+		return false
+	}
+	return C.SetClassOpaqueContextNullForTest(v.ref) != 0
+}
+
 // resolveClassIDFromInheritance attempts to resolve classID by checking if this constructor
 // extends a registered class and should use the parent's classID
 func (v *Value) resolveClassIDFromInheritance() (uint32, bool) {
+	if v == nil || v.ctx == nil || v.ctx.ref == nil {
+		return 0, false
+	}
+
 	// Simple and efficient approach: use JavaScript to traverse the prototype chain
 	script := `
         (function(child) {
@@ -848,7 +1090,7 @@ func (v *Value) resolveClassIDFromInheritance() (uint32, bool) {
 		parent := parents.GetIdx(int64(i))
 		defer parent.Free()
 
-		if classID, exists := getConstructorClassID(parent.ref); exists {
+		if classID, exists := getConstructorClassID(v.ctx, parent.ref); exists {
 			return classID, true
 		}
 	}

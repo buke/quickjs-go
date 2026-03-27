@@ -1,8 +1,10 @@
 package quickjs
 
 import (
+	"errors"
 	"fmt"
 	"os"
+	"sync"
 	"sync/atomic"
 	"time"
 	"unsafe"
@@ -16,15 +18,92 @@ import "C"
 
 // Context represents a Javascript context (or Realm). Each JSContext has its own global objects and system objects. There can be several JSContexts per JSRuntime and they can share objects, similar to frames of the same origin sharing Javascript objects in a web browser.
 type Context struct {
-	runtime     *Runtime
-	ref         *C.JSContext
-	globals     *Value
-	handleStore *handleStore //  function handle storage
-	jobQueue    chan func(*Context)
-	jobClosed   chan struct{}
+	runtime                      *Runtime
+	ref                          *C.JSContext
+	globals                      *Value
+	handleStore                  *handleStore //  function handle storage
+	fnHandleMap                  sync.Map     // map[uintptr]int32: function object pointer -> handle ID
+	autoReleaseRegistryMu        sync.Mutex
+	autoReleaseFinalizerRegistry *Value
+	jobQueue                     chan func(*Context)
+	jobClosed                    chan struct{}
+	promiseCallbackRefCount      atomic.Int64
+	promiseCleanupCancelCount    atomic.Uint64
+	promiseCleanupFinallyCount   atomic.Uint64
+	promiseCleanupFallbackCount  atomic.Uint64
+	closeEnqueueSuccessCount     atomic.Uint64
+	closeEnqueueDroppedCount     atomic.Uint64
+	closeEnqueueValueFreeDropped atomic.Uint64
+	closeEnqueuePromiseDropped   atomic.Uint64
+	closeEnqueueOtherDropped     atomic.Uint64
 }
 
+// PromiseCleanupObservabilitySnapshot captures cleanup trigger source counters.
+// This is intended for diagnostics and tests.
+type PromiseCleanupObservabilitySnapshot struct {
+	CancelTriggered   uint64
+	FinallyTriggered  uint64
+	FallbackTriggered uint64
+}
+
+// CloseEnqueueObservabilitySnapshot captures best-effort enqueue outcomes
+// during close-window fallback paths.
+type CloseEnqueueObservabilitySnapshot struct {
+	Succeeded              uint64
+	Dropped                uint64
+	ValueFreeDropped       uint64
+	PromiseCallbackDropped uint64
+	OtherDropped           uint64
+}
+
+type promiseCleanupSource uint8
+
+const (
+	promiseCleanupSourceCancel promiseCleanupSource = iota
+	promiseCleanupSourceFinally
+	promiseCleanupSourceFallback
+)
+
+type closeEnqueueSource uint8
+
+const (
+	closeEnqueueSourceValueFree closeEnqueueSource = iota
+	closeEnqueueSourcePromiseCallback
+	closeEnqueueSourceOther
+)
+
 const defaultJobQueueSize = 1024
+
+var contextNewFunctionForceExceptionForTest atomic.Bool
+var contextNewFunctionForceZeroKeyForTest atomic.Bool
+var contextReleaseFunctionForceZeroKeyForTest atomic.Bool
+var contextFunctionHandleIDForceZeroKeyForTest atomic.Bool
+var contextEnsureAutoReleaseForceFactoryExceptionForTest atomic.Bool
+var contextEnsureAutoReleaseForceFactoryEvalExceptionForTest atomic.Bool
+
+func setContextNewFunctionForceExceptionForTest(enabled bool) {
+	contextNewFunctionForceExceptionForTest.Store(enabled)
+}
+
+func setContextNewFunctionForceZeroKeyForTest(enabled bool) {
+	contextNewFunctionForceZeroKeyForTest.Store(enabled)
+}
+
+func setContextReleaseFunctionForceZeroKeyForTest(enabled bool) {
+	contextReleaseFunctionForceZeroKeyForTest.Store(enabled)
+}
+
+func setContextFunctionHandleIDForceZeroKeyForTest(enabled bool) {
+	contextFunctionHandleIDForceZeroKeyForTest.Store(enabled)
+}
+
+func setContextEnsureAutoReleaseForceFactoryExceptionForTest(enabled bool) {
+	contextEnsureAutoReleaseForceFactoryExceptionForTest.Store(enabled)
+}
+
+func setContextEnsureAutoReleaseForceFactoryEvalExceptionForTest(enabled bool) {
+	contextEnsureAutoReleaseForceFactoryEvalExceptionForTest.Store(enabled)
+}
 
 // awaitPollInterval is the duration the Await loop sleeps when no JS or Go
 // jobs are pending. Keeps CPU usage low while ensuring Go-scheduled work
@@ -34,14 +113,45 @@ const awaitPollInterval = time.Millisecond
 // awaitPromiseStateHook and awaitExecutePendingJobHook are used only in tests to
 // force specific Await code paths; they must remain nil in production.
 var (
-	awaitPromiseStateHook      func(ctx *Context, promise *Value, current int) (int, bool)
-	awaitExecutePendingJobHook func(ctx *Context, promise *Value, current int) (int, bool)
-	awaitHasPendingGoJobsHook  func(ctx *Context, promise *Value, current bool) (bool, bool)
+	awaitPromiseStateHook                        func(ctx *Context, promise *Value, current int) (int, bool)
+	awaitExecutePendingJobHook                   func(ctx *Context, promise *Value, current int) (int, bool)
+	awaitHasPendingGoJobsHook                    func(ctx *Context, promise *Value, current bool) (bool, bool)
+	newPromiseWithCancelPostSettleCASHookForTest func()
 )
+
+func setNewPromiseWithCancelPostSettleCASHookForTest(hook func()) {
+	newPromiseWithCancelPostSettleCASHookForTest = hook
+}
 
 func (ctx *Context) initScheduler() {
 	ctx.jobQueue = make(chan func(*Context), defaultJobQueueSize)
 	ctx.jobClosed = make(chan struct{})
+}
+
+func (ctx *Context) enqueueJobDuringClose(job func(*Context)) bool {
+	return ctx.enqueueJobDuringCloseWithSource(job, closeEnqueueSourceOther)
+}
+
+func (ctx *Context) enqueueJobDuringCloseWithSource(job func(*Context), source closeEnqueueSource) bool {
+	if ctx == nil || ctx.jobQueue == nil || job == nil {
+		return false
+	}
+	select {
+	case ctx.jobQueue <- job:
+		ctx.closeEnqueueSuccessCount.Add(1)
+		return true
+	default:
+		ctx.closeEnqueueDroppedCount.Add(1)
+		switch source {
+		case closeEnqueueSourceValueFree:
+			ctx.closeEnqueueValueFreeDropped.Add(1)
+		case closeEnqueueSourcePromiseCallback:
+			ctx.closeEnqueuePromiseDropped.Add(1)
+		default:
+			ctx.closeEnqueueOtherDropped.Add(1)
+		}
+		return false
+	}
 }
 
 // Schedule enqueues a job to be executed on the Context's thread.
@@ -108,10 +218,36 @@ func (ctx *Context) wrapPromiseCallback(fn *Value) (func(*Value), func()) {
 		return noop, func() {}
 	}
 	fnRef := ctx.duplicateValue(fn)
+	if fnRef != nil {
+		ctx.promiseCallbackRefCount.Add(1)
+	}
 	var consumed atomic.Bool
+	var freed atomic.Bool
+	freeFnRef := func() {
+		if !freed.Swap(true) && fnRef != nil {
+			freeOnOwner := func(inner *Context) {
+				if inner != nil && inner.ref != nil {
+					fnRef.Free()
+				}
+			}
+
+			// Keep all C-side JSValue release on owner thread.
+			if ctx.runtime == nil || ctx.runtime.ref == nil || C.IsRuntimeOwnerThread(ctx.runtime.ref) != 0 {
+				freeOnOwner(ctx)
+				ctx.promiseCallbackRefCount.Add(-1)
+				return
+			}
+
+			if !ctx.Schedule(freeOnOwner) {
+				// Context is closing/closed. Best-effort enqueue for close-phase drain.
+				_ = ctx.enqueueJobDuringCloseWithSource(freeOnOwner, closeEnqueueSourcePromiseCallback)
+			}
+			ctx.promiseCallbackRefCount.Add(-1)
+		}
+	}
 	release := func() {
-		if !consumed.Swap(true) && fnRef != nil {
-			fnRef.Free()
+		if !consumed.Swap(true) {
+			freeFnRef()
 		}
 	}
 	callback := func(arg *Value) {
@@ -120,7 +256,7 @@ func (ctx *Context) wrapPromiseCallback(fn *Value) (func(*Value), func()) {
 		}
 		dupArg := ctx.duplicateValue(arg)
 		job := func(inner *Context) {
-			defer fnRef.Free()
+			defer freeFnRef()
 			var callArg *Value
 			if dupArg != nil {
 				callArg = dupArg
@@ -143,10 +279,90 @@ func (ctx *Context) wrapPromiseCallback(fn *Value) (func(*Value), func()) {
 			if dupArg != nil {
 				dupArg.Free()
 			}
-			fnRef.Free()
+			freeFnRef()
 		}
 	}
 	return callback, release
+}
+
+func (ctx *Context) currentPromiseCallbackRefCount() int64 {
+	if ctx == nil {
+		return 0
+	}
+	return ctx.promiseCallbackRefCount.Load()
+}
+
+// SnapshotPromiseCleanupObservability returns cleanup source counters.
+func (ctx *Context) SnapshotPromiseCleanupObservability() PromiseCleanupObservabilitySnapshot {
+	if ctx == nil {
+		return PromiseCleanupObservabilitySnapshot{}
+	}
+	return PromiseCleanupObservabilitySnapshot{
+		CancelTriggered:   ctx.promiseCleanupCancelCount.Load(),
+		FinallyTriggered:  ctx.promiseCleanupFinallyCount.Load(),
+		FallbackTriggered: ctx.promiseCleanupFallbackCount.Load(),
+	}
+}
+
+// SnapshotAndResetPromiseCleanupObservability returns current counters and then resets them.
+func (ctx *Context) SnapshotAndResetPromiseCleanupObservability() PromiseCleanupObservabilitySnapshot {
+	if ctx == nil {
+		return PromiseCleanupObservabilitySnapshot{}
+	}
+	return PromiseCleanupObservabilitySnapshot{
+		CancelTriggered:   ctx.promiseCleanupCancelCount.Swap(0),
+		FinallyTriggered:  ctx.promiseCleanupFinallyCount.Swap(0),
+		FallbackTriggered: ctx.promiseCleanupFallbackCount.Swap(0),
+	}
+}
+
+// SnapshotCloseEnqueueObservability returns enqueue fallback counters.
+func (ctx *Context) SnapshotCloseEnqueueObservability() CloseEnqueueObservabilitySnapshot {
+	if ctx == nil {
+		return CloseEnqueueObservabilitySnapshot{}
+	}
+	return CloseEnqueueObservabilitySnapshot{
+		Succeeded:              ctx.closeEnqueueSuccessCount.Load(),
+		Dropped:                ctx.closeEnqueueDroppedCount.Load(),
+		ValueFreeDropped:       ctx.closeEnqueueValueFreeDropped.Load(),
+		PromiseCallbackDropped: ctx.closeEnqueuePromiseDropped.Load(),
+		OtherDropped:           ctx.closeEnqueueOtherDropped.Load(),
+	}
+}
+
+// SnapshotAndResetCloseEnqueueObservability returns current counters and resets them.
+func (ctx *Context) SnapshotAndResetCloseEnqueueObservability() CloseEnqueueObservabilitySnapshot {
+	if ctx == nil {
+		return CloseEnqueueObservabilitySnapshot{}
+	}
+	return CloseEnqueueObservabilitySnapshot{
+		Succeeded:              ctx.closeEnqueueSuccessCount.Swap(0),
+		Dropped:                ctx.closeEnqueueDroppedCount.Swap(0),
+		ValueFreeDropped:       ctx.closeEnqueueValueFreeDropped.Swap(0),
+		PromiseCallbackDropped: ctx.closeEnqueuePromiseDropped.Swap(0),
+		OtherDropped:           ctx.closeEnqueueOtherDropped.Swap(0),
+	}
+}
+
+func (ctx *Context) observePromiseCleanup(source promiseCleanupSource) {
+	if ctx == nil {
+		return
+	}
+	switch source {
+	case promiseCleanupSourceCancel:
+		ctx.promiseCleanupCancelCount.Add(1)
+	case promiseCleanupSourceFinally:
+		ctx.promiseCleanupFinallyCount.Add(1)
+	default:
+		ctx.promiseCleanupFallbackCount.Add(1)
+	}
+}
+
+func (ctx *Context) cContextKeyForTest() uintptr {
+	if ctx == nil || ctx.ref == nil {
+		return 0
+	}
+	return uintptr(unsafe.Pointer(ctx.ref))
 }
 
 // Runtime returns the runtime of the context.
@@ -154,8 +370,51 @@ func (ctx *Context) Runtime() *Runtime {
 	return ctx.runtime
 }
 
+func (ctx *Context) requireOwnerThread(op string) {
+	if ctx == nil || ctx.runtime == nil || ctx.runtime.ref == nil {
+		return
+	}
+	requireRuntimeOwnerThread(ctx.runtime, op)
+}
+
 // Free will free context and all associated objects.
 func (ctx *Context) Close() {
+	if ctx == nil || ctx.ref == nil {
+		return
+	}
+	ctx.requireOwnerThread("Context.Close")
+
+	ctxRef := ctx.ref
+	// Drain already queued jobs first so deferred owner-thread releases can run.
+	drainUntilStable := func(timeout time.Duration, stableRequired int) {
+		if ctx.jobQueue == nil {
+			return
+		}
+		deadline := time.Now().Add(timeout)
+		lastLen := -1
+		stableCount := 0
+		for {
+			ctx.ProcessJobs()
+			currentLen := len(ctx.jobQueue)
+			if currentLen == lastLen {
+				stableCount++
+			} else {
+				stableCount = 0
+				lastLen = currentLen
+			}
+
+			if currentLen == 0 && stableCount >= stableRequired {
+				return
+			}
+			if time.Now().After(deadline) {
+				return
+			}
+			time.Sleep(50 * time.Microsecond)
+		}
+	}
+
+	drainUntilStable(2*time.Millisecond, 2)
+
 	if ctx.jobClosed != nil {
 		select {
 		case <-ctx.jobClosed:
@@ -163,21 +422,35 @@ func (ctx *Context) Close() {
 			close(ctx.jobClosed)
 		}
 	}
-	ctx.drainJobs()
+	// Best effort: execute jobs that raced with close signal.
+	drainUntilStable(4*time.Millisecond, 3)
 
 	if ctx.globals != nil {
 		ctx.globals.Free()
 	}
+	ctx.autoReleaseRegistryMu.Lock()
+	if ctx.autoReleaseFinalizerRegistry != nil {
+		ctx.autoReleaseFinalizerRegistry.Free()
+		ctx.autoReleaseFinalizerRegistry = nil
+	}
+	ctx.autoReleaseRegistryMu.Unlock()
 
 	// Clean up all registered function handles (critical for memory management)
 	if ctx.handleStore != nil {
 		ctx.handleStore.Clear()
 	}
+	ctx.fnHandleMap.Range(func(key, _ interface{}) bool {
+		ctx.fnHandleMap.Delete(key)
+		return true
+	})
 
 	// Remove from global mapping
-	unregisterContext(ctx.ref)
+	unregisterContext(ctxRef)
 
-	C.JS_FreeContext(ctx.ref)
+	C.JS_FreeContext(ctxRef)
+	ctx.ref = nil
+	ctx.globals = nil
+	ctx.runtime = nil
 }
 
 // NewNull returns a null value.
@@ -215,6 +488,12 @@ func (ctx *Context) Uninitialized() *Value {
 
 // NewError returns a new exception value with given message.
 func (ctx *Context) NewError(err error) *Value {
+	if ctx == nil || ctx.ref == nil {
+		return nil
+	}
+	if err == nil {
+		err = errors.New("unknown error")
+	}
 	val := &Value{ctx: ctx, ref: C.JS_NewError(ctx.ref)}
 	val.Set("message", ctx.NewString(err.Error()))
 	return val
@@ -228,6 +507,9 @@ func (ctx *Context) Error(err error) *Value {
 
 // NewBool returns a bool value with given bool.
 func (ctx *Context) NewBool(b bool) *Value {
+	if ctx == nil || ctx.ref == nil {
+		return nil
+	}
 	bv := 0
 	if b {
 		bv = 1
@@ -243,6 +525,9 @@ func (ctx *Context) Bool(b bool) *Value {
 
 // NewInt32 returns a int32 value with given int32.
 func (ctx *Context) NewInt32(v int32) *Value {
+	if ctx == nil || ctx.ref == nil {
+		return nil
+	}
 	return &Value{ctx: ctx, ref: C.JS_NewInt32(ctx.ref, C.int32_t(v))}
 }
 
@@ -254,6 +539,9 @@ func (ctx *Context) Int32(v int32) *Value {
 
 // NewInt64 returns a int64 value with given int64.
 func (ctx *Context) NewInt64(v int64) *Value {
+	if ctx == nil || ctx.ref == nil {
+		return nil
+	}
 	return &Value{ctx: ctx, ref: C.JS_NewInt64(ctx.ref, C.int64_t(v))}
 }
 
@@ -265,6 +553,9 @@ func (ctx *Context) Int64(v int64) *Value {
 
 // NewUint32 returns a uint32 value with given uint32.
 func (ctx *Context) NewUint32(v uint32) *Value {
+	if ctx == nil || ctx.ref == nil {
+		return nil
+	}
 	return &Value{ctx: ctx, ref: C.JS_NewUint32(ctx.ref, C.uint32_t(v))}
 }
 
@@ -276,6 +567,9 @@ func (ctx *Context) Uint32(v uint32) *Value {
 
 // NewBigInt64 returns a int64 value with given uint64.
 func (ctx *Context) NewBigInt64(v int64) *Value {
+	if ctx == nil || ctx.ref == nil {
+		return nil
+	}
 	return &Value{ctx: ctx, ref: C.JS_NewBigInt64(ctx.ref, C.int64_t(v))}
 }
 
@@ -287,6 +581,9 @@ func (ctx *Context) BigInt64(v int64) *Value {
 
 // NewBigUint64 returns a uint64 value with given uint64.
 func (ctx *Context) NewBigUint64(v uint64) *Value {
+	if ctx == nil || ctx.ref == nil {
+		return nil
+	}
 	return &Value{ctx: ctx, ref: C.JS_NewBigUint64(ctx.ref, C.uint64_t(v))}
 }
 
@@ -298,6 +595,9 @@ func (ctx *Context) BigUint64(v uint64) *Value {
 
 // NewFloat64 returns a float64 value with given float64.
 func (ctx *Context) NewFloat64(v float64) *Value {
+	if ctx == nil || ctx.ref == nil {
+		return nil
+	}
 	return &Value{ctx: ctx, ref: C.JS_NewFloat64(ctx.ref, C.double(v))}
 }
 
@@ -309,6 +609,9 @@ func (ctx *Context) Float64(v float64) *Value {
 
 // NewString returns a string value with given string.
 func (ctx *Context) NewString(v string) *Value {
+	if ctx == nil || ctx.ref == nil {
+		return nil
+	}
 	ptr := C.CString(v)
 	defer C.free(unsafe.Pointer(ptr))
 	return &Value{ctx: ctx, ref: C.JS_NewString(ctx.ref, ptr)}
@@ -322,6 +625,9 @@ func (ctx *Context) String(v string) *Value {
 
 // NewArrayBuffer returns a ArrayBuffer value with given binary data.
 func (ctx *Context) NewArrayBuffer(binaryData []byte) *Value {
+	if ctx == nil || ctx.ref == nil {
+		return nil
+	}
 	if len(binaryData) == 0 {
 		return &Value{ctx: ctx, ref: C.JS_NewArrayBufferCopy(ctx.ref, nil, 0)}
 	}
@@ -337,6 +643,10 @@ func (ctx *Context) ArrayBuffer(binaryData []byte) *Value {
 // createTypedArray is a helper function to create TypedArray with given data and type.
 // It creates an ArrayBuffer first, then constructs a TypedArray from it.
 func (ctx *Context) createTypedArray(data unsafe.Pointer, elementCount int, elementSize int, arrayType C.JSTypedArrayEnum) *Value {
+	if ctx == nil || ctx.ref == nil {
+		return nil
+	}
+
 	// Calculate total bytes needed for the data
 	totalBytes := elementCount * elementSize
 
@@ -518,6 +828,9 @@ func (ctx *Context) BigUint64Array(data []uint64) *Value {
 
 // NewObject returns a new object value.
 func (ctx *Context) NewObject() *Value {
+	if ctx == nil || ctx.ref == nil {
+		return nil
+	}
 	return &Value{ctx: ctx, ref: C.JS_NewObject(ctx.ref)}
 }
 
@@ -529,6 +842,9 @@ func (ctx *Context) Object() *Value {
 
 // ParseJson parses given json string and returns a object value.
 func (ctx *Context) ParseJSON(v string) *Value {
+	if ctx == nil || ctx.ref == nil {
+		return nil
+	}
 	ptr := C.CString(v)
 	defer C.free(unsafe.Pointer(ptr))
 
@@ -541,20 +857,251 @@ func (ctx *Context) ParseJSON(v string) *Value {
 // NewFunction returns a js function value with given function template
 // New implementation using HandleStore and JS_NewCFunction2 with magic parameter
 func (ctx *Context) NewFunction(fn func(*Context, *Value, []*Value) *Value) *Value {
+	if ctx == nil || ctx.ref == nil || ctx.handleStore == nil || fn == nil {
+		return nil
+	}
+
 	// Store function in HandleStore and get int32 ID
 	fnID := ctx.handleStore.Store(fn)
+	funcRef := C.JS_NewCFunction2(
+		ctx.ref,
+		(*C.JSCFunction)(unsafe.Pointer(C.GoFunctionProxy)),
+		nil,                      // name (can be set later)
+		0,                        // length (auto-detected)
+		C.JS_CFUNC_generic_magic, // enable magic parameter support
+		C.int(fnID),              // magic parameter passes function ID
+	)
+	if contextNewFunctionForceExceptionForTest.Load() {
+		C.JS_FreeValue(ctx.ref, funcRef)
+		funcRef = C.JS_NewException()
+	}
+
+	if C.JS_IsException_Wrapper(funcRef) == 1 {
+		ctx.handleStore.Delete(fnID)
+		return &Value{ctx: ctx, ref: funcRef}
+	}
+
+	key := uintptr(C.JS_VALUE_GET_PTR_Wrapper(funcRef))
+	if contextNewFunctionForceZeroKeyForTest.Load() {
+		key = 0
+	}
+	if key != 0 {
+		ctx.fnHandleMap.Store(key, fnID)
+	}
 
 	return &Value{
 		ctx: ctx,
-		ref: C.JS_NewCFunction2(
-			ctx.ref,
-			(*C.JSCFunction)(unsafe.Pointer(C.GoFunctionProxy)),
-			nil,                      // name (can be set later)
-			0,                        // length (auto-detected)
-			C.JS_CFUNC_generic_magic, // enable magic parameter support
-			C.int(fnID),              // magic parameter passes function ID
-		),
+		ref: funcRef,
 	}
+}
+
+// ReleaseFunction releases a handle created by NewFunction before Context.Close.
+// It is safe to call multiple times for the same function value.
+func (ctx *Context) ReleaseFunction(fn *Value) bool {
+	if ctx == nil || fn == nil || fn.ctx != ctx || !fn.IsFunction() {
+		return false
+	}
+
+	key := uintptr(C.JS_VALUE_GET_PTR_Wrapper(fn.ref))
+	if contextReleaseFunctionForceZeroKeyForTest.Load() {
+		key = 0
+	}
+	if key == 0 {
+		return false
+	}
+
+	rawID, ok := ctx.fnHandleMap.LoadAndDelete(key)
+	if !ok {
+		return false
+	}
+
+	id, ok := rawID.(int32)
+	if !ok {
+		return false
+	}
+
+	return ctx.handleStore.Delete(id)
+}
+
+func (ctx *Context) functionHandleID(fn *Value) (int32, bool) {
+	if ctx == nil || fn == nil || fn.ctx != ctx || !fn.IsFunction() {
+		return 0, false
+	}
+
+	key := uintptr(C.JS_VALUE_GET_PTR_Wrapper(fn.ref))
+	if contextFunctionHandleIDForceZeroKeyForTest.Load() {
+		key = 0
+	}
+	if key == 0 {
+		return 0, false
+	}
+
+	rawID, ok := ctx.fnHandleMap.Load(key)
+	if !ok {
+		return 0, false
+	}
+
+	id, ok := rawID.(int32)
+	if !ok {
+		ctx.fnHandleMap.Delete(key)
+		return 0, false
+	}
+
+	return id, true
+}
+
+func (ctx *Context) releaseFunctionByID(id int32) bool {
+	if ctx == nil || ctx.handleStore == nil || id <= 0 {
+		return false
+	}
+
+	released := ctx.handleStore.Delete(id)
+	if !released {
+		return false
+	}
+
+	ctx.fnHandleMap.Range(func(key, value interface{}) bool {
+		mappedID, ok := value.(int32)
+		if ok && mappedID == id {
+			ctx.fnHandleMap.Delete(key)
+			return false
+		}
+		return true
+	})
+
+	return true
+}
+
+func (ctx *Context) ensureAutoReleaseFinalizerRegistry() *Value {
+	if ctx == nil || ctx.ref == nil || ctx.handleStore == nil {
+		return nil
+	}
+	ctx.autoReleaseRegistryMu.Lock()
+	defer ctx.autoReleaseRegistryMu.Unlock()
+	if ctx.autoReleaseFinalizerRegistry != nil {
+		return ctx.autoReleaseFinalizerRegistry
+	}
+
+	cleanupFn := ctx.NewFunction(func(ctx *Context, this *Value, args []*Value) *Value {
+		if len(args) > 0 && args[0] != nil && args[0].IsNumber() {
+			ctx.releaseFunctionByID(args[0].ToInt32())
+		}
+		return ctx.NewUndefined()
+	})
+	cleanupFnID, hasCleanupFnID := ctx.functionHandleID(cleanupFn)
+	if contextEnsureAutoReleaseForceFactoryExceptionForTest.Load() {
+		cleanupFn.Free()
+		if hasCleanupFnID {
+			ctx.releaseFunctionByID(cleanupFnID)
+		}
+		return nil
+	}
+
+	factory := ctx.Eval("(cleanup) => new FinalizationRegistry(cleanup)")
+	if contextEnsureAutoReleaseForceFactoryEvalExceptionForTest.Load() {
+		factory.Free()
+		factory = ctx.ThrowInternalError("forced ensureAutoRelease factory eval failure")
+	}
+	if factory.IsException() {
+		cleanupFn.Free()
+		if hasCleanupFnID {
+			ctx.releaseFunctionByID(cleanupFnID)
+		}
+		_ = ctx.Exception()
+		factory.Free()
+		return nil
+	}
+	defer factory.Free()
+
+	thisVal := ctx.NewUndefined()
+	defer thisVal.Free()
+
+	registry := factory.Execute(thisVal, cleanupFn)
+	cleanupFn.Free()
+	if registry.IsException() {
+		if hasCleanupFnID {
+			ctx.releaseFunctionByID(cleanupFnID)
+		}
+		_ = ctx.Exception()
+		registry.Free()
+		return nil
+	}
+
+	ctx.autoReleaseFinalizerRegistry = registry
+	return ctx.autoReleaseFinalizerRegistry
+}
+
+func (ctx *Context) registerFunctionForAutoRelease(fn *Value) {
+	if ctx == nil || fn == nil {
+		return
+	}
+	id, ok := ctx.functionHandleID(fn)
+	if !ok {
+		return
+	}
+
+	registry := ctx.ensureAutoReleaseFinalizerRegistry()
+	if registry == nil {
+		return
+	}
+
+	idVal := ctx.NewInt32(id)
+	defer idVal.Free()
+
+	ret := registry.Call("register", fn, idVal)
+	if ret != nil {
+		ret.Free()
+	}
+}
+
+func (ctx *Context) autoReleaseTemporaryFunctions(funcs ...*Value) {
+	for _, fn := range funcs {
+		ctx.registerFunctionForAutoRelease(fn)
+	}
+}
+
+func (ctx *Context) registerPromiseSettlementCleanup(promise *Value, cleanup func()) func() {
+	var cleaned atomic.Bool
+	var cleanupFnID int32
+	var hasCleanupFnID bool
+	cleanupOnce := func(source promiseCleanupSource) {
+		if cleaned.Swap(true) {
+			return
+		}
+		ctx.observePromiseCleanup(source)
+		cleanup()
+		if hasCleanupFnID {
+			ctx.releaseFunctionByID(cleanupFnID)
+		}
+	}
+	cancelCleanup := func() {
+		cleanupOnce(promiseCleanupSourceCancel)
+	}
+
+	if ctx == nil || promise == nil || cleanup == nil || !promise.IsPromise() {
+		return cancelCleanup
+	}
+	if ctx.ensureAutoReleaseFinalizerRegistry() == nil {
+		return cancelCleanup
+	}
+
+	cleanupFn := ctx.NewFunction(func(ctx *Context, this *Value, args []*Value) *Value {
+		cleanupOnce(promiseCleanupSourceFinally)
+		return ctx.NewUndefined()
+	})
+
+	cleanupFnID, hasCleanupFnID = ctx.functionHandleID(cleanupFn)
+	ctx.autoReleaseTemporaryFunctions(cleanupFn)
+
+	ret := promise.Call("finally", cleanupFn)
+	cleanupFn.Free()
+	failed := ret.IsException()
+	ret.Free()
+	if failed {
+		_ = ctx.Exception()
+		cleanupOnce(promiseCleanupSourceFallback)
+	}
+	return cancelCleanup
 }
 
 // Function returns a js function value with given function template
@@ -581,15 +1128,18 @@ func (ctx *Context) NewAsyncFunction(asyncFn func(ctx *Context, this *Value, pro
 		return ctx.NewPromise(func(resolve, reject func(*Value)) {
 			// Create a promise object that has resolve/reject methods
 			promiseObj := ctx.NewObject()
-			promiseObj.Set("resolve", ctx.NewFunction(func(ctx *Context, this *Value, args []*Value) *Value {
+			resolveFn := ctx.NewFunction(func(ctx *Context, this *Value, args []*Value) *Value {
 				if len(args) > 0 {
 					resolve(args[0])
 				} else {
 					resolve(ctx.NewUndefined())
 				}
 				return ctx.NewUndefined()
-			}))
-			promiseObj.Set("reject", ctx.NewFunction(func(ctx *Context, this *Value, args []*Value) *Value {
+			})
+			ctx.autoReleaseTemporaryFunctions(resolveFn)
+			promiseObj.Set("resolve", resolveFn)
+
+			rejectFn := ctx.NewFunction(func(ctx *Context, this *Value, args []*Value) *Value {
 				if len(args) > 0 {
 					reject(args[0])
 				} else {
@@ -598,11 +1148,19 @@ func (ctx *Context) NewAsyncFunction(asyncFn func(ctx *Context, this *Value, pro
 					reject(errObj)
 				}
 				return ctx.NewUndefined()
-			}))
+			})
+			ctx.autoReleaseTemporaryFunctions(rejectFn)
+			promiseObj.Set("reject", rejectFn)
 			defer promiseObj.Free()
 
 			// Call the original async function with the promise object
 			result := asyncFn(ctx, this, promiseObj, args)
+			if result == nil {
+				undefined := ctx.NewUndefined()
+				defer undefined.Free()
+				resolve(undefined)
+				return
+			}
 
 			// If the function returned a value directly (not using promise.resolve/reject),
 			// we resolve with that value
@@ -632,6 +1190,9 @@ func (ctx *Context) AsyncFunction(asyncFn func(ctx *Context, this *Value, promis
 
 // getFunction gets function from HandleStore (internal use)
 func (ctx *Context) loadFunctionFromHandleID(id int32) interface{} {
+	if ctx == nil || ctx.handleStore == nil {
+		return nil
+	}
 	fn, _ := ctx.handleStore.Load(id)
 	return fn
 }
@@ -645,6 +1206,9 @@ func (ctx *Context) SetInterruptHandler(handler InterruptHandler) {
 
 // NewAtom returns a new Atom value with given string.
 func (ctx *Context) NewAtom(v string) *Atom {
+	if ctx == nil || ctx.ref == nil {
+		return nil
+	}
 	ptr := C.CString(v)
 	defer C.free(unsafe.Pointer(ptr))
 	return &Atom{ctx: ctx, ref: C.JS_NewAtom(ctx.ref, ptr)}
@@ -658,6 +1222,9 @@ func (ctx *Context) Atom(v string) *Atom {
 
 // NewAtomIdx returns a new Atom value with given idx.
 func (ctx *Context) NewAtomIdx(idx uint32) *Atom {
+	if ctx == nil || ctx.ref == nil {
+		return nil
+	}
 	return &Atom{ctx: ctx, ref: C.JS_NewAtomUInt32(ctx.ref, C.uint32_t(idx))}
 }
 
@@ -670,15 +1237,44 @@ func (ctx *Context) AtomIdx(idx uint32) *Atom {
 // Invoke invokes a function with given this value and arguments.
 // Deprecated: Use Value.Execute() instead for better API consistency.
 func (ctx *Context) Invoke(fn *Value, this *Value, args ...*Value) *Value {
+	if ctx == nil || ctx.ref == nil || fn == nil || fn.ctx == nil {
+		return nil
+	}
+	if fn.ctx != ctx || fn.ctx.ref == nil {
+		return ctx.ThrowTypeError("cross-context function")
+	}
+
 	cargs := []C.JSValue{}
 	for _, x := range args {
+		if x == nil {
+			cargs = append(cargs, C.JS_NewUndefined())
+			continue
+		}
+		if x.ctx == nil || x.ctx.ref == nil {
+			cargs = append(cargs, C.JS_NewUndefined())
+			continue
+		}
+		if x.ctx != ctx {
+			return ctx.ThrowTypeError("cross-context argument")
+		}
 		cargs = append(cargs, x.ref)
 	}
+
+	thisRef := C.JS_NewUndefined()
+	if this != nil {
+		if this.ctx != nil && this.ctx.ref != nil {
+			if this.ctx != ctx {
+				return ctx.ThrowTypeError("cross-context this value")
+			}
+			thisRef = this.ref
+		}
+	}
+
 	var val *Value
 	if len(cargs) == 0 {
-		val = &Value{ctx: ctx, ref: C.JS_Call(ctx.ref, fn.ref, this.ref, 0, nil)}
+		val = &Value{ctx: ctx, ref: C.JS_Call(ctx.ref, fn.ref, thisRef, 0, nil)}
 	} else {
-		val = &Value{ctx: ctx, ref: C.JS_Call(ctx.ref, fn.ref, this.ref, C.int(len(cargs)), &cargs[0])}
+		val = &Value{ctx: ctx, ref: C.JS_Call(ctx.ref, fn.ref, thisRef, C.int(len(cargs)), &cargs[0])}
 	}
 	return val
 }
@@ -741,6 +1337,8 @@ func EvalLoadOnly(loadOnly bool) EvalOption {
 // Need call Free() `quickjs.Value`'s returned by `Eval()` and `EvalFile()` and `EvalBytecode()`.
 // func (ctx *Context) Eval(code string) (*Value, error) { return ctx.EvalFile(code, "code") }
 func (ctx *Context) Eval(code string, opts ...EvalOption) *Value {
+	ctx.requireOwnerThread("Context.Eval")
+
 	options := EvalOptions{
 		js_eval_type_global: true,
 		filename:            "<input>",
@@ -924,16 +1522,37 @@ func (ctx *Context) Globals() *Value {
 
 // Throw returns a context's exception value.
 func (ctx *Context) Throw(v *Value) *Value {
-	return &Value{ctx: ctx, ref: C.JS_Throw(ctx.ref, v.ref)}
+	if ctx == nil || ctx.ref == nil {
+		return nil
+	}
+	if v == nil {
+		return ctx.ThrowTypeError("throw value cannot be nil")
+	}
+	if v.ctx != nil && v.ctx != ctx {
+		return ctx.ThrowTypeError("throw value must belong to current context")
+	}
+	ret := &Value{ctx: ctx, ref: C.JS_Throw(ctx.ref, v.ref)}
+	// JS_Throw consumes v.ref, invalidate source handle to avoid double free.
+	v.ref = C.JS_NewUndefined()
+	return ret
 }
 
 // ThrowError returns a context's exception value with given error message.
 func (ctx *Context) ThrowError(err error) *Value {
+	if ctx == nil || ctx.ref == nil {
+		return nil
+	}
+	if err == nil {
+		return ctx.ThrowInternalError("nil error")
+	}
 	return ctx.Throw(ctx.NewError(err))
 }
 
 // ThrowSyntaxError returns a context's exception value with given error message.
 func (ctx *Context) ThrowSyntaxError(format string, args ...interface{}) *Value {
+	if ctx == nil || ctx.ref == nil {
+		return nil
+	}
 	cause := fmt.Sprintf(format, args...)
 	causePtr := C.CString(cause)
 	defer C.free(unsafe.Pointer(causePtr))
@@ -942,6 +1561,9 @@ func (ctx *Context) ThrowSyntaxError(format string, args ...interface{}) *Value 
 
 // ThrowTypeError returns a context's exception value with given error message.
 func (ctx *Context) ThrowTypeError(format string, args ...interface{}) *Value {
+	if ctx == nil || ctx.ref == nil {
+		return nil
+	}
 	cause := fmt.Sprintf(format, args...)
 	causePtr := C.CString(cause)
 	defer C.free(unsafe.Pointer(causePtr))
@@ -950,6 +1572,9 @@ func (ctx *Context) ThrowTypeError(format string, args ...interface{}) *Value {
 
 // ThrowReferenceError returns a context's exception value with given error message.
 func (ctx *Context) ThrowReferenceError(format string, args ...interface{}) *Value {
+	if ctx == nil || ctx.ref == nil {
+		return nil
+	}
 	cause := fmt.Sprintf(format, args...)
 	causePtr := C.CString(cause)
 	defer C.free(unsafe.Pointer(causePtr))
@@ -958,6 +1583,9 @@ func (ctx *Context) ThrowReferenceError(format string, args ...interface{}) *Val
 
 // ThrowRangeError returns a context's exception value with given error message.
 func (ctx *Context) ThrowRangeError(format string, args ...interface{}) *Value {
+	if ctx == nil || ctx.ref == nil {
+		return nil
+	}
 	cause := fmt.Sprintf(format, args...)
 	causePtr := C.CString(cause)
 	defer C.free(unsafe.Pointer(causePtr))
@@ -966,6 +1594,9 @@ func (ctx *Context) ThrowRangeError(format string, args ...interface{}) *Value {
 
 // ThrowInternalError returns a context's exception value with given error message.
 func (ctx *Context) ThrowInternalError(format string, args ...interface{}) *Value {
+	if ctx == nil || ctx.ref == nil {
+		return nil
+	}
 	cause := fmt.Sprintf(format, args...)
 	causePtr := C.CString(cause)
 	defer C.free(unsafe.Pointer(causePtr))
@@ -974,12 +1605,18 @@ func (ctx *Context) ThrowInternalError(format string, args ...interface{}) *Valu
 
 // HasException checks if the context has an exception set.
 func (ctx *Context) HasException() bool {
+	if ctx == nil || ctx.ref == nil {
+		return false
+	}
 	// Check if the context has an exception set
 	return C.JS_HasException_Wrapper(ctx.ref) == 1
 }
 
 // Exception returns a context's exception value.
 func (ctx *Context) Exception() error {
+	if ctx == nil || ctx.ref == nil {
+		return nil
+	}
 	val := &Value{ctx: ctx, ref: C.JS_GetException(ctx.ref)}
 	defer val.Free()
 	return val.Error()
@@ -987,6 +1624,10 @@ func (ctx *Context) Exception() error {
 
 // Loop runs the context's event loop.
 func (ctx *Context) Loop() {
+	if ctx == nil || ctx.ref == nil {
+		return
+	}
+	ctx.requireOwnerThread("Context.Loop")
 	ctx.ProcessJobs()
 	C.js_std_loop(ctx.ref)
 	ctx.ProcessJobs()
@@ -1000,6 +1641,10 @@ func (ctx *Context) Loop() {
 // iterations, enabling async Go bridge functions (fetch, storage, etc.) to
 // resolve Promises from goroutines without blocking the event loop.
 func (ctx *Context) Await(v *Value) *Value {
+	if ctx == nil || ctx.ref == nil || ctx.runtime == nil || ctx.runtime.ref == nil {
+		return v
+	}
+	ctx.requireOwnerThread("Context.Await")
 	if v == nil || !v.IsPromise() {
 		return v
 	}
@@ -1101,6 +1746,25 @@ func (ctx *Context) Await(v *Value) *Value {
 // The resolver helpers ensure only the first resolve/reject wins, matching
 // native Promise semantics.
 func (ctx *Context) NewPromise(executor func(resolve, reject func(*Value))) *Value {
+	promise, _ := ctx.NewPromiseWithCancel(executor)
+	return promise
+}
+
+// NewPromiseWithCancel creates a Promise and returns a cancel function that
+// explicitly releases resolve/reject callback references if the Promise is
+// abandoned before settlement.
+//
+// Calling cancel does not resolve/reject the Promise itself; it only releases
+// internal callback references. If user logic never settles the Promise, its
+// JS state remains pending.
+func (ctx *Context) NewPromiseWithCancel(executor func(resolve, reject func(*Value))) (*Value, func()) {
+	if ctx == nil || ctx.ref == nil {
+		return nil, func() {}
+	}
+	if executor == nil {
+		return ctx.ThrowInternalError("promise executor is nil"), func() {}
+	}
+
 	// Create Promise using JavaScript code to avoid complex C API reference management
 	promiseSetup := ctx.Eval(`
         (() => {
@@ -1112,10 +1776,14 @@ func (ctx *Context) NewPromise(executor func(resolve, reject func(*Value))) *Val
             return { promise, resolve: _resolve, reject: _reject };
         })()
     `)
+	if promiseSetup.IsException() {
+		return promiseSetup, func() {}
+	}
 
 	defer promiseSetup.Free()
 
-	promise := promiseSetup.Get("promise")
+	var promise *Value
+	promise = promiseSetup.Get("promise")
 	resolveFunc := promiseSetup.Get("resolve")
 	rejectFunc := promiseSetup.Get("reject")
 	defer resolveFunc.Free()
@@ -1125,22 +1793,48 @@ func (ctx *Context) NewPromise(executor func(resolve, reject func(*Value))) *Val
 	settled := int32(0)
 	resolveCallback, releaseResolve := ctx.wrapPromiseCallback(resolveFunc)
 	rejectCallback, releaseReject := ctx.wrapPromiseCallback(rejectFunc)
+	var cancelled atomic.Bool
 	wrap := func(target int32, callback func(*Value), releaseOther func()) func(*Value) {
 		return func(val *Value) {
 			if atomic.CompareAndSwapInt32(&settled, 0, target) {
+				if hook := newPromiseWithCancelPostSettleCASHookForTest; hook != nil {
+					hook()
+				}
+				if cancelled.Load() {
+					return
+				}
 				callback(val)
 				releaseOther()
+				cancelled.Store(true)
 			}
 		}
 	}
 	resolve := wrap(1, resolveCallback, releaseReject)
 	reject := wrap(2, rejectCallback, releaseResolve)
+	rawCancel := func() {
+		if cancelled.Swap(true) {
+			return
+		}
+		atomic.CompareAndSwapInt32(&settled, 0, 3)
+		releaseResolve()
+		releaseReject()
+	}
+	cancel := ctx.registerPromiseSettlementCleanup(promise, rawCancel)
+	defer func() {
+		if rec := recover(); rec != nil {
+			cancel()
+			if promise != nil {
+				promise.Free()
+			}
+			panic(rec)
+		}
+	}()
 
 	// Execute user function synchronously and flush any immediate resolve/reject work
 	executor(resolve, reject)
 	ctx.ProcessJobs()
 
-	return promise
+	return promise, cancel
 }
 
 // Promise creates a new Promise with executor function

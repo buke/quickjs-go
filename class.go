@@ -15,8 +15,8 @@ import (
 // GLOBAL CONSTRUCTOR REGISTRY FOR UNIFIED MAPPING
 // =============================================================================
 
-// Global constructor to class ID mapping table for unified management
-var globalConstructorRegistry = sync.Map{} // constructor hash -> classID
+// Runtime-scoped constructor to class ID mapping table.
+var constructorRegistryByRuntime = sync.Map{} // map[uintptr]*sync.Map(constructorKey -> classID)
 
 // Helper function to create a stable key from JSValue
 // For constructor functions, we use the object pointer as a unique identifier
@@ -27,19 +27,98 @@ func jsValueToKey(jsVal C.JSValue) uint64 {
 	return uint64(uintptr(objPtr))
 }
 
-// registerConstructorClassID stores the constructor -> classID mapping
-func registerConstructorClassID(constructor C.JSValue, classID uint32) {
-	constructorKey := jsValueToKey(constructor)
-	globalConstructorRegistry.Store(constructorKey, classID)
+func constructorRegistryRuntimeKey(ctx *Context) uintptr {
+	if ctx == nil || ctx.runtime == nil || ctx.runtime.ref == nil {
+		return 0
+	}
+	return runtimeKeyFromCRef(ctx.runtime.ref)
 }
 
-// getConstructorClassID retrieves the classID for a given constructor
-func getConstructorClassID(constructor C.JSValue) (uint32, bool) {
+func constructorRegistryBucketForContext(ctx *Context, create bool) *sync.Map {
+	key := constructorRegistryRuntimeKey(ctx)
+	if key == 0 {
+		return nil
+	}
+
+	if !create {
+		raw, ok := constructorRegistryByRuntime.Load(key)
+		if !ok {
+			return nil
+		}
+		bucket, ok := raw.(*sync.Map)
+		if !ok {
+			constructorRegistryByRuntime.Delete(key)
+			return nil
+		}
+		return bucket
+	}
+
+	raw, _ := constructorRegistryByRuntime.LoadOrStore(key, &sync.Map{})
+	bucket, ok := raw.(*sync.Map)
+	if !ok {
+		constructorRegistryByRuntime.Delete(key)
+		return nil
+	}
+	return bucket
+}
+
+// registerConstructorClassID stores the constructor -> classID mapping in runtime-scoped registry.
+func registerConstructorClassID(ctx *Context, constructor C.JSValue, classID uint32) {
+	bucket := constructorRegistryBucketForContext(ctx, true)
+	if bucket == nil {
+		return
+	}
+	bucket.Store(jsValueToKey(constructor), classID)
+}
+
+// getConstructorClassID retrieves the classID for a given constructor from runtime-scoped registry.
+func getConstructorClassID(ctx *Context, constructor C.JSValue) (uint32, bool) {
+	bucket := constructorRegistryBucketForContext(ctx, false)
+	if bucket == nil {
+		return 0, false
+	}
+
 	constructorKey := jsValueToKey(constructor)
-	if classIDInterface, ok := globalConstructorRegistry.Load(constructorKey); ok {
-		return classIDInterface.(uint32), true
+	if classIDInterface, ok := bucket.Load(constructorKey); ok {
+		classID, castOK := classIDInterface.(uint32)
+		if !castOK {
+			bucket.Delete(constructorKey)
+			return 0, false
+		}
+		return classID, true
 	}
 	return 0, false
+}
+
+func storeConstructorRegistryEntryForTest(ctx *Context, constructor C.JSValue, value interface{}) {
+	bucket := constructorRegistryBucketForContext(ctx, true)
+	if bucket == nil {
+		return
+	}
+	bucket.Store(jsValueToKey(constructor), value)
+}
+
+func loadConstructorRegistryEntryForTest(ctx *Context, constructor C.JSValue) (interface{}, bool) {
+	bucket := constructorRegistryBucketForContext(ctx, false)
+	if bucket == nil {
+		return nil, false
+	}
+	return bucket.Load(jsValueToKey(constructor))
+}
+
+func deleteConstructorRegistryEntryForTest(ctx *Context, constructor C.JSValue) {
+	bucket := constructorRegistryBucketForContext(ctx, false)
+	if bucket == nil {
+		return
+	}
+	bucket.Delete(jsValueToKey(constructor))
+}
+
+func clearConstructorRegistryForRuntime(r *Runtime) {
+	if r == nil || r.ref == nil {
+		return
+	}
+	constructorRegistryByRuntime.Delete(runtimeKeyFromCRef(r.ref))
 }
 
 // =============================================================================
@@ -261,8 +340,39 @@ func (cb *ClassBuilder) Build(ctx *Context) (*Value, uint32) {
 
 // validateClassBuilder validates ClassBuilder configuration - unchanged
 func validateClassBuilder(builder *ClassBuilder) error {
+	if builder == nil {
+		return errors.New("class builder is nil")
+	}
+
 	if builder.constructor == nil {
 		return errors.New("constructor function is required")
+	}
+
+	for _, method := range builder.methods {
+		if method.Name == "" {
+			return errors.New("method name cannot be empty")
+		}
+		if method.Func == nil {
+			return fmt.Errorf("method function cannot be nil: %s", method.Name)
+		}
+	}
+
+	for _, accessor := range builder.accessors {
+		if accessor.Name == "" {
+			return errors.New("accessor name cannot be empty")
+		}
+		if accessor.Getter == nil && accessor.Setter == nil {
+			return fmt.Errorf("accessor must define getter or setter: %s", accessor.Name)
+		}
+	}
+
+	for _, property := range builder.properties {
+		if property.Name == "" {
+			return errors.New("property name cannot be empty")
+		}
+		if property.Value == nil {
+			return fmt.Errorf("property value cannot be nil: %s", property.Name)
+		}
 	}
 	return nil
 }
@@ -270,9 +380,19 @@ func validateClassBuilder(builder *ClassBuilder) error {
 // createClass implements the core class creation logic using C layer optimization
 // MODIFIED FOR SCHEME C: Now stores entire ClassBuilder and separates static/instance properties
 func createClass(ctx *Context, builder *ClassBuilder) (*Value, uint32) {
+	if ctx == nil || ctx.ref == nil || ctx.handleStore == nil {
+		return nil, 0
+	}
+
 	// Step 1: Input validation (keep in Go layer for business logic) - unchanged
 	if err := validateClassBuilder(builder); err != nil {
 		return ctx.ThrowError(err), 0
+	}
+
+	for _, property := range builder.properties {
+		if property.Value.ctx != nil && property.Value.ctx != ctx {
+			return ctx.ThrowError(fmt.Errorf("property value must belong to current context: %s", property.Name)), 0
+		}
 	}
 
 	// Step 2: Go layer manages class name and JSClassDef memory - unchanged
@@ -294,6 +414,7 @@ func createClass(ctx *Context, builder *ClassBuilder) (*Value, uint32) {
 	// Step 5: Prepare method entries for C layer - unchanged logic, same implementation
 	var cMethods []C.MethodEntry
 	var methodIDs []int32
+	var methodNames []*C.char
 
 	for _, method := range builder.methods {
 		// Store method function in handleStore
@@ -302,6 +423,7 @@ func createClass(ctx *Context, builder *ClassBuilder) (*Value, uint32) {
 
 		// Convert method name to C string
 		methodName := C.CString(method.Name)
+		methodNames = append(methodNames, methodName)
 		// Note: Don't defer free as C layer needs these strings during binding
 
 		// Determine length parameter
@@ -325,10 +447,12 @@ func createClass(ctx *Context, builder *ClassBuilder) (*Value, uint32) {
 	// Step 6: Prepare accessor entries for C layer - unchanged logic, same implementation
 	var cAccessors []C.AccessorEntry
 	var accessorIDs []int32
+	var accessorNames []*C.char
 
 	for _, accessor := range builder.accessors {
 		// Convert accessor name to C string
 		accessorName := C.CString(accessor.Name)
+		accessorNames = append(accessorNames, accessorName)
 		// Note: Don't defer free as C layer needs these strings during binding
 
 		var getterID, setterID C.int32_t = 0, 0
@@ -365,6 +489,7 @@ func createClass(ctx *Context, builder *ClassBuilder) (*Value, uint32) {
 	// SCHEME C STEP 7: Prepare property entries - ONLY STATIC PROPERTIES for CreateClass
 	// Instance properties are handled separately by constructor proxy
 	var cProperties []C.PropertyEntry
+	var propertyNames []*C.char
 
 	for _, property := range builder.properties {
 		// SCHEME C: Only include static properties for CreateClass call
@@ -372,6 +497,7 @@ func createClass(ctx *Context, builder *ClassBuilder) (*Value, uint32) {
 		if property.Static {
 			// Convert property name to C string
 			propertyName := C.CString(property.Name)
+			propertyNames = append(propertyNames, propertyName)
 			// Note: Don't defer free as C layer needs these strings during binding
 
 			// Create C property entry for static property only
@@ -415,6 +541,16 @@ func createClass(ctx *Context, builder *ClassBuilder) (*Value, uint32) {
 		C.int(len(cProperties)), // SCHEME C: Only static property count
 	)
 
+	for _, name := range methodNames {
+		C.free(unsafe.Pointer(name))
+	}
+	for _, name := range accessorNames {
+		C.free(unsafe.Pointer(name))
+	}
+	for _, name := range propertyNames {
+		C.free(unsafe.Pointer(name))
+	}
+
 	// Step 10: Error handling - clean up all stored handlers on failure - unchanged logic
 	if C.JS_IsException_Wrapper(constructor) != 0 {
 		fmt.Printf("Failed to create class '%s'\n", builder.name)
@@ -439,7 +575,7 @@ func createClass(ctx *Context, builder *ClassBuilder) (*Value, uint32) {
 
 	// SCHEME C STEP 11: Register constructor -> classID mapping for constructor proxy access
 	// This enables constructor proxy to extract classID from newTarget
-	registerConstructorClassID(constructor, uint32(classID))
+	registerConstructorClassID(ctx, constructor, uint32(classID))
 
 	// Success: className, classDef, and classID are all managed properly
 	// - className and classDef: Go GC manages lifetime (QuickJS holds references)

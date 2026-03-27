@@ -78,6 +78,18 @@ extern int GetInvalidClassID();
 // Helper functions
 extern void* IntToOpaque(int32_t id);
 extern int32_t OpaqueToInt(void* opaque);
+extern void* NewClassOpaque(JSContext *ctx, int32_t handle_id);
+extern JSContext* ClassOpaqueContext(void* opaque);
+extern int32_t ClassOpaqueHandleID(void* opaque);
+extern int ClassOpaqueIsValid(void* opaque);
+extern void FreeClassOpaque(void* opaque);
+extern int GetClassOpaqueAllocationCount(void);
+extern int GetClassOpaqueFreeCount(void);
+extern int GetClassOpaqueOutstandingCount(void);
+extern void ResetClassOpaqueCountersForTest(void);
+extern int CorruptClassOpaqueMagicForTest(JSValue val);
+extern int SetClassOpaqueHandleIDForTest(JSValue val, int32_t handle_id);
+extern int SetClassOpaqueContextNullForTest(JSValue val);
 extern int ValueGetTag(JSValueConst v);
 extern void* JS_VALUE_GET_PTR_Wrapper(JSValue val); 
 extern int JS_DeletePropertyInt64(JSContext *ctx, JSValueConst obj, int64_t idx, int flags);
@@ -172,6 +184,15 @@ extern void SetStripInfo(JSRuntime *rt, int flags);
 extern void SetInterruptHandler(JSRuntime *rt);
 extern void ClearInterruptHandler(JSRuntime *rt);
 extern void SetExecuteTimeout(JSRuntime *rt, time_t timeout);
+extern int GetTimeoutAllocationCount(void);
+extern int GetTimeoutRegistryEntryCount(void);
+extern JSRuntime* JS_NewRuntime_Go(void);
+extern void SetJSNewRuntimeFailForTest(int enabled);
+extern JSContext* JS_NewContext_Go(JSRuntime *rt);
+extern void SetJSNewContextFailForTest(JSRuntime *rt, int enabled);
+extern void RegisterRuntimeOwnerThread(JSRuntime *rt);
+extern int IsRuntimeOwnerThread(JSRuntime *rt);
+extern void UnregisterRuntimeOwnerThread(JSRuntime *rt);
 
 // =============================================================================
 // MODULE-RELATED DECLARATIONS - NEW FOR MODULE BUILDER

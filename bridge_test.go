@@ -3,7 +3,6 @@ package quickjs
 import (
 	"fmt"
 	"runtime"
-	"runtime/cgo"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -57,6 +56,8 @@ func TestBridgeGetRuntimeFromJSReturnNil(t *testing.T) {
 	// Test getRuntimeFromJS return nil in goInterruptHandler
 	t.Run("GetRuntimeFromJSReturnNil", func(t *testing.T) {
 		rt := NewRuntime()
+		ctx := rt.NewContext()
+		require.NotNil(t, ctx)
 
 		// Set interrupt handler
 		interruptCalled := false
@@ -64,8 +65,6 @@ func TestBridgeGetRuntimeFromJSReturnNil(t *testing.T) {
 			interruptCalled = true
 			return 1 // Request interrupt
 		})
-
-		ctx := rt.NewContext()
 
 		// Unregister runtime from mapping before executing long-running code
 		unregisterRuntime(rt.ref)
@@ -220,18 +219,12 @@ func TestBridgeInvalidFunctionType(t *testing.T) {
 		require.Equal(t, "test", result.ToString()) // Changed: String() → ToString()
 		result.Free()
 
-		// Get function ID from handleStore and store original handle properly
-		var fnID int32
-		var originalHandle cgo.Handle
-		ctx.handleStore.handles.Range(func(key, value interface{}) bool {
-			fnID = key.(int32)
-			originalHandle = value.(cgo.Handle)
-			return false // Stop after first item
+		fnID, _ := findHandleByPredicate(t, ctx.handleStore, func(v interface{}) bool {
+			_, ok := v.(func(*Context, *Value, []*Value) *Value)
+			return ok
 		})
-
-		// Create invalid handle with wrong type and store it
-		invalidHandle := cgo.NewHandle("not a function")
-		ctx.handleStore.handles.Store(fnID, invalidHandle)
+		restore := replaceHandleWithValueForTest(t, ctx.handleStore, fnID, "not a function")
+		defer restore()
 
 		// Call function from JavaScript - triggers goFunctionProxy with invalid function type
 		result2 := ctx.Eval(`
@@ -253,10 +246,6 @@ func TestBridgeInvalidFunctionType(t *testing.T) {
 			t.Logf("Exception result: %s", resultStr)
 			require.Contains(t, resultStr, "Invalid function type")
 		}
-
-		// Clean up invalid handle and restore original
-		invalidHandle.Delete()
-		ctx.handleStore.handles.Store(fnID, originalHandle)
 
 		t.Log("Successfully triggered goFunctionProxy type assertion failure branch")
 	})
@@ -371,22 +360,12 @@ func TestBridgeClassConstructorErrors(t *testing.T) {
 		ctx.Globals().Set("TestClass", constructor)
 
 		// SCHEME C: Find ClassBuilder (not individual constructor function) and replace with invalid type
-		var constructorID int32
-		var originalHandle cgo.Handle
-		ctx.handleStore.handles.Range(func(key, value interface{}) bool {
-			handleValue := value.(cgo.Handle).Value()
-			// SCHEME C: Look for ClassBuilder, not ClassConstructorFunc
-			if _, ok := handleValue.(*ClassBuilder); ok {
-				constructorID = key.(int32)
-				originalHandle = value.(cgo.Handle)
-				return false // Stop after finding ClassBuilder
-			}
-			return true
+		constructorID, _ := findHandleByPredicate(t, ctx.handleStore, func(v interface{}) bool {
+			_, ok := v.(*ClassBuilder)
+			return ok
 		})
-
-		// Create invalid handle with wrong type and store it
-		invalidHandle := cgo.NewHandle("not a ClassBuilder")
-		ctx.handleStore.handles.Store(constructorID, invalidHandle)
+		restore := replaceHandleWithValueForTest(t, ctx.handleStore, constructorID, "not a ClassBuilder")
+		defer restore()
 
 		// Call constructor - triggers type assertion failure
 		result := ctx.Eval(`
@@ -405,11 +384,158 @@ func TestBridgeClassConstructorErrors(t *testing.T) {
 			require.Contains(t, result.ToString(), "Invalid constructor function type") // Changed: String() → ToString()
 		}
 
-		// Clean up invalid handle and restore original
-		invalidHandle.Delete()
-		ctx.handleStore.handles.Store(constructorID, originalHandle)
-
 		t.Log("Successfully triggered goClassConstructorProxy type assertion failure branch")
+	})
+
+	t.Run("NilConstructorInBuilder", func(t *testing.T) {
+		rt := NewRuntime()
+		defer rt.Close()
+		ctx := rt.NewContext()
+		defer ctx.Close()
+
+		constructor, _ := NewClassBuilder("TestClass").
+			Constructor(func(ctx *Context, instance *Value, args []*Value) (interface{}, error) {
+				return &Point{X: 1, Y: 2}, nil
+			}).
+			Build(ctx)
+		require.False(t, constructor.IsException())
+		ctx.Globals().Set("TestClass", constructor)
+
+		constructorID, _ := findHandleByPredicate(t, ctx.handleStore, func(v interface{}) bool {
+			_, ok := v.(*ClassBuilder)
+			return ok
+		})
+
+		corrupted := &ClassBuilder{name: "CorruptedClass", constructor: nil}
+		restore := replaceHandleWithValueForTest(t, ctx.handleStore, constructorID, corrupted)
+		defer restore()
+
+		result := ctx.Eval(`
+            try {
+                new TestClass();
+            } catch(e) {
+                e.toString();
+            }
+        `)
+		if result.IsException() {
+			err := ctx.Exception()
+			require.Contains(t, err.Error(), "Constructor function is nil")
+		} else {
+			defer result.Free()
+			require.Contains(t, result.ToString(), "Constructor function is nil")
+		}
+
+	})
+
+	t.Run("ClassOpaqueAllocationFailure", func(t *testing.T) {
+		rt := NewRuntime()
+		defer rt.Close()
+		ctx := rt.NewContext()
+		defer ctx.Close()
+
+		setForceClassOpaqueAllocFailureForTest(true)
+		defer setForceClassOpaqueAllocFailureForTest(false)
+
+		constructor, _ := NewClassBuilder("OpaqueFailureClass").
+			Constructor(func(ctx *Context, instance *Value, args []*Value) (interface{}, error) {
+				return &Point{X: 1, Y: 2}, nil
+			}).
+			Build(ctx)
+		require.False(t, constructor.IsException())
+		ctx.Globals().Set("OpaqueFailureClass", constructor)
+
+		result := ctx.Eval(`
+            try {
+                new OpaqueFailureClass();
+            } catch(e) {
+                e.toString();
+            }
+        `)
+		defer result.Free()
+
+		if result.IsException() {
+			err := ctx.Exception()
+			require.Contains(t, err.Error(), "Failed to allocate class opaque payload")
+		} else {
+			require.Contains(t, result.ToString(), "Failed to allocate class opaque payload")
+		}
+	})
+
+	t.Run("InvalidInstancePropertyValue", func(t *testing.T) {
+		rt := NewRuntime()
+		defer rt.Close()
+		ctx := rt.NewContext()
+		defer ctx.Close()
+
+		constructor, _ := NewClassBuilder("MutatedPropsClass").
+			Constructor(func(ctx *Context, instance *Value, args []*Value) (interface{}, error) {
+				return &Point{X: 1, Y: 2}, nil
+			}).
+			Property("x", ctx.NewInt32(1)).
+			Build(ctx)
+		require.False(t, constructor.IsException())
+		ctx.Globals().Set("MutatedPropsClass", constructor)
+
+		constructorID, originalHandle := findHandleByPredicate(t, ctx.handleStore, func(v interface{}) bool {
+			b, ok := v.(*ClassBuilder)
+			return ok && b.name == "MutatedPropsClass"
+		})
+
+		originalBuilder, ok := originalHandle.Value().(*ClassBuilder)
+		require.True(t, ok)
+		require.GreaterOrEqual(t, len(originalBuilder.properties), 1)
+
+		mutatedNil := *originalBuilder
+		mutatedNil.properties = append([]PropertyEntry(nil), originalBuilder.properties...)
+		mutatedNil.properties[0].Value = nil
+		restoreNil := replaceHandleWithValueForTest(t, ctx.handleStore, constructorID, &mutatedNil)
+
+		resultNil := ctx.Eval(`
+            try {
+                new MutatedPropsClass();
+            } catch(e) {
+                e.toString();
+            }
+        `)
+		defer resultNil.Free()
+		if resultNil.IsException() {
+			err := ctx.Exception()
+			require.Contains(t, err.Error(), "Invalid instance property value")
+		} else {
+			require.Contains(t, resultNil.ToString(), "Invalid instance property value")
+		}
+		restoreNil()
+
+		rt2 := NewRuntime()
+		defer rt2.Close()
+		ctx2 := rt2.NewContext()
+		defer ctx2.Close()
+
+		foreignVal := ctx2.NewInt32(99)
+		defer foreignVal.Free()
+
+		mutatedForeign := *originalBuilder
+		mutatedForeign.properties = append([]PropertyEntry(nil), originalBuilder.properties...)
+		mutatedForeign.properties[0].Value = foreignVal
+		restoreForeign := replaceHandleWithValueForTest(t, ctx.handleStore, constructorID, &mutatedForeign)
+
+		resultForeign := ctx.Eval(`
+            try {
+                new MutatedPropsClass();
+            } catch(e) {
+                e.toString();
+            }
+        `)
+		defer resultForeign.Free()
+		if resultForeign.IsException() {
+			err := ctx.Exception()
+			require.Contains(t, err.Error(), "Invalid instance property value")
+		} else {
+			require.Contains(t, resultForeign.ToString(), "Invalid instance property value")
+		}
+
+		restoreForeign()
+		ctx.handleStore.handles.Store(constructorID, originalHandle)
 	})
 
 	// NEW TEST FOR SCHEME C: Test class ID resolution failure
@@ -427,11 +553,13 @@ func TestBridgeClassConstructorErrors(t *testing.T) {
 			Build(ctx)
 		require.False(t, constructor.IsException())
 
+		// Globals().Set transfers constructor ownership, capture key before transfer.
+		constructorRef := constructor.ref
+
 		ctx.Globals().Set("TestClass", constructor)
 
 		// Manually remove constructor from global registry to simulate class ID not found
-		constructorKey := jsValueToKey(constructor.ref)
-		globalConstructorRegistry.Delete(constructorKey)
+		deleteConstructorRegistryEntryForTest(ctx, constructorRef)
 
 		// Call constructor - triggers "Class ID not found for constructor" branch
 		result := ctx.Eval(`
@@ -630,44 +758,13 @@ func TestBridgeClassMethodErrors(t *testing.T) {
 		require.Equal(t, "method called", result.ToString()) // Changed: String() → ToString()
 		result.Free()
 
-		// Find method function ID by collecting all handles
-		var allHandles []struct {
-			id     int32
-			handle cgo.Handle
-		}
-		ctx.handleStore.handles.Range(func(key, value interface{}) bool {
-			allHandles = append(allHandles, struct {
-				id     int32
-				handle cgo.Handle
-			}{
-				id:     key.(int32),
-				handle: value.(cgo.Handle),
-			})
-			return true
+		methodID, _ := findHandleByPredicate(t, ctx.handleStore, func(v interface{}) bool {
+			_, ok := v.(ClassMethodFunc)
+			return ok
 		})
 
-		// Try to identify method by checking function types
-		var methodID int32
-		var originalHandle cgo.Handle
-		var found bool
-
-		for _, item := range allHandles {
-			handleValue := item.handle.Value()
-			if _, ok := handleValue.(ClassMethodFunc); ok {
-				methodID = item.id
-				originalHandle = item.handle
-				found = true
-				break
-			}
-		}
-
-		if !found {
-			t.Skip("Could not identify method handle ID")
-		}
-
-		// Create invalid handle with wrong type and store it
-		invalidHandle := cgo.NewHandle("not a method function")
-		ctx.handleStore.handles.Store(methodID, invalidHandle)
+		restore := replaceHandleWithValueForTest(t, ctx.handleStore, methodID, "not a method function")
+		defer restore()
 
 		// Call method on existing instance - triggers type assertion failure
 		result2 := ctx.Eval(`
@@ -685,10 +782,6 @@ func TestBridgeClassMethodErrors(t *testing.T) {
 			defer result2.Free()
 			require.Contains(t, result2.ToString(), "Invalid method function type") // Changed: String() → ToString()
 		}
-
-		// Clean up invalid handle and restore original
-		invalidHandle.Delete()
-		ctx.handleStore.handles.Store(methodID, originalHandle)
 
 		t.Log("Successfully triggered goClassMethodProxy type assertion failure branch")
 	})
@@ -833,44 +926,13 @@ func TestBridgeClassGetterErrors(t *testing.T) {
 		require.Equal(t, "getter called", result.ToString()) // Changed: String() → ToString()
 		result.Free()
 
-		// Find getter function ID by collecting all handles
-		var allHandles []struct {
-			id     int32
-			handle cgo.Handle
-		}
-		ctx.handleStore.handles.Range(func(key, value interface{}) bool {
-			allHandles = append(allHandles, struct {
-				id     int32
-				handle cgo.Handle
-			}{
-				id:     key.(int32),
-				handle: value.(cgo.Handle),
-			})
-			return true
+		getterID, _ := findHandleByPredicate(t, ctx.handleStore, func(v interface{}) bool {
+			_, ok := v.(ClassGetterFunc)
+			return ok
 		})
 
-		// Try to identify getter by checking function types
-		var getterID int32
-		var originalHandle cgo.Handle
-		var found bool
-
-		for _, item := range allHandles {
-			handleValue := item.handle.Value()
-			if _, ok := handleValue.(ClassGetterFunc); ok {
-				getterID = item.id
-				originalHandle = item.handle
-				found = true
-				break
-			}
-		}
-
-		if !found {
-			t.Skip("Could not identify getter handle ID")
-		}
-
-		// Create invalid handle with wrong type and store it
-		invalidHandle := cgo.NewHandle("not a getter function")
-		ctx.handleStore.handles.Store(getterID, invalidHandle)
+		restore := replaceHandleWithValueForTest(t, ctx.handleStore, getterID, "not a getter function")
+		defer restore()
 
 		// Access getter on existing instance - triggers type assertion failure
 		result2 := ctx.Eval(`
@@ -888,10 +950,6 @@ func TestBridgeClassGetterErrors(t *testing.T) {
 			defer result2.Free()
 			require.Contains(t, result2.ToString(), "Invalid getter function type") // Changed: String() → ToString()
 		}
-
-		// Clean up invalid handle and restore original
-		invalidHandle.Delete()
-		ctx.handleStore.handles.Store(getterID, originalHandle)
 
 		t.Log("Successfully triggered goClassGetterProxy type assertion failure branch")
 	})
@@ -1039,44 +1097,13 @@ func TestBridgeClassSetterErrors(t *testing.T) {
 		require.Equal(t, "setter works", result.ToString()) // Changed: String() → ToString()
 		result.Free()
 
-		// Find setter function ID by collecting all handles
-		var allHandles []struct {
-			id     int32
-			handle cgo.Handle
-		}
-		ctx.handleStore.handles.Range(func(key, value interface{}) bool {
-			allHandles = append(allHandles, struct {
-				id     int32
-				handle cgo.Handle
-			}{
-				id:     key.(int32),
-				handle: value.(cgo.Handle),
-			})
-			return true
+		setterID, _ := findHandleByPredicate(t, ctx.handleStore, func(v interface{}) bool {
+			_, ok := v.(ClassSetterFunc)
+			return ok
 		})
 
-		// Try to identify setter by checking function types
-		var setterID int32
-		var originalHandle cgo.Handle
-		var found bool
-
-		for _, item := range allHandles {
-			handleValue := item.handle.Value()
-			if _, ok := handleValue.(ClassSetterFunc); ok {
-				setterID = item.id
-				originalHandle = item.handle
-				found = true
-				break
-			}
-		}
-
-		if !found {
-			t.Skip("Could not identify setter handle ID")
-		}
-
-		// Create invalid handle with wrong type and store it
-		invalidHandle := cgo.NewHandle("not a setter function")
-		ctx.handleStore.handles.Store(setterID, invalidHandle)
+		restore := replaceHandleWithValueForTest(t, ctx.handleStore, setterID, "not a setter function")
+		defer restore()
 
 		// Call setter on existing instance - triggers type assertion failure
 		result2 := ctx.Eval(`
@@ -1094,10 +1121,6 @@ func TestBridgeClassSetterErrors(t *testing.T) {
 			defer result2.Free()
 			require.Contains(t, result2.ToString(), "Invalid setter function type") // Changed: String() → ToString()
 		}
-
-		// Clean up invalid handle and restore original
-		invalidHandle.Delete()
-		ctx.handleStore.handles.Store(setterID, originalHandle)
 
 		t.Log("Successfully triggered goClassSetterProxy type assertion failure branch")
 	})
@@ -1236,19 +1259,19 @@ func TestBridgeCreateClassInstanceFailures(t *testing.T) {
 			}).
 			Build(ctx)
 		require.False(t, constructor.IsException())
+		constructorRef := constructor.ref
 
 		ctx.Globals().Set("TestClass", constructor)
 
 		// Replace with invalid class ID to trigger JS_NewObjectProtoClass failure
-		constructorKey := jsValueToKey(constructor.ref)
-		globalConstructorRegistry.Store(constructorKey, uint32(999999))
+		storeConstructorRegistryEntryForTest(ctx, constructorRef, uint32(999999))
 
 		// This should trigger CreateClassInstance to return JS_EXCEPTION
 		result := ctx.Eval(`new TestClass()`)
 		defer result.Free()
 
 		// Restore for cleanup
-		globalConstructorRegistry.Store(constructorKey, originalClassID)
+		storeConstructorRegistryEntryForTest(ctx, constructorRef, originalClassID)
 
 		// Should get an error
 		if result.IsException() {
@@ -1257,5 +1280,68 @@ func TestBridgeCreateClassInstanceFailures(t *testing.T) {
 		}
 
 		t.Log("Successfully triggered CreateClassInstance JS_EXCEPTION branch")
+	})
+}
+
+func TestBridgeNilReturnSafety(t *testing.T) {
+	t.Run("FunctionProxyNilReturn", func(t *testing.T) {
+		rt := NewRuntime()
+		defer rt.Close()
+		ctx := rt.NewContext()
+		defer ctx.Close()
+
+		fn := ctx.NewFunction(func(ctx *Context, this *Value, args []*Value) *Value {
+			return nil
+		})
+		require.NotNil(t, fn)
+		ctx.Globals().Set("nilFn", fn)
+
+		result := ctx.Eval(`typeof nilFn()`)
+		defer result.Free()
+		require.False(t, result.IsException())
+		require.Equal(t, "undefined", result.ToString())
+	})
+
+	t.Run("ClassMethodGetterSetterNilReturn", func(t *testing.T) {
+		rt := NewRuntime()
+		defer rt.Close()
+		ctx := rt.NewContext()
+		defer ctx.Close()
+
+		constructor, _ := NewClassBuilder("NilReturnClass").
+			Constructor(func(ctx *Context, instance *Value, args []*Value) (interface{}, error) {
+				return &Point{X: 1, Y: 2}, nil
+			}).
+			Method("nilMethod", func(ctx *Context, this *Value, args []*Value) *Value {
+				return nil
+			}).
+			Accessor("nilProp",
+				func(ctx *Context, this *Value) *Value { return nil },
+				func(ctx *Context, this *Value, value *Value) *Value { return nil },
+			).
+			Build(ctx)
+		require.False(t, constructor.IsException())
+
+		ctx.Globals().Set("NilReturnClass", constructor)
+
+		result := ctx.Eval(`
+			const obj = new NilReturnClass();
+			obj.nilProp = 123;
+			[typeof obj.nilMethod(), typeof obj.nilProp, obj.nilProp = 456];
+		`)
+		defer result.Free()
+		require.False(t, result.IsException())
+
+		type0 := result.GetIdx(0)
+		defer type0.Free()
+		require.Equal(t, "undefined", type0.ToString())
+
+		type1 := result.GetIdx(1)
+		defer type1.Free()
+		require.Equal(t, "undefined", type1.ToString())
+
+		assigned := result.GetIdx(2)
+		defer assigned.Free()
+		require.Equal(t, int32(456), assigned.ToInt32())
 	})
 }

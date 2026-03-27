@@ -3,8 +3,10 @@ package quickjs
 import (
 	"errors"
 	"fmt"
+	"math/rand"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -12,38 +14,44 @@ import (
 )
 
 func TestContextBasics(t *testing.T) {
-	rt := NewRuntime()
-	defer rt.Close()
-	ctx := rt.NewContext()
-	defer ctx.Close()
+	newCtx := func(t *testing.T, opts ...Option) *Context {
+		rt := NewRuntime(opts...)
+		ctx := rt.NewContext()
+		t.Cleanup(func() {
+			ctx.Close()
+			rt.Close()
+		})
+		return ctx
+	}
 
-	// Test Runtime() method
+	ctx := newCtx(t)
 	require.NotNil(t, ctx.Runtime())
 
 	// Test basic value creation
 	t.Run("ValueCreation", func(t *testing.T) {
 		values := []struct {
 			name      string
-			createVal func() *Value     // Changed to return pointer
-			checkFunc func(*Value) bool // Changed parameter to pointer
+			createVal func(*Context) *Value
+			checkFunc func(*Value) bool
 		}{
-			{"Null", func() *Value { return ctx.NewNull() }, func(v *Value) bool { return v.IsNull() }},
-			{"Undefined", func() *Value { return ctx.NewUndefined() }, func(v *Value) bool { return v.IsUndefined() }},
-			{"Uninitialized", func() *Value { return ctx.NewUninitialized() }, func(v *Value) bool { return v.IsUninitialized() }},
-			{"Bool", func() *Value { return ctx.NewBool(true) }, func(v *Value) bool { return v.IsBool() }},
-			{"Int32", func() *Value { return ctx.NewInt32(-42) }, func(v *Value) bool { return v.IsNumber() }},
-			{"Int64", func() *Value { return ctx.NewInt64(1234567890) }, func(v *Value) bool { return v.IsNumber() }},
-			{"Uint32", func() *Value { return ctx.NewUint32(42) }, func(v *Value) bool { return v.IsNumber() }},
-			{"BigInt64", func() *Value { return ctx.NewBigInt64(9223372036854775807) }, func(v *Value) bool { return v.IsBigInt() }},
-			{"BigUint64", func() *Value { return ctx.NewBigUint64(18446744073709551615) }, func(v *Value) bool { return v.IsBigInt() }},
-			{"Float64", func() *Value { return ctx.NewFloat64(3.14159) }, func(v *Value) bool { return v.IsNumber() }},
-			{"String", func() *Value { return ctx.NewString("test") }, func(v *Value) bool { return v.IsString() }},
-			{"Object", func() *Value { return ctx.NewObject() }, func(v *Value) bool { return v.IsObject() }},
+			{"Null", func(ctx *Context) *Value { return ctx.NewNull() }, func(v *Value) bool { return v.IsNull() }},
+			{"Undefined", func(ctx *Context) *Value { return ctx.NewUndefined() }, func(v *Value) bool { return v.IsUndefined() }},
+			{"Uninitialized", func(ctx *Context) *Value { return ctx.NewUninitialized() }, func(v *Value) bool { return v.IsUninitialized() }},
+			{"Bool", func(ctx *Context) *Value { return ctx.NewBool(true) }, func(v *Value) bool { return v.IsBool() }},
+			{"Int32", func(ctx *Context) *Value { return ctx.NewInt32(-42) }, func(v *Value) bool { return v.IsNumber() }},
+			{"Int64", func(ctx *Context) *Value { return ctx.NewInt64(1234567890) }, func(v *Value) bool { return v.IsNumber() }},
+			{"Uint32", func(ctx *Context) *Value { return ctx.NewUint32(42) }, func(v *Value) bool { return v.IsNumber() }},
+			{"BigInt64", func(ctx *Context) *Value { return ctx.NewBigInt64(9223372036854775807) }, func(v *Value) bool { return v.IsBigInt() }},
+			{"BigUint64", func(ctx *Context) *Value { return ctx.NewBigUint64(18446744073709551615) }, func(v *Value) bool { return v.IsBigInt() }},
+			{"Float64", func(ctx *Context) *Value { return ctx.NewFloat64(3.14159) }, func(v *Value) bool { return v.IsNumber() }},
+			{"String", func(ctx *Context) *Value { return ctx.NewString("test") }, func(v *Value) bool { return v.IsString() }},
+			{"Object", func(ctx *Context) *Value { return ctx.NewObject() }, func(v *Value) bool { return v.IsObject() }},
 		}
 
 		for _, tc := range values {
 			t.Run(tc.name, func(t *testing.T) {
-				val := tc.createVal()
+				ctx := newCtx(t)
+				val := tc.createVal(ctx)
 				defer val.Free()
 				require.True(t, tc.checkFunc(val))
 			})
@@ -60,6 +68,7 @@ func TestContextBasics(t *testing.T) {
 
 		for i, data := range testCases {
 			t.Run(fmt.Sprintf("Case%d", i), func(t *testing.T) {
+				ctx := newCtx(t)
 				ab := ctx.NewArrayBuffer(data)
 				defer ab.Free()
 				require.True(t, ab.IsByteArray())
@@ -71,12 +80,18 @@ func TestContextBasics(t *testing.T) {
 }
 
 func TestContextEvaluation(t *testing.T) {
-	rt := NewRuntime()
-	defer rt.Close()
-	ctx := rt.NewContext()
-	defer ctx.Close()
+	newCtx := func(t *testing.T) *Context {
+		rt := NewRuntime()
+		ctx := rt.NewContext()
+		t.Cleanup(func() {
+			ctx.Close()
+			rt.Close()
+		})
+		return ctx
+	}
 
 	t.Run("BasicEvaluation", func(t *testing.T) {
+		ctx := newCtx(t)
 		// Simple expression
 		result := ctx.Eval(`1 + 2`)
 		defer result.Free()
@@ -104,6 +119,7 @@ func TestContextEvaluation(t *testing.T) {
 
 		for _, tt := range optionTests {
 			t.Run(tt.name, func(t *testing.T) {
+				ctx := newCtx(t)
 				result := ctx.Eval(tt.code, tt.options...)
 				defer result.Free()
 				require.False(t, result.IsException())
@@ -112,6 +128,7 @@ func TestContextEvaluation(t *testing.T) {
 	})
 
 	t.Run("EvaluationErrors", func(t *testing.T) {
+		ctx := newCtx(t)
 		result := ctx.Eval(`invalid syntax {`)
 		defer result.Free()
 		require.True(t, result.IsException())
@@ -122,12 +139,18 @@ func TestContextEvaluation(t *testing.T) {
 }
 
 func TestContextBytecodeOperations(t *testing.T) {
-	rt := NewRuntime()
-	defer rt.Close()
-	ctx := rt.NewContext()
-	defer ctx.Close()
+	newCtx := func(t *testing.T) *Context {
+		rt := NewRuntime()
+		ctx := rt.NewContext()
+		t.Cleanup(func() {
+			ctx.Close()
+			rt.Close()
+		})
+		return ctx
+	}
 
 	t.Run("BasicCompilation", func(t *testing.T) {
+		ctx := newCtx(t)
 		code := `function add(a, b) { return a + b; } add(2, 3);`
 		bytecode, err := ctx.Compile(code)
 		require.NoError(t, err)
@@ -141,6 +164,7 @@ func TestContextBytecodeOperations(t *testing.T) {
 	})
 
 	t.Run("FileOperations", func(t *testing.T) {
+		ctx := newCtx(t)
 		testFile := "./test_temp.js"
 		testContent := `function multiply(a, b) { return a * b; } multiply(3, 4);`
 		err := os.WriteFile(testFile, []byte(testContent), 0644)
@@ -164,30 +188,31 @@ func TestContextBytecodeOperations(t *testing.T) {
 	})
 
 	t.Run("ErrorCases", func(t *testing.T) {
+		ctx := newCtx(t)
 		errorTests := []struct {
 			name string
-			test func() bool // Changed to return bool indicating if exception occurred
+			test func(*Context) bool
 		}{
-			{"EmptyBytecode", func() bool {
+			{"EmptyBytecode", func(ctx *Context) bool {
 				result := ctx.EvalBytecode([]byte{})
 				defer result.Free()
 				return result.IsException()
 			}},
-			{"InvalidBytecode", func() bool {
+			{"InvalidBytecode", func(ctx *Context) bool {
 				result := ctx.EvalBytecode([]byte{0x01, 0x02, 0x03})
 				defer result.Free()
 				return result.IsException()
 			}},
-			{"NonexistentFile", func() bool {
+			{"NonexistentFile", func(ctx *Context) bool {
 				result := ctx.EvalFile("./nonexistent.js")
 				defer result.Free()
 				return result.IsException()
 			}},
-			{"CompileNonexistentFile", func() bool {
+			{"CompileNonexistentFile", func(ctx *Context) bool {
 				_, err := ctx.CompileFile("./nonexistent.js")
 				return err != nil
 			}},
-			{"CompilationError", func() bool {
+			{"CompilationError", func(ctx *Context) bool {
 				_, err := ctx.Compile(`invalid syntax {`)
 				return err != nil
 			}},
@@ -195,7 +220,8 @@ func TestContextBytecodeOperations(t *testing.T) {
 
 		for _, tt := range errorTests {
 			t.Run(tt.name, func(t *testing.T) {
-				require.True(t, tt.test())
+				ctx := newCtx(t)
+				require.True(t, tt.test(ctx))
 			})
 		}
 
@@ -214,6 +240,7 @@ func TestContextBytecodeOperations(t *testing.T) {
 	})
 
 	t.Run("CompilationVariants", func(t *testing.T) {
+		ctx := newCtx(t)
 		// Test empty code compilation
 		bytecode, err := ctx.Compile(``)
 		require.NoError(t, err)
@@ -237,14 +264,20 @@ func TestContextBytecodeOperations(t *testing.T) {
 }
 
 func TestContextModules(t *testing.T) {
-	rt := NewRuntime(WithModuleImport(true))
-	defer rt.Close()
-	ctx := rt.NewContext()
-	defer ctx.Close()
+	newCtx := func(t *testing.T) *Context {
+		rt := NewRuntime(WithModuleImport(true))
+		ctx := rt.NewContext()
+		t.Cleanup(func() {
+			ctx.Close()
+			rt.Close()
+		})
+		return ctx
+	}
 
 	moduleCode := `export function add(a, b) { return a + b; }`
 
 	t.Run("ModuleLoading", func(t *testing.T) {
+		ctx := newCtx(t)
 		// Basic module loading
 		result := ctx.LoadModule(moduleCode, "math_module")
 		defer result.Free()
@@ -257,6 +290,7 @@ func TestContextModules(t *testing.T) {
 	})
 
 	t.Run("ModuleBytecode", func(t *testing.T) {
+		ctx := newCtx(t)
 		bytecode, err := ctx.Compile(moduleCode, EvalFlagModule(true), EvalFlagCompileOnly(true))
 		require.NoError(t, err)
 
@@ -272,6 +306,7 @@ func TestContextModules(t *testing.T) {
 	})
 
 	t.Run("ModuleFiles", func(t *testing.T) {
+		ctx := newCtx(t)
 		moduleFile := "./test_module.js"
 		moduleContent := `export const value = 42;`
 		err := os.WriteFile(moduleFile, []byte(moduleContent), 0644)
@@ -296,19 +331,19 @@ func TestContextModules(t *testing.T) {
 	t.Run("ModuleErrors", func(t *testing.T) {
 		errorTests := []struct {
 			name string
-			test func() bool // Changed to return bool indicating if exception occurred
+			test func(*Context) bool
 		}{
-			{"NotModule", func() bool {
+			{"NotModule", func(ctx *Context) bool {
 				result := ctx.LoadModule(`var x = 1; x;`, "not_module")
 				defer result.Free()
 				return result.IsException()
 			}},
-			{"InvalidModule", func() bool {
+			{"InvalidModule", func(ctx *Context) bool {
 				result := ctx.LoadModule(`export { unclosed_brace`, "invalid_module")
 				defer result.Free()
 				return result.IsException()
 			}},
-			{"ModuleCompileError", func() bool {
+			{"ModuleCompileError", func(ctx *Context) bool {
 				// Use a dedicated runtime with a lowered memory limit to force Compile() error path.
 				rt2 := NewRuntime(WithModuleImport(true))
 				defer rt2.Close()
@@ -321,27 +356,27 @@ func TestContextModules(t *testing.T) {
 				defer result.Free()
 				return result.IsException()
 			}},
-			{"EmptyBytecode", func() bool {
+			{"EmptyBytecode", func(ctx *Context) bool {
 				result := ctx.LoadModuleBytecode([]byte{})
 				defer result.Free()
 				return result.IsException()
 			}},
-			{"InvalidBytecode", func() bool {
+			{"InvalidBytecode", func(ctx *Context) bool {
 				result := ctx.LoadModuleBytecode([]byte{0x01, 0x02, 0x03})
 				defer result.Free()
 				return result.IsException()
 			}},
-			{"MissingFile", func() bool {
+			{"MissingFile", func(ctx *Context) bool {
 				result := ctx.LoadModuleFile("./nonexistent_file.js", "missing")
 				defer result.Free()
 				return result.IsException()
 			}},
-			{"ModuleThrowsError", func() bool {
+			{"ModuleThrowsError", func(ctx *Context) bool {
 				result := ctx.LoadModule(`export default 123; throw new Error('aah')`, "mod")
 				defer result.Free()
 				return result.IsException()
 			}},
-			{"ModuleUndefinedVariable", func() bool {
+			{"ModuleUndefinedVariable", func(ctx *Context) bool {
 				result := ctx.LoadModule(`export default 123; blah`, "mod")
 				defer result.Free()
 				return result.IsException()
@@ -350,7 +385,8 @@ func TestContextModules(t *testing.T) {
 
 		for _, tt := range errorTests {
 			t.Run(tt.name, func(t *testing.T) {
-				require.True(t, tt.test())
+				ctx := newCtx(t)
+				require.True(t, tt.test(ctx))
 			})
 		}
 	})
@@ -358,12 +394,20 @@ func TestContextModules(t *testing.T) {
 }
 
 func TestContextFunctions(t *testing.T) {
-	rt := NewRuntime()
-	defer rt.Close()
-	ctx := rt.NewContext()
-	defer ctx.Close()
+	newCtx := func(t *testing.T) *Context {
+		rt := NewRuntime()
+		ctx := rt.NewContext()
+		t.Cleanup(func() {
+			ctx.Close()
+			rt.Close()
+		})
+		return ctx
+	}
 
 	t.Run("RegularFunctions", func(t *testing.T) {
+		ctx := newCtx(t)
+		baseHandles := ctx.handleStore.Count()
+
 		fn := ctx.NewFunction(func(ctx *Context, this *Value, args []*Value) *Value {
 			if len(args) == 0 {
 				return ctx.NewString("no args")
@@ -371,6 +415,7 @@ func TestContextFunctions(t *testing.T) {
 			return ctx.NewString("Hello " + args[0].ToString())
 		})
 		defer fn.Free()
+		require.Equal(t, baseHandles+1, ctx.handleStore.Count())
 
 		// Test function execution
 		result := fn.Execute(ctx.NewNull())
@@ -391,8 +436,31 @@ func TestContextFunctions(t *testing.T) {
 		require.EqualValues(t, "Hello Test", result4.ToString())
 	})
 
+	t.Run("ReleaseFunction", func(t *testing.T) {
+		ctx := newCtx(t)
+		baseHandles := ctx.handleStore.Count()
+
+		fn := ctx.NewFunction(func(ctx *Context, this *Value, args []*Value) *Value {
+			return ctx.NewString("released")
+		})
+		defer fn.Free()
+
+		require.Equal(t, baseHandles+1, ctx.handleStore.Count())
+		require.True(t, ctx.ReleaseFunction(fn))
+		require.Equal(t, baseHandles, ctx.handleStore.Count())
+
+		// Releasing again should be no-op.
+		require.False(t, ctx.ReleaseFunction(fn))
+
+		result := fn.Execute(ctx.NewNull())
+		defer result.Free()
+		require.True(t, result.IsException())
+		require.Contains(t, ctx.Exception().Error(), "Function not found")
+	})
+
 	// Updated: Use Function + Promise instead of AsyncFunction
 	t.Run("AsyncFunctions", func(t *testing.T) {
+		ctx := newCtx(t)
 		// New approach using Function + Promise
 		asyncFn := ctx.NewFunction(func(ctx *Context, this *Value, args []*Value) *Value {
 			return ctx.NewPromise(func(resolve, reject func(*Value)) {
@@ -408,6 +476,1644 @@ func TestContextFunctions(t *testing.T) {
 	})
 }
 
+func TestNewAsyncFunctionTemporaryCallbacksAutoRelease(t *testing.T) {
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	featureCheck := ctx.Eval(`typeof FinalizationRegistry !== "undefined"`)
+	require.False(t, featureCheck.IsException())
+	if !featureCheck.Bool() {
+		featureCheck.Free()
+		t.Skip("FinalizationRegistry is not available")
+	}
+	featureCheck.Free()
+
+	baseHandles := ctx.handleStore.Count()
+
+	asyncFn := ctx.NewAsyncFunction(func(ctx *Context, this *Value, promise *Value, args []*Value) *Value {
+		resolve := promise.Get("resolve")
+		defer resolve.Free()
+
+		payload := ctx.NewString("auto-release-ok")
+		defer payload.Free()
+
+		ret := resolve.Execute(ctx.NewUndefined(), payload)
+		defer ret.Free()
+		return ctx.NewUndefined()
+	})
+	defer asyncFn.Free()
+
+	promise := asyncFn.Execute(ctx.NewUndefined())
+	defer promise.Free()
+	require.True(t, promise.IsPromise())
+
+	result := ctx.Await(promise)
+	defer result.Free()
+	require.False(t, result.IsException())
+	require.Equal(t, "auto-release-ok", result.ToString())
+
+	// asyncFn + registry cleanup callback can stay alive; resolve/reject temp callbacks should be reclaimed.
+	stableUpperBound := baseHandles + 2
+	for i := 0; i < 50 && ctx.handleStore.Count() > stableUpperBound; i++ {
+		junk := ctx.Eval(`(() => { let x = []; for (let i = 0; i < 2000; i++) x.push({i}); return x.length; })()`)
+		if junk != nil {
+			junk.Free()
+		}
+		rt.RunGC()
+		ctx.Loop()
+	}
+
+	require.LessOrEqual(t, ctx.handleStore.Count(), stableUpperBound)
+}
+
+func TestNewPromiseTemporaryCallbacksAutoRelease(t *testing.T) {
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	featureCheck := ctx.Eval(`typeof FinalizationRegistry !== "undefined"`)
+	require.False(t, featureCheck.IsException())
+	if !featureCheck.Bool() {
+		featureCheck.Free()
+		t.Skip("FinalizationRegistry is not available")
+	}
+	featureCheck.Free()
+
+	baseHandles := ctx.handleStore.Count()
+
+	promise := ctx.NewPromise(func(resolve, reject func(*Value)) {
+		resolve(ctx.NewString("promise-auto-release-ok"))
+	})
+	defer promise.Free()
+
+	result := ctx.Await(promise)
+	defer result.Free()
+	require.False(t, result.IsException())
+	require.Equal(t, "promise-auto-release-ok", result.ToString())
+
+	// FinalizationRegistry cleanup callback may stay alive; temp cleanup function should not keep accumulating.
+	stableUpperBound := baseHandles + 1
+	for i := 0; i < 50 && ctx.handleStore.Count() > stableUpperBound; i++ {
+		junk := ctx.Eval(`(() => { let x = []; for (let i = 0; i < 2000; i++) x.push({i}); return x.length; })()`)
+		if junk != nil {
+			junk.Free()
+		}
+		rt.RunGC()
+		ctx.Loop()
+	}
+
+	require.LessOrEqual(t, ctx.handleStore.Count(), stableUpperBound)
+}
+
+func TestNewPromiseTemporaryCallbacksAutoReleaseWithoutFinalizationRegistry(t *testing.T) {
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	disableFR := ctx.Eval(`delete globalThis.FinalizationRegistry; typeof FinalizationRegistry`)
+	require.False(t, disableFR.IsException())
+	require.Equal(t, "undefined", disableFR.ToString())
+	disableFR.Free()
+
+	baseHandles := ctx.handleStore.Count()
+
+	for i := 0; i < 200; i++ {
+		promise := ctx.NewPromise(func(resolve, reject func(*Value)) {
+			resolve(ctx.NewInt32(int32(i)))
+		})
+		result := ctx.Await(promise)
+		require.False(t, result.IsException())
+		result.Free()
+		promise.Free()
+	}
+
+	// Without FinalizationRegistry, cleanup callback should still self-release after settlement.
+	require.LessOrEqual(t, ctx.handleStore.Count(), baseHandles)
+}
+
+func TestEnsureAutoReleaseFinalizerRegistryIdempotentInit(t *testing.T) {
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	featureCheck := ctx.Eval(`typeof FinalizationRegistry !== "undefined"`)
+	require.False(t, featureCheck.IsException())
+	if !featureCheck.Bool() {
+		featureCheck.Free()
+		t.Skip("FinalizationRegistry is not available")
+	}
+	featureCheck.Free()
+
+	baseHandles := ctx.handleStore.Count()
+	registry1 := ctx.ensureAutoReleaseFinalizerRegistry()
+	registry2 := ctx.ensureAutoReleaseFinalizerRegistry()
+	registry3 := ctx.ensureAutoReleaseFinalizerRegistry()
+
+	require.NotNil(t, registry1)
+	require.NotNil(t, registry2)
+	require.NotNil(t, registry3)
+	require.Equal(t, registry1.ref, registry2.ref)
+	require.Equal(t, registry2.ref, registry3.ref)
+	// Only the finalizer cleanup callback should remain registered in handleStore.
+	require.LessOrEqual(t, ctx.handleStore.Count(), baseHandles+1)
+}
+
+func TestEnsureAutoReleaseFinalizerRegistryRetryAfterInitialFailure(t *testing.T) {
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	backup := ctx.Eval(`
+        (() => {
+            globalThis.__fr_backup_for_retry_test = globalThis.FinalizationRegistry;
+            delete globalThis.FinalizationRegistry;
+            return typeof FinalizationRegistry;
+        })()
+    `)
+	require.False(t, backup.IsException())
+	require.Equal(t, "undefined", backup.ToString())
+	backup.Free()
+
+	registry1 := ctx.ensureAutoReleaseFinalizerRegistry()
+	require.Nil(t, registry1)
+
+	restore := ctx.Eval(`
+        (() => {
+            globalThis.FinalizationRegistry = globalThis.__fr_backup_for_retry_test;
+            delete globalThis.__fr_backup_for_retry_test;
+            return typeof FinalizationRegistry;
+        })()
+    `)
+	require.False(t, restore.IsException())
+	require.Equal(t, "function", restore.ToString())
+	restore.Free()
+
+	registry2 := ctx.ensureAutoReleaseFinalizerRegistry()
+	require.NotNil(t, registry2)
+	registry3 := ctx.ensureAutoReleaseFinalizerRegistry()
+	require.NotNil(t, registry3)
+	require.Equal(t, registry2.ref, registry3.ref)
+}
+
+func TestPromiseSettlementCleanupHandleCountStableAcrossBranches(t *testing.T) {
+	t.Run("CancelBranch", func(t *testing.T) {
+		rt := NewRuntime()
+		defer rt.Close()
+		ctx := rt.NewContext()
+		defer ctx.Close()
+
+		baseHandles := ctx.handleStore.Count()
+		baseRefs := ctx.currentPromiseCallbackRefCount()
+
+		promise, cancel := ctx.NewPromiseWithCancel(func(resolve, reject func(*Value)) {
+			// keep pending
+		})
+		require.NotNil(t, promise)
+		require.Equal(t, baseRefs+2, ctx.currentPromiseCallbackRefCount())
+
+		cancel()
+		promise.Free()
+
+		require.Equal(t, baseRefs, ctx.currentPromiseCallbackRefCount())
+		require.LessOrEqual(t, ctx.handleStore.Count(), baseHandles+1)
+	})
+
+	t.Run("FinallyBranch", func(t *testing.T) {
+		rt := NewRuntime()
+		defer rt.Close()
+		ctx := rt.NewContext()
+		defer ctx.Close()
+
+		baseHandles := ctx.handleStore.Count()
+		baseRefs := ctx.currentPromiseCallbackRefCount()
+
+		promise, cancel := ctx.NewPromiseWithCancel(func(resolve, reject func(*Value)) {
+			v := ctx.NewString("ok")
+			defer v.Free()
+			resolve(v)
+		})
+		require.NotNil(t, promise)
+
+		result := ctx.Await(promise)
+		require.NotNil(t, result)
+		require.False(t, result.IsException())
+		result.Free()
+
+		cancel()
+		promise.Free()
+
+		require.Equal(t, baseRefs, ctx.currentPromiseCallbackRefCount())
+		require.LessOrEqual(t, ctx.handleStore.Count(), baseHandles+1)
+	})
+
+	t.Run("FinallyExceptionBranch", func(t *testing.T) {
+		rt := NewRuntime()
+		defer rt.Close()
+		ctx := rt.NewContext()
+		defer ctx.Close()
+
+		patch := ctx.Eval(`
+            (() => {
+                if (!Promise.prototype.__origFinallyForCleanupTest) {
+                    Promise.prototype.__origFinallyForCleanupTest = Promise.prototype.finally;
+                }
+                Promise.prototype.finally = function() {
+                    throw new Error("finally patched failure");
+                };
+                return true;
+            })()
+        `)
+		require.False(t, patch.IsException())
+		patch.Free()
+		defer func() {
+			restore := ctx.Eval(`
+                (() => {
+                    if (Promise.prototype.__origFinallyForCleanupTest) {
+                        Promise.prototype.finally = Promise.prototype.__origFinallyForCleanupTest;
+                        delete Promise.prototype.__origFinallyForCleanupTest;
+                    }
+                    return true;
+                })()
+            `)
+			if restore != nil {
+				restore.Free()
+			}
+		}()
+
+		baseHandles := ctx.handleStore.Count()
+		baseRefs := ctx.currentPromiseCallbackRefCount()
+
+		promise, cancel := ctx.NewPromiseWithCancel(func(resolve, reject func(*Value)) {
+			// keep pending
+		})
+		require.NotNil(t, promise)
+		cancel()
+		promise.Free()
+
+		require.Equal(t, baseRefs, ctx.currentPromiseCallbackRefCount())
+		require.LessOrEqual(t, ctx.handleStore.Count(), baseHandles+1)
+	})
+}
+
+func TestNewPromiseWithCancelLongRandomizedNoHandleStoreGrowth(t *testing.T) {
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	baseHandles := ctx.handleStore.Count()
+	baseRefs := ctx.currentPromiseCallbackRefCount()
+	rng := rand.New(rand.NewSource(20260326))
+
+	maxHandles := baseHandles
+	for i := 0; i < 800; i++ {
+		var resolveLater func(*Value)
+		var rejectLater func(*Value)
+		promise, cancel := ctx.NewPromiseWithCancel(func(resolve, reject func(*Value)) {
+			resolveLater = resolve
+			rejectLater = reject
+		})
+		require.NotNil(t, promise)
+
+		switch rng.Intn(6) {
+		case 0:
+			cancel()
+		case 1:
+			v := ctx.NewInt32(int32(i))
+			resolveLater(v)
+			v.Free()
+		case 2:
+			errVal := ctx.NewError(errors.New("random-reject"))
+			rejectLater(errVal)
+			errVal.Free()
+		case 3:
+			cancel()
+			v := ctx.NewString("late-resolve")
+			resolveLater(v)
+			v.Free()
+		case 4:
+			v := ctx.NewString("resolve-then-cancel")
+			resolveLater(v)
+			v.Free()
+			cancel()
+		default:
+			errVal := ctx.NewError(errors.New("reject-then-cancel"))
+			rejectLater(errVal)
+			errVal.Free()
+			cancel()
+		}
+
+		ctx.ProcessJobs()
+		if promise.PromiseState() != PromisePending {
+			result := ctx.Await(promise)
+			if result != nil {
+				result.Free()
+			}
+		}
+
+		cancel()
+		promise.Free()
+
+		require.Equal(t, baseRefs, ctx.currentPromiseCallbackRefCount())
+		if current := ctx.handleStore.Count(); current > maxHandles {
+			maxHandles = current
+		}
+
+		if i%80 == 0 {
+			rt.RunGC()
+			ctx.Loop()
+		}
+	}
+
+	for i := 0; i < 20 && ctx.handleStore.Count() > baseHandles+1; i++ {
+		rt.RunGC()
+		ctx.Loop()
+	}
+
+	require.LessOrEqual(t, ctx.handleStore.Count(), baseHandles+1)
+	// Allow transient spikes during randomized interleaving, but ensure no runaway growth.
+	require.LessOrEqual(t, maxHandles, baseHandles+24)
+}
+
+func TestNewPromiseWithCancelGoroutineCancelSettleRaceOwnerThreadSafe(t *testing.T) {
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	baseRefs := ctx.currentPromiseCallbackRefCount()
+	baseHandles := ctx.handleStore.Count()
+
+	var resolveLater func(*Value)
+	promise, cancel := ctx.NewPromiseWithCancel(func(resolve, reject func(*Value)) {
+		resolveLater = resolve
+	})
+	require.NotNil(t, promise)
+
+	panicCh := make(chan interface{}, 2)
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	go func() {
+		defer wg.Done()
+		defer func() { panicCh <- recover() }()
+		cancel()
+	}()
+
+	go func() {
+		defer wg.Done()
+		defer func() { panicCh <- recover() }()
+		resolveLater(nil)
+	}()
+
+	wg.Wait()
+	close(panicCh)
+	for rec := range panicCh {
+		require.Nil(t, rec)
+	}
+
+	ctx.ProcessJobs()
+	if promise.PromiseState() != PromisePending {
+		result := ctx.Await(promise)
+		if result != nil {
+			result.Free()
+		}
+	}
+
+	cancel()
+	promise.Free()
+	require.Equal(t, baseRefs, ctx.currentPromiseCallbackRefCount())
+	require.LessOrEqual(t, ctx.handleStore.Count(), baseHandles+1)
+}
+
+func TestNewPromiseWithCancelLongStressGoroutineCancelNoRunawayGrowth(t *testing.T) {
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	baseRefs := ctx.currentPromiseCallbackRefCount()
+	baseHandles := ctx.handleStore.Count()
+	rng := rand.New(rand.NewSource(2026032602))
+	maxHandles := baseHandles
+
+	for i := 0; i < 1200; i++ {
+		var resolveLater func(*Value)
+		promise, cancel := ctx.NewPromiseWithCancel(func(resolve, reject func(*Value)) {
+			resolveLater = resolve
+		})
+		require.NotNil(t, promise)
+
+		panicCh := make(chan interface{}, 2)
+		var wg sync.WaitGroup
+		wg.Add(2)
+
+		go func() {
+			defer wg.Done()
+			defer func() { panicCh <- recover() }()
+			cancel()
+		}()
+
+		go func(mode int) {
+			defer wg.Done()
+			defer func() { panicCh <- recover() }()
+			switch mode {
+			case 0:
+				resolveLater(nil)
+			case 1:
+				ctx.Schedule(func(inner *Context) {
+					v := inner.NewInt32(int32(i))
+					defer v.Free()
+					resolveLater(v)
+				})
+			default:
+				// no settle
+			}
+		}(rng.Intn(3))
+
+		wg.Wait()
+		close(panicCh)
+		for rec := range panicCh {
+			require.Nil(t, rec)
+		}
+
+		ctx.ProcessJobs()
+		if promise.PromiseState() != PromisePending {
+			result := ctx.Await(promise)
+			if result != nil {
+				result.Free()
+			}
+		}
+
+		cancel()
+		promise.Free()
+		require.Equal(t, baseRefs, ctx.currentPromiseCallbackRefCount())
+		if current := ctx.handleStore.Count(); current > maxHandles {
+			maxHandles = current
+		}
+
+		if i%120 == 0 {
+			rt.RunGC()
+			ctx.Loop()
+		}
+	}
+
+	for i := 0; i < 20 && ctx.handleStore.Count() > baseHandles+1; i++ {
+		rt.RunGC()
+		ctx.Loop()
+	}
+
+	require.Equal(t, baseRefs, ctx.currentPromiseCallbackRefCount())
+	require.LessOrEqual(t, ctx.handleStore.Count(), baseHandles+1)
+	require.LessOrEqual(t, maxHandles, baseHandles+28)
+}
+
+func TestContextCloseInterleavingWithConcurrentCancelResolveStress(t *testing.T) {
+	rng := rand.New(rand.NewSource(2026032603))
+
+	for i := 0; i < 320; i++ {
+		rt := NewRuntime()
+		ctx := rt.NewContext()
+		require.NotNil(t, ctx)
+
+		var resolveLater func(*Value)
+		promise, cancel := ctx.NewPromiseWithCancel(func(resolve, reject func(*Value)) {
+			resolveLater = resolve
+		})
+		require.NotNil(t, promise)
+
+		start := make(chan struct{})
+		panicCh := make(chan interface{}, 2)
+		var wg sync.WaitGroup
+		wg.Add(2)
+
+		go func() {
+			defer wg.Done()
+			defer func() { panicCh <- recover() }()
+			<-start
+			for j := 0; j < 6; j++ {
+				_ = ctx.Schedule(func(inner *Context) {
+					cancel()
+				})
+			}
+		}()
+
+		go func(mode int) {
+			defer wg.Done()
+			defer func() { panicCh <- recover() }()
+			<-start
+			for j := 0; j < 6; j++ {
+				switch mode {
+				case 0:
+					_ = ctx.Schedule(func(inner *Context) {
+						resolveLater(nil)
+					})
+				case 1:
+					_ = ctx.Schedule(func(inner *Context) {
+						v := inner.NewInt32(int32(i*10 + j))
+						defer v.Free()
+						resolveLater(v)
+					})
+				default:
+					_ = ctx.Schedule(func(inner *Context) {
+						// leave pending in this branch
+					})
+				}
+			}
+		}(rng.Intn(3))
+
+		close(start)
+		wg.Wait()
+		close(panicCh)
+		for rec := range panicCh {
+			require.Nil(t, rec)
+		}
+		// Release local Promise handle before context teardown.
+		promise.Free()
+		if i%2 == 0 {
+			ctx.Close()
+		} else {
+			ctx.ProcessJobs()
+			ctx.Close()
+		}
+		rt.Close()
+	}
+}
+
+func TestPromiseCleanupObservabilityCounters(t *testing.T) {
+	newCtx := func(t *testing.T) *Context {
+		rt := NewRuntime()
+		ctx := rt.NewContext()
+		require.NotNil(t, ctx)
+		featureCheck := ctx.Eval(`typeof FinalizationRegistry !== "undefined"`)
+		require.False(t, featureCheck.IsException())
+		if !featureCheck.Bool() {
+			featureCheck.Free()
+			ctx.Close()
+			rt.Close()
+			t.Skip("FinalizationRegistry is not available")
+		}
+		featureCheck.Free()
+		t.Cleanup(func() {
+			ctx.Close()
+			rt.Close()
+		})
+		return ctx
+	}
+
+	t.Run("CancelTriggered", func(t *testing.T) {
+		ctx := newCtx(t)
+		ctx.SnapshotAndResetPromiseCleanupObservability()
+
+		promise, cancel := ctx.NewPromiseWithCancel(func(resolve, reject func(*Value)) {
+			// keep pending
+		})
+		require.NotNil(t, promise)
+		cancel()
+		promise.Free()
+
+		snap := ctx.SnapshotAndResetPromiseCleanupObservability()
+		require.GreaterOrEqual(t, snap.CancelTriggered, uint64(1))
+		require.Equal(t, uint64(0), snap.FinallyTriggered)
+		require.Equal(t, uint64(0), snap.FallbackTriggered)
+	})
+
+	t.Run("FinallyTriggered", func(t *testing.T) {
+		ctx := newCtx(t)
+		ctx.SnapshotAndResetPromiseCleanupObservability()
+
+		promise, _ := ctx.NewPromiseWithCancel(func(resolve, reject func(*Value)) {
+			v := ctx.NewString("ok")
+			defer v.Free()
+			resolve(v)
+		})
+		require.NotNil(t, promise)
+
+		result := ctx.Await(promise)
+		require.NotNil(t, result)
+		result.Free()
+		promise.Free()
+
+		snap := ctx.SnapshotPromiseCleanupObservability()
+		for i := 0; i < 10 && snap.FinallyTriggered == 0; i++ {
+			ctx.ProcessJobs()
+			ctx.Loop()
+			time.Sleep(time.Millisecond)
+			snap = ctx.SnapshotPromiseCleanupObservability()
+		}
+		snap = ctx.SnapshotAndResetPromiseCleanupObservability()
+		require.Equal(t, uint64(0), snap.CancelTriggered)
+		require.GreaterOrEqual(t, snap.FinallyTriggered, uint64(1))
+		require.Equal(t, uint64(0), snap.FallbackTriggered)
+	})
+
+	t.Run("FallbackTriggered", func(t *testing.T) {
+		ctx := newCtx(t)
+		ctx.SnapshotAndResetPromiseCleanupObservability()
+
+		patch := ctx.Eval(`
+            (() => {
+                if (!Promise.prototype.__origFinallyForObsTest) {
+                    Promise.prototype.__origFinallyForObsTest = Promise.prototype.finally;
+                }
+                Promise.prototype.finally = function() {
+                    throw new Error("finally patched failure");
+                };
+                return true;
+            })()
+        `)
+		require.False(t, patch.IsException())
+		patch.Free()
+		defer func() {
+			restore := ctx.Eval(`
+                (() => {
+                    if (Promise.prototype.__origFinallyForObsTest) {
+                        Promise.prototype.finally = Promise.prototype.__origFinallyForObsTest;
+                        delete Promise.prototype.__origFinallyForObsTest;
+                    }
+                    return true;
+                })()
+            `)
+			if restore != nil {
+				restore.Free()
+			}
+		}()
+
+		promise, cancel := ctx.NewPromiseWithCancel(func(resolve, reject func(*Value)) {
+			// keep pending
+		})
+		require.NotNil(t, promise)
+		cancel()
+		promise.Free()
+
+		snap := ctx.SnapshotAndResetPromiseCleanupObservability()
+		require.Equal(t, uint64(0), snap.CancelTriggered)
+		require.Equal(t, uint64(0), snap.FinallyTriggered)
+		require.GreaterOrEqual(t, snap.FallbackTriggered, uint64(1))
+	})
+}
+
+func TestCloseHighQueuePressureEnqueueDropCounterStable(t *testing.T) {
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+
+	ctx.SnapshotAndResetCloseEnqueueObservability()
+
+	// Saturate queue first to force fallback enqueue drops.
+	for i := 0; i < defaultJobQueueSize; i++ {
+		require.True(t, ctx.enqueueJobDuringClose(func(*Context) {}))
+	}
+
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	workers := 64
+	attemptsPerWorker := 48
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			for j := 0; j < attemptsPerWorker; j++ {
+				_ = ctx.enqueueJobDuringClose(func(*Context) {})
+			}
+		}()
+	}
+
+	close(start)
+	time.Sleep(2 * time.Millisecond)
+	ctx.Close()
+	wg.Wait()
+
+	snap := ctx.SnapshotCloseEnqueueObservability()
+	require.Greater(t, snap.Dropped, uint64(0))
+	require.LessOrEqual(t, snap.Dropped, uint64(workers*attemptsPerWorker))
+	require.Greater(t, snap.OtherDropped, uint64(0))
+	require.Equal(t, snap.Dropped, snap.ValueFreeDropped+snap.PromiseCallbackDropped+snap.OtherDropped)
+
+	stable := ctx.SnapshotCloseEnqueueObservability()
+	time.Sleep(2 * time.Millisecond)
+	idle := ctx.SnapshotCloseEnqueueObservability()
+	require.Equal(t, stable, idle)
+
+	ctx.Close()
+}
+
+func TestCloseQueueSustainedPressureCloseRecreateExtremeGate(t *testing.T) {
+	const rounds = 2000
+	const warmupQueueFill = defaultJobQueueSize
+
+	var totalDropped uint64
+	var maxDroppedPerRound uint64
+	var firstWindowDropped uint64
+	var lastWindowDropped uint64
+
+	for i := 0; i < rounds; i++ {
+		rt := NewRuntime()
+		ctx := rt.NewContext()
+		require.NotNil(t, ctx)
+
+		baseRefs := ctx.currentPromiseCallbackRefCount()
+		baseHandles := ctx.handleStore.Count()
+		ctx.SnapshotAndResetCloseEnqueueObservability()
+
+		for j := 0; j < warmupQueueFill; j++ {
+			_ = ctx.enqueueJobDuringClose(func(*Context) {})
+		}
+
+		val := ctx.NewString("queue-pressure")
+		promise, cancel := ctx.NewPromiseWithCancel(func(resolve, reject func(*Value)) {
+			// keep pending; cancel path should release callback refs
+		})
+		require.NotNil(t, promise)
+		promise.Free()
+
+		start := make(chan struct{})
+		panicCh := make(chan interface{}, 3)
+		var wg sync.WaitGroup
+		wg.Add(3)
+
+		go func() {
+			defer wg.Done()
+			defer func() { panicCh <- recover() }()
+			<-start
+			val.Free()
+		}()
+
+		go func() {
+			defer wg.Done()
+			defer func() { panicCh <- recover() }()
+			<-start
+			cancel()
+		}()
+
+		go func() {
+			defer wg.Done()
+			defer func() { panicCh <- recover() }()
+			<-start
+			for k := 0; k < 16; k++ {
+				_ = ctx.enqueueJobDuringClose(func(*Context) {})
+			}
+		}()
+
+		close(start)
+		time.Sleep(100 * time.Microsecond)
+		ctx.Close()
+		wg.Wait()
+		close(panicCh)
+		for rec := range panicCh {
+			require.Nil(t, rec)
+		}
+
+		snap := ctx.SnapshotCloseEnqueueObservability()
+		totalDropped += snap.Dropped
+		if snap.Dropped > maxDroppedPerRound {
+			maxDroppedPerRound = snap.Dropped
+		}
+		if i < 200 {
+			firstWindowDropped += snap.Dropped
+		}
+		if i >= rounds-200 {
+			lastWindowDropped += snap.Dropped
+		}
+
+		require.Equal(t, snap.Dropped, snap.ValueFreeDropped+snap.PromiseCallbackDropped+snap.OtherDropped)
+		require.Equal(t, baseRefs, ctx.currentPromiseCallbackRefCount())
+		require.LessOrEqual(t, ctx.handleStore.Count(), baseHandles)
+
+		rt.Close()
+	}
+
+	// Bound worst-case burst and check trend does not diverge across recreate rounds.
+	require.LessOrEqual(t, maxDroppedPerRound, uint64(defaultJobQueueSize+96))
+	if totalDropped > 0 {
+		require.LessOrEqual(t, lastWindowDropped, firstWindowDropped+uint64(200*64))
+	}
+}
+
+func TestPromiseCleanupObservabilitySoakGate(t *testing.T) {
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	featureCheck := ctx.Eval(`typeof FinalizationRegistry !== "undefined"`)
+	require.False(t, featureCheck.IsException())
+	if !featureCheck.Bool() {
+		featureCheck.Free()
+		t.Skip("FinalizationRegistry is not available")
+	}
+	featureCheck.Free()
+
+	baseRefs := ctx.currentPromiseCallbackRefCount()
+	baseHandles := ctx.handleStore.Count()
+	ctx.SnapshotAndResetPromiseCleanupObservability()
+
+	const total = 6000
+	for i := 0; i < total; i++ {
+		switch i % 3 {
+		case 0:
+			promise, cancel := ctx.NewPromiseWithCancel(func(resolve, reject func(*Value)) {
+				// pending -> cancel branch
+			})
+			require.NotNil(t, promise)
+			cancel()
+			promise.Free()
+		case 1:
+			promise, _ := ctx.NewPromiseWithCancel(func(resolve, reject func(*Value)) {
+				v := ctx.NewInt32(int32(i))
+				defer v.Free()
+				resolve(v)
+			})
+			require.NotNil(t, promise)
+			result := ctx.Await(promise)
+			if result != nil {
+				result.Free()
+			}
+			promise.Free()
+		default:
+			patch := ctx.Eval(`
+                (() => {
+                    if (!Promise.prototype.__origFinallyForSoakGate) {
+                        Promise.prototype.__origFinallyForSoakGate = Promise.prototype.finally;
+                    }
+                    Promise.prototype.finally = function() { throw new Error("soak-finally-fallback"); };
+                    return true;
+                })()
+            `)
+			require.False(t, patch.IsException())
+			patch.Free()
+
+			promise, cancel := ctx.NewPromiseWithCancel(func(resolve, reject func(*Value)) {
+				// force fallback through patched finally
+			})
+			require.NotNil(t, promise)
+			cancel()
+			promise.Free()
+
+			restore := ctx.Eval(`
+                (() => {
+                    if (Promise.prototype.__origFinallyForSoakGate) {
+                        Promise.prototype.finally = Promise.prototype.__origFinallyForSoakGate;
+                        delete Promise.prototype.__origFinallyForSoakGate;
+                    }
+                    return true;
+                })()
+            `)
+			if restore != nil {
+				restore.Free()
+			}
+		}
+
+		if i%250 == 0 {
+			ctx.ProcessJobs()
+			ctx.Loop()
+			rt.RunGC()
+		}
+	}
+
+	snap := ctx.SnapshotPromiseCleanupObservability()
+	for i := 0; i < 20 && snap.FinallyTriggered == 0; i++ {
+		ctx.ProcessJobs()
+		ctx.Loop()
+		time.Sleep(time.Millisecond)
+		snap = ctx.SnapshotPromiseCleanupObservability()
+	}
+
+	snap = ctx.SnapshotAndResetPromiseCleanupObservability()
+	require.Greater(t, snap.CancelTriggered, uint64(0))
+	require.Greater(t, snap.FinallyTriggered, uint64(0))
+	require.Greater(t, snap.FallbackTriggered, uint64(0))
+	require.Equal(t, baseRefs, ctx.currentPromiseCallbackRefCount())
+
+	for i := 0; i < 30 && ctx.handleStore.Count() > baseHandles+2; i++ {
+		rt.RunGC()
+		ctx.ProcessJobs()
+		ctx.Loop()
+	}
+	require.LessOrEqual(t, ctx.handleStore.Count(), baseHandles+2)
+}
+
+func TestValueFreeSafeWhenCalledOffOwnerThread(t *testing.T) {
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	v := ctx.NewString("owner-thread-only")
+	recCh := make(chan interface{}, 1)
+	go func() {
+		defer func() { recCh <- recover() }()
+		v.Free()
+	}()
+
+	rec := <-recCh
+	require.Nil(t, rec)
+
+	ctx.ProcessJobs()
+
+	// Free remains idempotent after deferred owner-thread cleanup.
+	v.Free()
+}
+
+func TestNewPromiseWithCancelReleasesPendingCallbacksWithoutFinalizationRegistry(t *testing.T) {
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	disableFR := ctx.Eval(`delete globalThis.FinalizationRegistry; typeof FinalizationRegistry`)
+	require.False(t, disableFR.IsException())
+	require.Equal(t, "undefined", disableFR.ToString())
+	disableFR.Free()
+
+	baseRefs := ctx.currentPromiseCallbackRefCount()
+	promise, cancel := ctx.NewPromiseWithCancel(func(resolve, reject func(*Value)) {
+		// Keep pending on purpose.
+	})
+	defer promise.Free()
+
+	require.Equal(t, PromisePending, promise.PromiseState())
+	require.Equal(t, baseRefs+2, ctx.currentPromiseCallbackRefCount())
+
+	cancel()
+	require.Equal(t, baseRefs, ctx.currentPromiseCallbackRefCount())
+
+	// Cancel must be idempotent.
+	cancel()
+	require.Equal(t, baseRefs, ctx.currentPromiseCallbackRefCount())
+}
+
+func TestNewPromiseWithCancelStressNoAccumulation(t *testing.T) {
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	disableFR := ctx.Eval(`delete globalThis.FinalizationRegistry; typeof FinalizationRegistry`)
+	require.False(t, disableFR.IsException())
+	require.Equal(t, "undefined", disableFR.ToString())
+	disableFR.Free()
+
+	baseRefs := ctx.currentPromiseCallbackRefCount()
+	for i := 0; i < 200; i++ {
+		promise, cancel := ctx.NewPromiseWithCancel(func(resolve, reject func(*Value)) {
+			// keep pending
+		})
+		require.Equal(t, PromisePending, promise.PromiseState())
+		cancel()
+		promise.Free()
+	}
+
+	require.Equal(t, baseRefs, ctx.currentPromiseCallbackRefCount())
+}
+
+func TestNewPromiseWithCancelExecutorPanicReleasesCallbacks(t *testing.T) {
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	baseRefs := ctx.currentPromiseCallbackRefCount()
+	require.PanicsWithValue(t, "executor panic", func() {
+		_, _ = ctx.NewPromiseWithCancel(func(resolve, reject func(*Value)) {
+			panic("executor panic")
+		})
+	})
+	require.Equal(t, baseRefs, ctx.currentPromiseCallbackRefCount())
+}
+
+func TestNewPromiseWithCancelPromiseSetupException(t *testing.T) {
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	baseRefs := ctx.currentPromiseCallbackRefCount()
+	executorCalled := false
+
+	patch := ctx.Eval(`
+        (() => {
+            globalThis.__promise_backup_for_setup_exception_test = globalThis.Promise;
+            globalThis.Promise = function() {
+                throw new Error("promise-ctor-fail");
+            };
+            return true;
+        })()
+    `)
+	require.False(t, patch.IsException())
+	patch.Free()
+
+	promise, cancel := ctx.NewPromiseWithCancel(func(resolve, reject func(*Value)) {
+		executorCalled = true
+	})
+	require.NotNil(t, promise)
+	defer promise.Free()
+	require.True(t, promise.IsException())
+	require.False(t, executorCalled)
+	require.NotPanics(t, cancel)
+	require.Equal(t, baseRefs, ctx.currentPromiseCallbackRefCount())
+
+	restore := ctx.Eval(`
+        (() => {
+            globalThis.Promise = globalThis.__promise_backup_for_setup_exception_test;
+            delete globalThis.__promise_backup_for_setup_exception_test;
+            return true;
+        })()
+    `)
+	require.False(t, restore.IsException())
+	restore.Free()
+}
+
+func TestNewPromiseWithCancelPostSettleCASHookPath(t *testing.T) {
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	baseRefs := ctx.currentPromiseCallbackRefCount()
+
+	var resolveLater func(*Value)
+	var cancel func()
+
+	setNewPromiseWithCancelPostSettleCASHookForTest(func() {
+		if cancel != nil {
+			cancel()
+		}
+	})
+	t.Cleanup(func() {
+		setNewPromiseWithCancelPostSettleCASHookForTest(nil)
+	})
+
+	promise, cancel := ctx.NewPromiseWithCancel(func(resolve, reject func(*Value)) {
+		resolveLater = resolve
+	})
+	defer promise.Free()
+
+	require.NotNil(t, resolveLater)
+	resolveLater(nil)
+	ctx.ProcessJobs()
+
+	// cancel hook runs between settled CAS and callback dispatch;
+	// Promise remains pending while callbacks are released safely.
+	require.Equal(t, PromisePending, promise.PromiseState())
+	require.Equal(t, baseRefs, ctx.currentPromiseCallbackRefCount())
+
+	cancel()
+	require.Equal(t, baseRefs, ctx.currentPromiseCallbackRefCount())
+}
+
+func TestNewPromiseWithCancelScheduledCancelSettleRace(t *testing.T) {
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	baseRefs := ctx.currentPromiseCallbackRefCount()
+	start := make(chan struct{})
+	resolveScheduled := make(chan bool, 1)
+	cancelScheduled := make(chan bool, 1)
+
+	var resolveLater func(*Value)
+	var cancel func()
+	promise, cancel := ctx.NewPromiseWithCancel(func(resolve, reject func(*Value)) {
+		resolveLater = resolve
+
+		go func() {
+			<-start
+			ok := ctx.Schedule(func(inner *Context) {
+				val := inner.NewString("resolve-before-cancel")
+				defer val.Free()
+				resolveLater(val)
+			})
+			resolveScheduled <- ok
+		}()
+
+		go func() {
+			<-start
+			ok := ctx.Schedule(func(inner *Context) {
+				cancel()
+			})
+			cancelScheduled <- ok
+		}()
+	})
+	defer promise.Free()
+
+	require.NotNil(t, resolveLater)
+	close(start)
+
+	select {
+	case ok := <-resolveScheduled:
+		require.True(t, ok)
+	case <-time.After(2 * time.Second):
+		t.Fatal("scheduled resolve job was not enqueued")
+	}
+
+	select {
+	case ok := <-cancelScheduled:
+		require.True(t, ok)
+	case <-time.After(2 * time.Second):
+		t.Fatal("scheduled cancel job was not enqueued")
+	}
+
+	ctx.ProcessJobs()
+	state := promise.PromiseState()
+	require.True(t, state == PromisePending || state == PromiseFulfilled)
+	if state == PromiseFulfilled {
+		result := ctx.Await(promise)
+		defer result.Free()
+		require.False(t, result.IsException())
+		require.Equal(t, "resolve-before-cancel", result.ToString())
+	}
+
+	cancel()
+	require.Equal(t, baseRefs, ctx.currentPromiseCallbackRefCount())
+}
+
+func TestNewPromiseWithCancelNoopAfterSettled(t *testing.T) {
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	baseRefs := ctx.currentPromiseCallbackRefCount()
+	promise, cancel := ctx.NewPromiseWithCancel(func(resolve, reject func(*Value)) {
+		resolve(ctx.NewString("settled"))
+	})
+	defer promise.Free()
+
+	result := ctx.Await(promise)
+	defer result.Free()
+	require.False(t, result.IsException())
+	require.Equal(t, "settled", result.ToString())
+	require.Equal(t, baseRefs, ctx.currentPromiseCallbackRefCount())
+
+	// cancel after settled must be a no-op and idempotent.
+	cancel()
+	require.Equal(t, baseRefs, ctx.currentPromiseCallbackRefCount())
+	cancel()
+	require.Equal(t, baseRefs, ctx.currentPromiseCallbackRefCount())
+}
+
+func TestNewPromiseWithCancelNoopAfterRejected(t *testing.T) {
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	baseRefs := ctx.currentPromiseCallbackRefCount()
+	promise, cancel := ctx.NewPromiseWithCancel(func(resolve, reject func(*Value)) {
+		errVal := ctx.NewError(errors.New("rejected"))
+		defer errVal.Free()
+		reject(errVal)
+	})
+	defer promise.Free()
+
+	result := ctx.Await(promise)
+	defer result.Free()
+	require.True(t, result.IsException())
+	require.Contains(t, ctx.Exception().Error(), "rejected")
+	require.Equal(t, baseRefs, ctx.currentPromiseCallbackRefCount())
+
+	// cancel after rejected must be a no-op and idempotent.
+	cancel()
+	require.Equal(t, baseRefs, ctx.currentPromiseCallbackRefCount())
+	cancel()
+	require.Equal(t, baseRefs, ctx.currentPromiseCallbackRefCount())
+}
+
+func TestNewPromiseWithCancelDoesNotSettlePromise(t *testing.T) {
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	baseRefs := ctx.currentPromiseCallbackRefCount()
+	var resolveLater func(*Value)
+	promise, cancel := ctx.NewPromiseWithCancel(func(resolve, reject func(*Value)) {
+		resolveLater = resolve
+	})
+	defer promise.Free()
+
+	require.NotNil(t, resolveLater)
+	require.Equal(t, PromisePending, promise.PromiseState())
+
+	cancel()
+	require.Equal(t, baseRefs, ctx.currentPromiseCallbackRefCount())
+
+	val := ctx.NewString("should-not-settle")
+	defer val.Free()
+	resolveLater(val)
+	ctx.ProcessJobs()
+
+	// cancel only releases callback references; it must not force settlement.
+	require.Equal(t, PromisePending, promise.PromiseState())
+	require.Equal(t, baseRefs, ctx.currentPromiseCallbackRefCount())
+}
+
+func TestNewPromiseWithCancelInterleaving(t *testing.T) {
+	t.Run("CancelThenResolve", func(t *testing.T) {
+		rt := NewRuntime()
+		defer rt.Close()
+		ctx := rt.NewContext()
+		defer ctx.Close()
+
+		baseRefs := ctx.currentPromiseCallbackRefCount()
+		var resolveLater func(*Value)
+		promise, cancel := ctx.NewPromiseWithCancel(func(resolve, reject func(*Value)) {
+			resolveLater = resolve
+		})
+		defer promise.Free()
+
+		require.NotNil(t, resolveLater)
+		cancel()
+		resolveLater(nil)
+		ctx.ProcessJobs()
+
+		require.Equal(t, PromisePending, promise.PromiseState())
+		require.Equal(t, baseRefs, ctx.currentPromiseCallbackRefCount())
+	})
+
+	t.Run("CancelThenReject", func(t *testing.T) {
+		rt := NewRuntime()
+		defer rt.Close()
+		ctx := rt.NewContext()
+		defer ctx.Close()
+
+		baseRefs := ctx.currentPromiseCallbackRefCount()
+		var rejectLater func(*Value)
+		promise, cancel := ctx.NewPromiseWithCancel(func(resolve, reject func(*Value)) {
+			rejectLater = reject
+		})
+		defer promise.Free()
+
+		require.NotNil(t, rejectLater)
+		cancel()
+		errVal := ctx.NewError(errors.New("should-not-reject"))
+		defer errVal.Free()
+		rejectLater(errVal)
+		ctx.ProcessJobs()
+
+		require.Equal(t, PromisePending, promise.PromiseState())
+		require.Equal(t, baseRefs, ctx.currentPromiseCallbackRefCount())
+	})
+
+	t.Run("ResolveThenCancel", func(t *testing.T) {
+		rt := NewRuntime()
+		defer rt.Close()
+		ctx := rt.NewContext()
+		defer ctx.Close()
+
+		baseRefs := ctx.currentPromiseCallbackRefCount()
+		var resolveLater func(*Value)
+		promise, cancel := ctx.NewPromiseWithCancel(func(resolve, reject func(*Value)) {
+			resolveLater = resolve
+		})
+		defer promise.Free()
+
+		require.NotNil(t, resolveLater)
+		resolveLater(nil)
+		result := ctx.Await(promise)
+		defer result.Free()
+		require.False(t, result.IsException())
+		require.True(t, result.IsUndefined())
+
+		cancel()
+		require.Equal(t, baseRefs, ctx.currentPromiseCallbackRefCount())
+	})
+
+	t.Run("RejectThenCancel", func(t *testing.T) {
+		rt := NewRuntime()
+		defer rt.Close()
+		ctx := rt.NewContext()
+		defer ctx.Close()
+
+		baseRefs := ctx.currentPromiseCallbackRefCount()
+		var rejectLater func(*Value)
+		promise, cancel := ctx.NewPromiseWithCancel(func(resolve, reject func(*Value)) {
+			rejectLater = reject
+		})
+		defer promise.Free()
+
+		require.NotNil(t, rejectLater)
+		errVal := ctx.NewError(errors.New("reject-first"))
+		defer errVal.Free()
+		rejectLater(errVal)
+
+		result := ctx.Await(promise)
+		defer result.Free()
+		require.True(t, result.IsException())
+		require.Contains(t, ctx.Exception().Error(), "reject-first")
+
+		cancel()
+		require.Equal(t, baseRefs, ctx.currentPromiseCallbackRefCount())
+	})
+}
+
+func TestNewPromiseWithCancelRandomizedOrdering(t *testing.T) {
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	baseRefs := ctx.currentPromiseCallbackRefCount()
+	rng := rand.New(rand.NewSource(42))
+
+	permutations := [][]string{
+		{"cancel", "resolve", "reject"},
+		{"cancel", "reject", "resolve"},
+		{"resolve", "cancel", "reject"},
+		{"resolve", "reject", "cancel"},
+		{"reject", "cancel", "resolve"},
+		{"reject", "resolve", "cancel"},
+	}
+
+	for i := 0; i < 200; i++ {
+		var resolveLater func(*Value)
+		var rejectLater func(*Value)
+		promise, cancel := ctx.NewPromiseWithCancel(func(resolve, reject func(*Value)) {
+			resolveLater = resolve
+			rejectLater = reject
+		})
+
+		require.NotNil(t, resolveLater)
+		require.NotNil(t, rejectLater)
+
+		order := permutations[rng.Intn(len(permutations))]
+		for _, op := range order {
+			switch op {
+			case "cancel":
+				cancel()
+			case "resolve":
+				val := ctx.NewString("resolved")
+				resolveLater(val)
+				val.Free()
+			case "reject":
+				errVal := ctx.NewError(errors.New("rejected"))
+				rejectLater(errVal)
+				errVal.Free()
+			}
+		}
+
+		ctx.ProcessJobs()
+
+		switch order[0] {
+		case "cancel":
+			require.Equal(t, PromisePending, promise.PromiseState())
+		case "resolve":
+			require.Equal(t, PromiseFulfilled, promise.PromiseState())
+		case "reject":
+			require.Equal(t, PromiseRejected, promise.PromiseState())
+		}
+
+		promise.Free()
+		require.Equal(t, baseRefs, ctx.currentPromiseCallbackRefCount())
+	}
+}
+
+func TestNewPromiseWithCancelScheduledInterleaving(t *testing.T) {
+	t.Run("CancelThenScheduledResolve", func(t *testing.T) {
+		rt := NewRuntime()
+		defer rt.Close()
+		ctx := rt.NewContext()
+		defer ctx.Close()
+
+		baseRefs := ctx.currentPromiseCallbackRefCount()
+		trigger := make(chan struct{})
+		scheduled := make(chan bool, 1)
+
+		var resolveLater func(*Value)
+		promise, cancel := ctx.NewPromiseWithCancel(func(resolve, reject func(*Value)) {
+			resolveLater = resolve
+			go func() {
+				<-trigger
+				ok := ctx.Schedule(func(inner *Context) {
+					val := inner.NewString("scheduled-resolve")
+					defer val.Free()
+					resolveLater(val)
+				})
+				scheduled <- ok
+			}()
+		})
+		defer promise.Free()
+
+		require.NotNil(t, resolveLater)
+		cancel()
+		close(trigger)
+
+		select {
+		case ok := <-scheduled:
+			require.True(t, ok)
+		case <-time.After(2 * time.Second):
+			t.Fatal("scheduled resolve job was not enqueued")
+		}
+
+		ctx.ProcessJobs()
+		require.Equal(t, PromisePending, promise.PromiseState())
+		require.Equal(t, baseRefs, ctx.currentPromiseCallbackRefCount())
+	})
+
+	t.Run("ScheduledRejectThenCancel", func(t *testing.T) {
+		rt := NewRuntime()
+		defer rt.Close()
+		ctx := rt.NewContext()
+		defer ctx.Close()
+
+		baseRefs := ctx.currentPromiseCallbackRefCount()
+		scheduled := make(chan bool, 1)
+
+		var rejectLater func(*Value)
+		promise, cancel := ctx.NewPromiseWithCancel(func(resolve, reject func(*Value)) {
+			rejectLater = reject
+			go func() {
+				ok := ctx.Schedule(func(inner *Context) {
+					errVal := inner.NewError(errors.New("scheduled-reject"))
+					defer errVal.Free()
+					rejectLater(errVal)
+				})
+				scheduled <- ok
+			}()
+		})
+		defer promise.Free()
+
+		require.NotNil(t, rejectLater)
+		select {
+		case ok := <-scheduled:
+			require.True(t, ok)
+		case <-time.After(2 * time.Second):
+			t.Fatal("scheduled reject job was not enqueued")
+		}
+
+		result := ctx.Await(promise)
+		defer result.Free()
+		require.True(t, result.IsException())
+		require.Contains(t, ctx.Exception().Error(), "scheduled-reject")
+
+		cancel()
+		require.Equal(t, baseRefs, ctx.currentPromiseCallbackRefCount())
+	})
+}
+
+func TestNewPromiseWithCancelScheduledSettleRace(t *testing.T) {
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	baseRefs := ctx.currentPromiseCallbackRefCount()
+	start := make(chan struct{})
+	resolveScheduled := make(chan bool, 1)
+	rejectScheduled := make(chan bool, 1)
+
+	var resolveLater func(*Value)
+	var rejectLater func(*Value)
+	promise, cancel := ctx.NewPromiseWithCancel(func(resolve, reject func(*Value)) {
+		resolveLater = resolve
+		rejectLater = reject
+
+		go func() {
+			<-start
+			ok := ctx.Schedule(func(inner *Context) {
+				val := inner.NewString("race-resolve")
+				defer val.Free()
+				resolveLater(val)
+			})
+			resolveScheduled <- ok
+		}()
+
+		go func() {
+			<-start
+			ok := ctx.Schedule(func(inner *Context) {
+				errVal := inner.NewError(errors.New("race-reject"))
+				defer errVal.Free()
+				rejectLater(errVal)
+			})
+			rejectScheduled <- ok
+		}()
+	})
+	defer promise.Free()
+
+	require.NotNil(t, resolveLater)
+	require.NotNil(t, rejectLater)
+	close(start)
+
+	select {
+	case ok := <-resolveScheduled:
+		require.True(t, ok)
+	case <-time.After(2 * time.Second):
+		t.Fatal("scheduled resolve job was not enqueued")
+	}
+
+	select {
+	case ok := <-rejectScheduled:
+		require.True(t, ok)
+	case <-time.After(2 * time.Second):
+		t.Fatal("scheduled reject job was not enqueued")
+	}
+
+	result := ctx.Await(promise)
+	defer result.Free()
+	if result.IsException() {
+		require.Contains(t, ctx.Exception().Error(), "race-reject")
+	} else {
+		require.Equal(t, "race-resolve", result.ToString())
+	}
+
+	cancel()
+	require.Equal(t, baseRefs, ctx.currentPromiseCallbackRefCount())
+}
+
+func TestNewPromiseWithCancelScheduledSettleRaceStress(t *testing.T) {
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	baseRefs := ctx.currentPromiseCallbackRefCount()
+	rng := rand.New(rand.NewSource(7))
+
+	for i := 0; i < 50; i++ {
+		start := make(chan struct{})
+		resolveScheduled := make(chan bool, 1)
+		rejectScheduled := make(chan bool, 1)
+
+		var resolveLater func(*Value)
+		var rejectLater func(*Value)
+		promise, cancel := ctx.NewPromiseWithCancel(func(resolve, reject func(*Value)) {
+			resolveLater = resolve
+			rejectLater = reject
+
+			launch := func(f func()) {
+				go func() {
+					<-start
+					f()
+				}()
+			}
+
+			launch(func() {
+				ok := ctx.Schedule(func(inner *Context) {
+					val := inner.NewString("race-resolve")
+					defer val.Free()
+					resolveLater(val)
+				})
+				resolveScheduled <- ok
+			})
+
+			launch(func() {
+				ok := ctx.Schedule(func(inner *Context) {
+					errVal := inner.NewError(errors.New("race-reject"))
+					defer errVal.Free()
+					rejectLater(errVal)
+				})
+				rejectScheduled <- ok
+			})
+		})
+
+		require.NotNil(t, resolveLater)
+		require.NotNil(t, rejectLater)
+
+		// Randomly introduce cancel into the race in roughly half the rounds.
+		if rng.Intn(2) == 0 {
+			cancel()
+		}
+
+		close(start)
+
+		select {
+		case ok := <-resolveScheduled:
+			require.True(t, ok)
+		case <-time.After(2 * time.Second):
+			t.Fatal("scheduled resolve job was not enqueued")
+		}
+
+		select {
+		case ok := <-rejectScheduled:
+			require.True(t, ok)
+		case <-time.After(2 * time.Second):
+			t.Fatal("scheduled reject job was not enqueued")
+		}
+
+		if promise.PromiseState() == PromisePending {
+			ctx.ProcessJobs()
+		}
+
+		if promise.PromiseState() != PromisePending {
+			result := ctx.Await(promise)
+			result.Free()
+		}
+
+		cancel()
+		promise.Free()
+		require.Equal(t, baseRefs, ctx.currentPromiseCallbackRefCount())
+	}
+}
+
 func TestContextErrorHandling(t *testing.T) {
 	rt := NewRuntime()
 	defer rt.Close()
@@ -419,6 +2125,18 @@ func TestContextErrorHandling(t *testing.T) {
 		errorVal := ctx.NewError(testErr)
 		defer errorVal.Free()
 		require.True(t, errorVal.IsError())
+
+		nilErrVal := ctx.NewError(nil)
+		require.NotNil(t, nilErrVal)
+		defer nilErrVal.Free()
+		require.True(t, nilErrVal.IsError())
+		nilErrMsg := nilErrVal.Get("message")
+		require.NotNil(t, nilErrMsg)
+		require.Equal(t, "unknown error", nilErrMsg.ToString())
+		nilErrMsg.Free()
+
+		var nilCtx *Context
+		require.Nil(t, nilCtx.NewError(errors.New("x")))
 	})
 
 	t.Run("ThrowMethods", func(t *testing.T) {
@@ -455,6 +2173,58 @@ func TestContextErrorHandling(t *testing.T) {
 		}
 	})
 
+	t.Run("ThrowOwnershipTransfer", func(t *testing.T) {
+		errVal := ctx.NewError(errors.New("throw ownership transfer"))
+		result := ctx.Throw(errVal)
+		defer result.Free()
+
+		require.True(t, result.IsException())
+		require.True(t, errVal.IsUndefined())
+
+		// Must be safe because Throw consumed and invalidated the source value.
+		errVal.Free()
+
+		exception := ctx.Exception()
+		require.Error(t, exception)
+		require.Contains(t, exception.Error(), "throw ownership transfer")
+	})
+
+	t.Run("ThrowNilAndCrossContextSafety", func(t *testing.T) {
+		nilResult := ctx.Throw(nil)
+		require.NotNil(t, nilResult)
+		defer nilResult.Free()
+		require.True(t, nilResult.IsException())
+		nilErr := ctx.Exception()
+		require.Error(t, nilErr)
+		require.Contains(t, nilErr.Error(), "throw value cannot be nil")
+
+		rt2 := NewRuntime()
+		defer rt2.Close()
+		ctx2 := rt2.NewContext()
+		defer ctx2.Close()
+		foreignVal := ctx2.NewString("foreign")
+		defer foreignVal.Free()
+
+		crossResult := ctx.Throw(foreignVal)
+		require.NotNil(t, crossResult)
+		defer crossResult.Free()
+		require.True(t, crossResult.IsException())
+		crossErr := ctx.Exception()
+		require.Error(t, crossErr)
+		require.Contains(t, crossErr.Error(), "throw value must belong to current context")
+		require.False(t, foreignVal.IsUndefined())
+	})
+
+	t.Run("ThrowErrorNilSafety", func(t *testing.T) {
+		result := ctx.ThrowError(nil)
+		require.NotNil(t, result)
+		defer result.Free()
+		require.True(t, result.IsException())
+		err := ctx.Exception()
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "nil error")
+	})
+
 	t.Run("ExceptionHandling", func(t *testing.T) {
 		// Test Exception() when no exception
 		exception := ctx.Exception()
@@ -464,12 +2234,18 @@ func TestContextErrorHandling(t *testing.T) {
 }
 
 func TestContextUtilities(t *testing.T) {
-	rt := NewRuntime()
-	defer rt.Close()
-	ctx := rt.NewContext()
-	defer ctx.Close()
+	newCtx := func(t *testing.T) *Context {
+		rt := NewRuntime()
+		ctx := rt.NewContext()
+		t.Cleanup(func() {
+			ctx.Close()
+			rt.Close()
+		})
+		return ctx
+	}
 
 	t.Run("Globals", func(t *testing.T) {
+		ctx := newCtx(t)
 		// Test globals caching
 		globals1 := ctx.Globals()
 		globals2 := ctx.Globals()
@@ -484,6 +2260,7 @@ func TestContextUtilities(t *testing.T) {
 	})
 
 	t.Run("JSONParsing", func(t *testing.T) {
+		ctx := newCtx(t)
 		// Valid JSON
 		jsonObj := ctx.ParseJSON(`{"name": "test", "value": 42}`)
 		defer jsonObj.Free()
@@ -500,6 +2277,7 @@ func TestContextUtilities(t *testing.T) {
 	})
 
 	t.Run("InterruptHandler", func(t *testing.T) {
+		ctx := newCtx(t)
 		interruptCalled := false
 		ctx.SetInterruptHandler(func() int {
 			interruptCalled = true
@@ -517,13 +2295,661 @@ func TestContextUtilities(t *testing.T) {
 	})
 }
 
-func TestContextAsync(t *testing.T) {
+func TestContextNilReceiverCoverageHelpers(t *testing.T) {
+	var nilCtx *Context
+	emptyCtx := &Context{}
+
+	require.Equal(t, int64(0), nilCtx.currentPromiseCallbackRefCount())
+	require.Equal(t, PromiseCleanupObservabilitySnapshot{}, nilCtx.SnapshotPromiseCleanupObservability())
+	require.Equal(t, PromiseCleanupObservabilitySnapshot{}, nilCtx.SnapshotAndResetPromiseCleanupObservability())
+	require.Equal(t, CloseEnqueueObservabilitySnapshot{}, nilCtx.SnapshotCloseEnqueueObservability())
+	require.Equal(t, CloseEnqueueObservabilitySnapshot{}, nilCtx.SnapshotAndResetCloseEnqueueObservability())
+	require.Equal(t, uintptr(0), nilCtx.cContextKeyForTest())
+	require.False(t, nilCtx.enqueueJobDuringClose(nil))
+	require.False(t, nilCtx.enqueueJobDuringCloseWithSource(func(*Context) {}, closeEnqueueSourceOther))
+	require.Nil(t, nilCtx.ensureAutoReleaseFinalizerRegistry())
+	require.Nil(t, emptyCtx.ensureAutoReleaseFinalizerRegistry())
+	require.False(t, nilCtx.releaseFunctionByID(1))
+	require.False(t, nilCtx.ReleaseFunction(nil))
+	nilCtx.requireOwnerThread("noop")
+
+	// Constructors on empty context should fail closed.
+	require.Nil(t, emptyCtx.NewInt64(1))
+	require.Nil(t, emptyCtx.NewUint32(1))
+	require.Nil(t, emptyCtx.NewBigInt64(1))
+	require.Nil(t, emptyCtx.NewBigUint64(1))
+	require.Nil(t, emptyCtx.NewFloat64(1.25))
+	require.Nil(t, nilCtx.NewFunction(nil))
+	require.Nil(t, emptyCtx.NewFunction(func(ctx *Context, this *Value, args []*Value) *Value {
+		return nil
+	}))
+	require.Nil(t, nilCtx.NewInt8Array(nil))
+	require.Nil(t, nilCtx.NewUint8Array(nil))
+	require.Nil(t, nilCtx.NewUint8ClampedArray(nil))
+	require.Nil(t, nilCtx.NewInt16Array(nil))
+	require.Nil(t, nilCtx.NewUint16Array(nil))
+	require.Nil(t, nilCtx.NewInt32Array(nil))
+	require.Nil(t, nilCtx.NewUint32Array(nil))
+	require.Nil(t, nilCtx.NewFloat32Array(nil))
+	require.Nil(t, nilCtx.NewFloat64Array(nil))
+	require.Nil(t, nilCtx.NewBigInt64Array(nil))
+	require.Nil(t, nilCtx.NewBigUint64Array(nil))
+	require.Nil(t, emptyCtx.NewInt8Array([]int8{1}))
+	require.Nil(t, emptyCtx.NewUint8Array([]uint8{1}))
+	require.Nil(t, emptyCtx.NewUint8ClampedArray([]uint8{1}))
+	require.Nil(t, emptyCtx.NewInt16Array([]int16{1}))
+	require.Nil(t, emptyCtx.NewUint16Array([]uint16{1}))
+	require.Nil(t, emptyCtx.NewInt32Array([]int32{1}))
+	require.Nil(t, emptyCtx.NewUint32Array([]uint32{1}))
+	require.Nil(t, emptyCtx.NewFloat32Array([]float32{1}))
+	require.Nil(t, emptyCtx.NewFloat64Array([]float64{1}))
+	require.Nil(t, emptyCtx.NewBigInt64Array([]int64{1}))
+	require.Nil(t, emptyCtx.NewBigUint64Array([]uint64{1}))
+}
+
+func TestContextNewFunctionHandleStoreGuard(t *testing.T) {
 	rt := NewRuntime()
 	defer rt.Close()
 	ctx := rt.NewContext()
 	defer ctx.Close()
 
+	require.Nil(t, ctx.NewFunction(nil))
+
+	originalStore := ctx.handleStore
+	ctx.handleStore = nil
+	require.Nil(t, ctx.NewFunction(func(ctx *Context, this *Value, args []*Value) *Value {
+		return ctx.NewUndefined()
+	}))
+	ctx.handleStore = originalStore
+}
+
+func TestContextEnsureAutoReleaseFinalizerRegistryHandleStoreGuard(t *testing.T) {
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	originalStore := ctx.handleStore
+	ctx.handleStore = nil
+	require.Nil(t, ctx.ensureAutoReleaseFinalizerRegistry())
+	ctx.handleStore = originalStore
+}
+
+func TestContextWrapPromiseCallbackGuardBranches(t *testing.T) {
+	var nilCtx *Context
+	callback, release := nilCtx.wrapPromiseCallback(nil)
+	require.NotNil(t, callback)
+	require.NotNil(t, release)
+	require.NotPanics(t, func() { callback(nil) })
+	require.NotPanics(t, func() { release() })
+
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	baseRefs := ctx.currentPromiseCallbackRefCount()
+	orphanFn := &Value{}
+	_, release2 := ctx.wrapPromiseCallback(orphanFn)
+	require.NotPanics(t, func() { release2() })
+	require.Equal(t, baseRefs, ctx.currentPromiseCallbackRefCount())
+}
+
+func TestContextNewFunctionForcedExceptionForCoverage(t *testing.T) {
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	baseHandles := ctx.handleStore.Count()
+
+	setContextNewFunctionForceExceptionForTest(true)
+	t.Cleanup(func() {
+		setContextNewFunctionForceExceptionForTest(false)
+	})
+
+	fn := ctx.NewFunction(func(ctx *Context, this *Value, args []*Value) *Value {
+		return ctx.NewUndefined()
+	})
+	require.NotNil(t, fn)
+	defer fn.Free()
+	require.True(t, fn.IsException())
+	require.Equal(t, baseHandles, ctx.handleStore.Count())
+}
+
+func TestContextNewFunctionZeroKeyPathForCoverage(t *testing.T) {
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	setContextNewFunctionForceZeroKeyForTest(true)
+	t.Cleanup(func() {
+		setContextNewFunctionForceZeroKeyForTest(false)
+	})
+
+	fn := ctx.NewFunction(func(ctx *Context, this *Value, args []*Value) *Value {
+		return ctx.NewUndefined()
+	})
+	require.NotNil(t, fn)
+	defer fn.Free()
+	require.False(t, fn.IsException())
+
+	_, ok := ctx.functionHandleID(fn)
+	require.False(t, ok)
+}
+
+func TestContextEnqueueDropSourceBuckets(t *testing.T) {
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	ctx.SnapshotAndResetCloseEnqueueObservability()
+	for i := 0; i < defaultJobQueueSize; i++ {
+		require.True(t, ctx.enqueueJobDuringClose(func(*Context) {}))
+	}
+
+	require.False(t, ctx.enqueueJobDuringCloseWithSource(func(*Context) {}, closeEnqueueSourceValueFree))
+	require.False(t, ctx.enqueueJobDuringCloseWithSource(func(*Context) {}, closeEnqueueSourcePromiseCallback))
+	require.False(t, ctx.enqueueJobDuringCloseWithSource(func(*Context) {}, closeEnqueueSourceOther))
+
+	snap := ctx.SnapshotAndResetCloseEnqueueObservability()
+	require.GreaterOrEqual(t, snap.ValueFreeDropped, uint64(1))
+	require.GreaterOrEqual(t, snap.PromiseCallbackDropped, uint64(1))
+	require.GreaterOrEqual(t, snap.OtherDropped, uint64(1))
+	require.Equal(t, snap.Dropped, snap.ValueFreeDropped+snap.PromiseCallbackDropped+snap.OtherDropped)
+}
+
+func TestContextObservePromiseCleanupAllBranches(t *testing.T) {
+	var nilCtx *Context
+	require.NotPanics(t, func() { nilCtx.observePromiseCleanup(promiseCleanupSourceCancel) })
+	require.NotPanics(t, func() { nilCtx.observePromiseCleanup(promiseCleanupSourceFinally) })
+	require.NotPanics(t, func() { nilCtx.observePromiseCleanup(promiseCleanupSourceFallback) })
+
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	ctx.SnapshotAndResetPromiseCleanupObservability()
+	ctx.observePromiseCleanup(promiseCleanupSourceCancel)
+	ctx.observePromiseCleanup(promiseCleanupSourceFinally)
+	ctx.observePromiseCleanup(promiseCleanupSourceFallback)
+	ctx.observePromiseCleanup(promiseCleanupSource(255)) // default -> fallback
+
+	snap := ctx.SnapshotAndResetPromiseCleanupObservability()
+	require.Equal(t, uint64(1), snap.CancelTriggered)
+	require.Equal(t, uint64(1), snap.FinallyTriggered)
+	require.Equal(t, uint64(2), snap.FallbackTriggered)
+}
+
+func TestContextFunctionHandleIDGuardBranches(t *testing.T) {
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	id, ok := ctx.functionHandleID(nil)
+	require.False(t, ok)
+	require.Zero(t, id)
+
+	nonFn := ctx.NewString("not-fn")
+	defer nonFn.Free()
+	id, ok = ctx.functionHandleID(nonFn)
+	require.False(t, ok)
+	require.Zero(t, id)
+
+	fn := ctx.NewFunction(func(ctx *Context, this *Value, args []*Value) *Value {
+		return ctx.NewUndefined()
+	})
+	defer fn.Free()
+
+	id, ok = ctx.functionHandleID(fn)
+	require.True(t, ok)
+	require.Greater(t, id, int32(0))
+
+	require.True(t, ctx.releaseFunctionByID(id))
+	require.False(t, ctx.releaseFunctionByID(id))
+	require.False(t, ctx.releaseFunctionByID(-1))
+	require.False(t, ctx.releaseFunctionByID(0))
+
+	id, ok = ctx.functionHandleID(fn)
+	require.False(t, ok)
+	require.Zero(t, id)
+
+	fn2 := ctx.NewFunction(func(ctx *Context, this *Value, args []*Value) *Value {
+		return ctx.NewUndefined()
+	})
+	defer fn2.Free()
+
+	setContextFunctionHandleIDForceZeroKeyForTest(true)
+	id, ok = ctx.functionHandleID(fn2)
+	setContextFunctionHandleIDForceZeroKeyForTest(false)
+	require.False(t, ok)
+	require.Zero(t, id)
+}
+
+func TestContextFunctionHandleIDInvalidMapValueType(t *testing.T) {
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	fn := ctx.NewFunction(func(ctx *Context, this *Value, args []*Value) *Value {
+		return ctx.NewUndefined()
+	})
+	defer fn.Free()
+
+	id, ok := ctx.functionHandleID(fn)
+	require.True(t, ok)
+
+	var matchedKey interface{}
+	ctx.fnHandleMap.Range(func(key, value interface{}) bool {
+		mappedID, castOK := value.(int32)
+		if castOK && mappedID == id {
+			matchedKey = key
+			return false
+		}
+		return true
+	})
+	require.NotNil(t, matchedKey)
+
+	ctx.fnHandleMap.Store(matchedKey, "invalid-type")
+	gotID, gotOK := ctx.functionHandleID(fn)
+	require.False(t, gotOK)
+	require.Zero(t, gotID)
+
+	_, exists := ctx.fnHandleMap.Load(matchedKey)
+	require.False(t, exists)
+}
+
+func TestContextLoadFunctionFromHandleIDFailClosed(t *testing.T) {
+	var nilCtx *Context
+	require.Nil(t, nilCtx.loadFunctionFromHandleID(1))
+
+	orphan := &Context{}
+	require.Nil(t, orphan.loadFunctionFromHandleID(1))
+
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	require.Nil(t, ctx.loadFunctionFromHandleID(1))
+
+	fn := ctx.NewFunction(func(ctx *Context, this *Value, args []*Value) *Value {
+		return ctx.NewString("ok")
+	})
+	defer fn.Free()
+
+	id, ok := ctx.functionHandleID(fn)
+	require.True(t, ok)
+	require.Greater(t, id, int32(0))
+
+	loaded := ctx.loadFunctionFromHandleID(id)
+	require.NotNil(t, loaded)
+	_, castOK := loaded.(func(*Context, *Value, []*Value) *Value)
+	require.True(t, castOK)
+
+	require.True(t, ctx.releaseFunctionByID(id))
+	require.Nil(t, ctx.loadFunctionFromHandleID(id))
+}
+
+func TestContextRegisterFunctionForAutoReleaseGuards(t *testing.T) {
+	var nilCtx *Context
+	require.NotPanics(t, func() { nilCtx.registerFunctionForAutoRelease(nil) })
+
+	orphan := &Context{}
+	require.NotPanics(t, func() { orphan.registerFunctionForAutoRelease(nil) })
+
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	nonFn := ctx.NewString("not-fn")
+	defer nonFn.Free()
+	require.NotPanics(t, func() { ctx.registerFunctionForAutoRelease(nonFn) })
+
+	fn := ctx.NewFunction(func(ctx *Context, this *Value, args []*Value) *Value {
+		return ctx.NewUndefined()
+	})
+	defer fn.Free()
+
+	id, ok := ctx.functionHandleID(fn)
+	require.True(t, ok)
+
+	var key interface{}
+	ctx.fnHandleMap.Range(func(k, v interface{}) bool {
+		mappedID, castOK := v.(int32)
+		if castOK && mappedID == id {
+			key = k
+			return false
+		}
+		return true
+	})
+	require.NotNil(t, key)
+
+	ctx.fnHandleMap.Store(key, "invalid-id-type")
+	require.NotPanics(t, func() { ctx.registerFunctionForAutoRelease(fn) })
+
+	_, exists := ctx.fnHandleMap.Load(key)
+	require.False(t, exists)
+
+	patch := ctx.Eval(`
+        (() => {
+            globalThis.__fr_backup_for_auto_release_guard = globalThis.FinalizationRegistry;
+            delete globalThis.FinalizationRegistry;
+            return typeof FinalizationRegistry;
+        })()
+    `)
+	require.False(t, patch.IsException())
+	require.Equal(t, "undefined", patch.ToString())
+	patch.Free()
+
+	fn2 := ctx.NewFunction(func(ctx *Context, this *Value, args []*Value) *Value {
+		return ctx.NewUndefined()
+	})
+	defer fn2.Free()
+	require.NotPanics(t, func() { ctx.registerFunctionForAutoRelease(fn2) })
+
+	restore := ctx.Eval(`
+        (() => {
+            globalThis.FinalizationRegistry = globalThis.__fr_backup_for_auto_release_guard;
+            delete globalThis.__fr_backup_for_auto_release_guard;
+            return typeof FinalizationRegistry;
+        })()
+    `)
+	require.False(t, restore.IsException())
+	restore.Free()
+}
+
+func TestContextReleaseFunctionGuardBranches(t *testing.T) {
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	var nilCtx *Context
+	require.False(t, nilCtx.ReleaseFunction(nil))
+
+	nonFn := ctx.NewString("x")
+	defer nonFn.Free()
+	require.False(t, ctx.ReleaseFunction(nonFn))
+
+	rt2 := NewRuntime()
+	defer rt2.Close()
+	ctx2 := rt2.NewContext()
+	defer ctx2.Close()
+
+	foreignFn := ctx2.NewFunction(func(ctx *Context, this *Value, args []*Value) *Value {
+		return ctx.NewUndefined()
+	})
+	defer foreignFn.Free()
+	require.False(t, ctx.ReleaseFunction(foreignFn))
+
+	fn := ctx.NewFunction(func(ctx *Context, this *Value, args []*Value) *Value {
+		return ctx.NewUndefined()
+	})
+	defer fn.Free()
+
+	id, ok := ctx.functionHandleID(fn)
+	require.True(t, ok)
+
+	var key interface{}
+	ctx.fnHandleMap.Range(func(k, v interface{}) bool {
+		mappedID, castOK := v.(int32)
+		if castOK && mappedID == id {
+			key = k
+			return false
+		}
+		return true
+	})
+	require.NotNil(t, key)
+
+	ctx.fnHandleMap.Store(key, "bad-id-type")
+	require.False(t, ctx.ReleaseFunction(fn))
+
+	_, exists := ctx.fnHandleMap.Load(key)
+	require.False(t, exists)
+}
+
+func TestContextReleaseFunctionZeroKeyInjectedPath(t *testing.T) {
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	fn := ctx.NewFunction(func(ctx *Context, this *Value, args []*Value) *Value {
+		return ctx.NewUndefined()
+	})
+	defer fn.Free()
+
+	setContextReleaseFunctionForceZeroKeyForTest(true)
+	t.Cleanup(func() {
+		setContextReleaseFunctionForceZeroKeyForTest(false)
+	})
+
+	require.False(t, ctx.ReleaseFunction(fn))
+}
+
+func TestContextRegisterPromiseSettlementCleanupGuards(t *testing.T) {
+	var nilCtx *Context
+	cancel := nilCtx.registerPromiseSettlementCleanup(nil, nil)
+	require.NotNil(t, cancel)
+
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	cleanupCount := 0
+	nonPromise := ctx.NewString("x")
+	defer nonPromise.Free()
+	cancel = ctx.registerPromiseSettlementCleanup(nonPromise, func() { cleanupCount++ })
+	require.NotNil(t, cancel)
+	cancel()
+	require.Equal(t, 1, cleanupCount)
+
+	promise := ctx.Eval(`Promise.resolve(1)`)
+	defer promise.Free()
+	require.False(t, promise.IsException())
+	require.True(t, promise.IsPromise())
+
+	cleanupCount2 := 0
+	cancel = ctx.registerPromiseSettlementCleanup(promise, func() { cleanupCount2++ })
+	require.NotNil(t, cancel)
+	cancel()
+	ctx.ProcessJobs()
+	require.Equal(t, 1, cleanupCount2)
+
+	// ensureAutoReleaseFinalizerRegistry returns nil branch
+	patch := ctx.Eval(`
+        (() => {
+            globalThis.__fr_backup_for_cleanup_guard = globalThis.FinalizationRegistry;
+            delete globalThis.FinalizationRegistry;
+            return typeof FinalizationRegistry;
+        })()
+    `)
+	require.False(t, patch.IsException())
+	patch.Free()
+
+	promise2 := ctx.Eval(`Promise.resolve(2)`)
+	defer promise2.Free()
+	require.False(t, promise2.IsException())
+	require.True(t, promise2.IsPromise())
+
+	cleanupCount3 := 0
+	cancel = ctx.registerPromiseSettlementCleanup(promise2, func() { cleanupCount3++ })
+	require.NotNil(t, cancel)
+	cancel()
+	ctx.ProcessJobs()
+	require.Equal(t, 1, cleanupCount3)
+
+	promise3 := ctx.Eval(`Promise.resolve(3)`)
+	defer promise3.Free()
+	require.False(t, promise3.IsException())
+	require.True(t, promise3.IsPromise())
+
+	cleanupCount4 := 0
+	setContextNewFunctionForceExceptionForTest(true)
+	cancel = ctx.registerPromiseSettlementCleanup(promise3, func() { cleanupCount4++ })
+	setContextNewFunctionForceExceptionForTest(false)
+	require.NotNil(t, cancel)
+	cancel()
+	ctx.ProcessJobs()
+	require.Equal(t, 1, cleanupCount4)
+
+	restore := ctx.Eval(`
+        (() => {
+            globalThis.FinalizationRegistry = globalThis.__fr_backup_for_cleanup_guard;
+            delete globalThis.__fr_backup_for_cleanup_guard;
+            return typeof FinalizationRegistry;
+        })()
+    `)
+	require.False(t, restore.IsException())
+	restore.Free()
+}
+
+func TestEnsureAutoReleaseFinalizerRegistryConstructorThrows(t *testing.T) {
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	featureCheck := ctx.Eval(`typeof FinalizationRegistry !== "undefined"`)
+	require.False(t, featureCheck.IsException())
+	if !featureCheck.Bool() {
+		featureCheck.Free()
+		t.Skip("FinalizationRegistry is not available")
+	}
+	featureCheck.Free()
+
+	patch := ctx.Eval(`
+        (() => {
+            globalThis.__origFRForCtorThrowTest = globalThis.FinalizationRegistry;
+            globalThis.FinalizationRegistry = function() { throw new Error("ctor-fail"); };
+            return true;
+        })()
+    `)
+	require.False(t, patch.IsException())
+	patch.Free()
+
+	registry := ctx.ensureAutoReleaseFinalizerRegistry()
+	require.Nil(t, registry)
+
+	restore := ctx.Eval(`
+        (() => {
+            globalThis.FinalizationRegistry = globalThis.__origFRForCtorThrowTest;
+            delete globalThis.__origFRForCtorThrowTest;
+            return true;
+        })()
+    `)
+	require.False(t, restore.IsException())
+	restore.Free()
+
+	retry := ctx.ensureAutoReleaseFinalizerRegistry()
+	require.NotNil(t, retry)
+}
+
+func TestEnsureAutoReleaseFinalizerRegistryInterruptSafety(t *testing.T) {
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	baseHandles := ctx.handleStore.Count()
+
+	ctx.SetInterruptHandler(func() int { return 1 })
+	defer ctx.SetInterruptHandler(nil)
+
+	registry := ctx.ensureAutoReleaseFinalizerRegistry()
+	if registry != nil && registry.IsException() {
+		registry.Free()
+		registry = nil
+	}
+	require.LessOrEqual(t, ctx.handleStore.Count(), baseHandles+1)
+}
+
+func TestEnsureAutoReleaseFinalizerRegistryCleanupFnExceptionPath(t *testing.T) {
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	baseHandles := ctx.handleStore.Count()
+
+	setContextNewFunctionForceExceptionForTest(true)
+	t.Cleanup(func() {
+		setContextNewFunctionForceExceptionForTest(false)
+	})
+
+	registry := ctx.ensureAutoReleaseFinalizerRegistry()
+	require.Nil(t, registry)
+	require.LessOrEqual(t, ctx.handleStore.Count(), baseHandles)
+}
+
+func TestEnsureAutoReleaseFinalizerRegistryFactoryExceptionPath(t *testing.T) {
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	baseHandles := ctx.handleStore.Count()
+
+	setContextEnsureAutoReleaseForceFactoryExceptionForTest(true)
+	t.Cleanup(func() {
+		setContextEnsureAutoReleaseForceFactoryExceptionForTest(false)
+	})
+
+	registry := ctx.ensureAutoReleaseFinalizerRegistry()
+	require.Nil(t, registry)
+	require.LessOrEqual(t, ctx.handleStore.Count(), baseHandles)
+}
+
+func TestEnsureAutoReleaseFinalizerRegistryFactoryEvalExceptionPath(t *testing.T) {
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	baseHandles := ctx.handleStore.Count()
+
+	setContextEnsureAutoReleaseForceFactoryEvalExceptionForTest(true)
+	t.Cleanup(func() {
+		setContextEnsureAutoReleaseForceFactoryEvalExceptionForTest(false)
+	})
+
+	registry := ctx.ensureAutoReleaseFinalizerRegistry()
+	require.Nil(t, registry)
+	require.LessOrEqual(t, ctx.handleStore.Count(), baseHandles)
+}
+
+func TestContextFailClosedGuardBranches(t *testing.T) {
+	emptyCtx := &Context{}
+	require.Nil(t, emptyCtx.NewFunction(nil))
+	require.Nil(t, emptyCtx.Throw(nil))
+	require.Nil(t, emptyCtx.ThrowError(errors.New("x")))
+	require.Nil(t, emptyCtx.ThrowSyntaxError("x"))
+	require.Nil(t, emptyCtx.ThrowTypeError("x"))
+	require.Nil(t, emptyCtx.ThrowReferenceError("x"))
+	require.Nil(t, emptyCtx.ParseJSON("{}"))
+}
+
+func TestContextAsync(t *testing.T) {
+	newCtx := func(t *testing.T) *Context {
+		rt := NewRuntime()
+		ctx := rt.NewContext()
+		t.Cleanup(func() {
+			ctx.Close()
+			rt.Close()
+		})
+		return ctx
+	}
+
 	t.Run("EventLoop", func(t *testing.T) {
+		ctx := newCtx(t)
 		result := ctx.Eval(`
             var executed = false;
             setTimeout(() => { executed = true; }, 10);
@@ -541,6 +2967,7 @@ func TestContextAsync(t *testing.T) {
 
 	// Updated: Use Function + Promise instead of AsyncFunction
 	t.Run("AwaitPromises", func(t *testing.T) {
+		ctx := newCtx(t)
 		// Test successful promise using new Promise API
 		asyncTestFn := ctx.NewFunction(func(ctx *Context, this *Value, args []*Value) *Value {
 			return ctx.NewPromise(func(resolve, reject func(*Value)) {
@@ -579,12 +3006,18 @@ func TestContextAsync(t *testing.T) {
 }
 
 func TestContextPromise(t *testing.T) {
-	rt := NewRuntime()
-	defer rt.Close()
-	ctx := rt.NewContext()
-	defer ctx.Close()
+	newCtx := func(t *testing.T) *Context {
+		rt := NewRuntime()
+		ctx := rt.NewContext()
+		t.Cleanup(func() {
+			ctx.Close()
+			rt.Close()
+		})
+		return ctx
+	}
 
 	t.Run("BasicPromise", func(t *testing.T) {
+		ctx := newCtx(t)
 		// Test immediate resolve
 		promise := ctx.NewPromise(func(resolve, reject func(*Value)) {
 			resolve(ctx.NewString("success"))
@@ -600,6 +3033,7 @@ func TestContextPromise(t *testing.T) {
 	})
 
 	t.Run("RejectedPromise", func(t *testing.T) {
+		ctx := newCtx(t)
 		promise := ctx.NewPromise(func(resolve, reject func(*Value)) {
 			errorObj := ctx.NewError(errors.New("error"))
 			defer errorObj.Free()
@@ -617,6 +3051,7 @@ func TestContextPromise(t *testing.T) {
 	})
 
 	t.Run("PromiseFunction", func(t *testing.T) {
+		ctx := newCtx(t)
 		// Create function that returns Promise
 		asyncFn := ctx.NewFunction(func(ctx *Context, this *Value, args []*Value) *Value {
 			return ctx.NewPromise(func(resolve, reject func(*Value)) {
@@ -653,6 +3088,7 @@ func TestContextPromise(t *testing.T) {
 	})
 
 	t.Run("PromiseChaining", func(t *testing.T) {
+		ctx := newCtx(t)
 		// Create async function for chaining
 		asyncDouble := ctx.NewFunction(func(ctx *Context, this *Value, args []*Value) *Value {
 			return ctx.NewPromise(func(resolve, reject func(*Value)) {
@@ -685,6 +3121,7 @@ func TestContextPromise(t *testing.T) {
 	})
 
 	t.Run("PromiseState", func(t *testing.T) {
+		ctx := newCtx(t)
 		// Test different promise states
 		pendingPromise := ctx.Eval(`new Promise(() => {})`) // Never resolves
 		defer pendingPromise.Free()
@@ -708,6 +3145,7 @@ func TestContextPromise(t *testing.T) {
 	})
 
 	t.Run("ValueAwait", func(t *testing.T) {
+		ctx := newCtx(t)
 		// Test Value.Await() method
 		promise := ctx.NewPromise(func(resolve, reject func(*Value)) {
 			resolve(ctx.NewString("awaited via Value.Await"))
@@ -734,6 +3172,7 @@ func TestContextPromise(t *testing.T) {
 	})
 
 	t.Run("ComplexAsync", func(t *testing.T) {
+		ctx := newCtx(t)
 		// Test more complex async scenario
 		asyncProcessor := ctx.NewFunction(func(ctx *Context, this *Value, args []*Value) *Value {
 			return ctx.NewPromise(func(resolve, reject func(*Value)) {
@@ -781,6 +3220,7 @@ func TestContextPromise(t *testing.T) {
 	})
 
 	t.Run("AwaitHandlesScheduledResolve", func(t *testing.T) {
+		ctx := newCtx(t)
 		scheduled := make(chan bool, 1)
 		promise := ctx.NewPromise(func(resolve, reject func(*Value)) {
 			go func() {
@@ -814,12 +3254,18 @@ func TestContextPromise(t *testing.T) {
 }
 
 func TestContextScheduler(t *testing.T) {
-	rt := NewRuntime()
-	defer rt.Close()
-	ctx := rt.NewContext()
-	defer ctx.Close()
+	newCtx := func(t *testing.T) *Context {
+		rt := NewRuntime()
+		ctx := rt.NewContext()
+		t.Cleanup(func() {
+			ctx.Close()
+			rt.Close()
+		})
+		return ctx
+	}
 
 	t.Run("LoopProcessesScheduledJobs", func(t *testing.T) {
+		ctx := newCtx(t)
 		results := make(chan struct {
 			sum int32
 			err error
@@ -859,9 +3305,58 @@ func TestContextInternalsCoverage(t *testing.T) {
 	t.Run("ScheduleEdgeCases", func(t *testing.T) {
 		var nilCtx *Context
 		require.False(t, nilCtx.Schedule(func(*Context) {}))
+		require.Nil(t, nilCtx.NewBool(true))
+		require.Nil(t, nilCtx.NewInt32(1))
+		require.Nil(t, nilCtx.NewString("x"))
+		require.Nil(t, nilCtx.NewArrayBuffer(nil))
+		require.Nil(t, nilCtx.NewObject())
+		require.Nil(t, nilCtx.ParseJSON("{}"))
+		require.Nil(t, nilCtx.NewFunction(func(*Context, *Value, []*Value) *Value { return nil }))
+		require.Nil(t, nilCtx.NewAtom("x"))
+		require.Nil(t, nilCtx.NewAtomIdx(1))
+		require.Nil(t, nilCtx.NewPromise(func(resolve, reject func(*Value)) {}))
+		promiseNil, cancelNil := nilCtx.NewPromiseWithCancel(func(resolve, reject func(*Value)) {})
+		require.Nil(t, promiseNil)
+		require.NotNil(t, cancelNil)
+		require.NotPanics(t, func() { cancelNil() })
+		require.Nil(t, nilCtx.Invoke(nil, nil))
+		require.Nil(t, nilCtx.ThrowSyntaxError("x"))
+		require.Nil(t, nilCtx.ThrowTypeError("x"))
+		require.Nil(t, nilCtx.ThrowReferenceError("x"))
+		require.Nil(t, nilCtx.ThrowRangeError("x"))
+		require.Nil(t, nilCtx.ThrowInternalError("x"))
+		require.False(t, nilCtx.HasException())
+		require.Nil(t, nilCtx.Exception())
+		require.NotPanics(t, func() { nilCtx.Loop() })
+		require.Nil(t, nilCtx.Await(nil))
 
 		ctx := &Context{}
 		require.False(t, ctx.Schedule(func(*Context) {}))
+		require.Nil(t, ctx.NewBool(true))
+		require.Nil(t, ctx.NewInt32(1))
+		require.Nil(t, ctx.NewString("x"))
+		require.Nil(t, ctx.NewArrayBuffer(nil))
+		require.Nil(t, ctx.NewObject())
+		require.Nil(t, ctx.ParseJSON("{}"))
+		require.Nil(t, ctx.NewFunction(func(*Context, *Value, []*Value) *Value { return nil }))
+		require.Nil(t, ctx.NewAtom("x"))
+		require.Nil(t, ctx.NewAtomIdx(1))
+		require.Nil(t, ctx.NewPromise(func(resolve, reject func(*Value)) {}))
+		promiseOrphan, cancelOrphan := ctx.NewPromiseWithCancel(func(resolve, reject func(*Value)) {})
+		require.Nil(t, promiseOrphan)
+		require.NotNil(t, cancelOrphan)
+		require.NotPanics(t, func() { cancelOrphan() })
+		require.Nil(t, ctx.Invoke(nil, nil))
+		require.Nil(t, ctx.ThrowSyntaxError("x"))
+		require.Nil(t, ctx.ThrowTypeError("x"))
+		require.Nil(t, ctx.ThrowReferenceError("x"))
+		require.Nil(t, ctx.ThrowRangeError("x"))
+		require.Nil(t, ctx.ThrowInternalError("x"))
+		require.False(t, ctx.HasException())
+		require.Nil(t, ctx.Exception())
+		require.NotPanics(t, func() { ctx.Loop() })
+		orphanPromise := &Value{}
+		require.Same(t, orphanPromise, ctx.Await(orphanPromise))
 
 		ctx.initScheduler()
 		require.False(t, ctx.Schedule(nil))
@@ -882,6 +3377,17 @@ func TestContextInternalsCoverage(t *testing.T) {
 		}()
 		require.False(t, blockingCtx.Schedule(func(*Context) {}))
 		<-done
+
+		rt := NewRuntime()
+		defer rt.Close()
+		realCtx := rt.NewContext()
+		defer realCtx.Close()
+		promiseErr, cancelErr := realCtx.NewPromiseWithCancel(nil)
+		require.NotNil(t, promiseErr)
+		require.True(t, promiseErr.IsException())
+		require.Contains(t, realCtx.Exception().Error(), "promise executor is nil")
+		promiseErr.Free()
+		require.NotPanics(t, func() { cancelErr() })
 	})
 
 	t.Run("ProcessJobsAndDrainJobs", func(t *testing.T) {
@@ -907,6 +3413,74 @@ func TestContextInternalsCoverage(t *testing.T) {
 		emptyCtx.jobQueue <- nil
 		emptyCtx.drainJobs()
 		require.Equal(t, 0, len(emptyCtx.jobQueue))
+	})
+
+	t.Run("CloseNilSafety", func(t *testing.T) {
+		var nilCtx *Context
+		require.NotPanics(t, func() { nilCtx.Close() })
+
+		orphan := &Context{}
+		require.NotPanics(t, func() { orphan.Close() })
+
+		rt := NewRuntime()
+		defer rt.Close()
+		realCtx := rt.NewContext()
+		require.NotNil(t, realCtx)
+		require.NotPanics(t, func() { realCtx.Close() })
+		require.NotPanics(t, func() { realCtx.Close() })
+		require.Nil(t, realCtx.ref)
+	})
+
+	t.Run("CloseAdditionalBranches", func(t *testing.T) {
+		rt := NewRuntime()
+		defer rt.Close()
+
+		ctx := rt.NewContext()
+		require.NotNil(t, ctx)
+
+		featureCheck := ctx.Eval(`typeof FinalizationRegistry !== "undefined"`)
+		require.False(t, featureCheck.IsException())
+		if featureCheck.Bool() {
+			require.NotNil(t, ctx.ensureAutoReleaseFinalizerRegistry())
+		}
+		featureCheck.Free()
+
+		close(ctx.jobClosed) // already-closed branch in Close
+		ctx.globals = nil    // globals nil branch in Close
+		require.NotPanics(t, func() { ctx.Close() })
+	})
+
+	t.Run("CloseWithoutJobClosedChannel", func(t *testing.T) {
+		rt := NewRuntime()
+		defer rt.Close()
+
+		ctx := rt.NewContext()
+		require.NotNil(t, ctx)
+		ctx.jobClosed = nil // jobClosed nil branch in Close
+		require.NotPanics(t, func() { ctx.Close() })
+	})
+
+	t.Run("CloseWithNilJobQueue", func(t *testing.T) {
+		rt := NewRuntime()
+		defer rt.Close()
+
+		ctx := rt.NewContext()
+		require.NotNil(t, ctx)
+		ctx.jobQueue = nil
+		require.NotPanics(t, func() { ctx.Close() })
+	})
+
+	t.Run("CloseDrainUntilStableTimeoutPath", func(t *testing.T) {
+		rt := NewRuntime()
+		defer rt.Close()
+
+		ctx := rt.NewContext()
+		require.NotNil(t, ctx)
+
+		ctx.jobQueue <- func(*Context) {
+			time.Sleep(4 * time.Millisecond)
+		}
+		require.NotPanics(t, func() { ctx.Close() })
 	})
 
 	t.Run("DuplicateValue", func(t *testing.T) {
@@ -1000,6 +3574,106 @@ func TestContextInternalsCoverage(t *testing.T) {
 		require.Equal(t, "unset", closedResult.ToString())
 		closedResult.Free()
 		releaseClosed()
+
+		ctxOffThread := rt.NewContext()
+		defer ctxOffThread.Close()
+		cbOffThread := ctxOffThread.Eval(`(value) => { globalThis.__off_thread_cb = value; }`)
+		defer cbOffThread.Free()
+		require.False(t, cbOffThread.IsException())
+
+		baseRefs := ctxOffThread.currentPromiseCallbackRefCount()
+		callbackOffThread, releaseOffThread := ctxOffThread.wrapPromiseCallback(cbOffThread)
+		require.Equal(t, baseRefs+1, ctxOffThread.currentPromiseCallbackRefCount())
+
+		close(ctxOffThread.jobClosed)
+		done := make(chan interface{}, 2)
+		go func() {
+			defer func() { done <- recover() }()
+			releaseOffThread()
+		}()
+		go func() {
+			defer func() { done <- recover() }()
+			callbackOffThread(nil)
+		}()
+		require.Nil(t, <-done)
+		require.Nil(t, <-done)
+
+		ctxOffThread.ProcessJobs()
+		require.Equal(t, baseRefs, ctxOffThread.currentPromiseCallbackRefCount())
+	})
+
+	t.Run("InvokeAndAsyncNilSafety", func(t *testing.T) {
+		rt := NewRuntime()
+		defer rt.Close()
+		ctx := rt.NewContext()
+		defer ctx.Close()
+
+		fn := ctx.NewFunction(func(ctx *Context, this *Value, args []*Value) *Value {
+			if len(args) == 0 || args[0] == nil || args[0].IsUndefined() {
+				return ctx.NewString("undefined")
+			}
+			return ctx.NewString(args[0].ToString())
+		})
+		defer fn.Free()
+
+		require.NotPanics(t, func() {
+			result := ctx.Invoke(fn, nil, nil)
+			require.NotNil(t, result)
+			defer result.Free()
+			require.Equal(t, "undefined", result.ToString())
+		})
+
+		orphanArg := &Value{}
+		orphanArgResult := ctx.Invoke(fn, nil, orphanArg)
+		require.NotNil(t, orphanArgResult)
+		defer orphanArgResult.Free()
+		require.False(t, orphanArgResult.IsException())
+		require.Equal(t, "undefined", orphanArgResult.ToString())
+
+		rt2 := NewRuntime()
+		defer rt2.Close()
+		ctx2 := rt2.NewContext()
+		defer ctx2.Close()
+
+		foreignArg := ctx2.NewString("foreign")
+		defer foreignArg.Free()
+		crossArgResult := ctx.Invoke(fn, nil, foreignArg)
+		require.NotNil(t, crossArgResult)
+		defer crossArgResult.Free()
+		require.True(t, crossArgResult.IsException())
+		require.Contains(t, ctx.Exception().Error(), "cross-context argument")
+
+		foreignThis := ctx2.NewObject()
+		defer foreignThis.Free()
+		crossThisResult := ctx.Invoke(fn, foreignThis)
+		require.NotNil(t, crossThisResult)
+		defer crossThisResult.Free()
+		require.True(t, crossThisResult.IsException())
+		require.Contains(t, ctx.Exception().Error(), "cross-context this value")
+
+		foreignFn := ctx2.NewFunction(func(ctx *Context, this *Value, args []*Value) *Value {
+			return ctx.NewString("foreign")
+		})
+		defer foreignFn.Free()
+		crossFnResult := ctx.Invoke(foreignFn, nil)
+		require.NotNil(t, crossFnResult)
+		defer crossFnResult.Free()
+		require.True(t, crossFnResult.IsException())
+		require.Contains(t, ctx.Exception().Error(), "cross-context function")
+
+		orphanCtx := &Context{}
+		require.Nil(t, orphanCtx.Invoke(fn, nil))
+
+		asyncFn := ctx.NewAsyncFunction(func(ctx *Context, this *Value, promise *Value, args []*Value) *Value {
+			return nil
+		})
+		defer asyncFn.Free()
+		ctx.Globals().Set("asyncNil", asyncFn)
+
+		result := ctx.Eval(`asyncNil()`, EvalAwait(true))
+		defer result.Free()
+		require.False(t, result.IsException())
+		require.True(t, result.IsUndefined())
 	})
 
 	t.Run("AwaitHandlesNilAndNonPromise", func(t *testing.T) {
@@ -1202,122 +3876,152 @@ func TestContextInternalsCoverage(t *testing.T) {
 	})
 }
 
-func TestContextTypedArrays(t *testing.T) {
+func TestContextCloseReadOnlyQueryContracts(t *testing.T) {
 	rt := NewRuntime()
-	defer rt.Close()
 	ctx := rt.NewContext()
-	defer ctx.Close()
+	require.NotNil(t, ctx)
+
+	require.NotNil(t, ctx.Runtime())
+
+	result := ctx.Eval(`(() => { throw new Error("boom") })()`)
+	require.True(t, result.IsException())
+	result.Free()
+	require.True(t, ctx.HasException())
+	require.NotNil(t, ctx.Exception())
+
+	ctx.Close()
+	require.Nil(t, ctx.Runtime())
+	require.False(t, ctx.HasException())
+	require.Nil(t, ctx.Exception())
+
+	// Read-only queries remain fail-closed after close.
+	require.NotPanics(t, func() { ctx.Loop() })
+
+	rt.Close()
+}
+
+func TestContextTypedArrays(t *testing.T) {
+	newCtx := func(t *testing.T) *Context {
+		rt := NewRuntime()
+		ctx := rt.NewContext()
+		t.Cleanup(func() {
+			ctx.Close()
+			rt.Close()
+		})
+		return ctx
+	}
 
 	t.Run("TypedArrayCreation", func(t *testing.T) {
 		// Test all TypedArray creation methods
 		typedArrayTests := []struct {
 			name       string
-			createFunc func() *Value     // Changed to return pointer
+			createFunc func(*Context) *Value
 			checkFunc  func(*Value) bool // Changed parameter to pointer
-			testEmpty  func() *Value     // Changed to return pointer
-			testNil    func() *Value     // Changed to return pointer
+			testEmpty  func(*Context) *Value
+			testNil    func(*Context) *Value
 		}{
 			{
 				"Int8Array",
-				func() *Value { return ctx.NewInt8Array([]int8{-128, -1, 0, 1, 127}) },
+				func(ctx *Context) *Value { return ctx.NewInt8Array([]int8{-128, -1, 0, 1, 127}) },
 				func(v *Value) bool { return v.IsInt8Array() },
-				func() *Value { return ctx.NewInt8Array([]int8{}) },
-				func() *Value { return ctx.NewInt8Array(nil) },
+				func(ctx *Context) *Value { return ctx.NewInt8Array([]int8{}) },
+				func(ctx *Context) *Value { return ctx.NewInt8Array(nil) },
 			},
 			{
 				"Uint8Array",
-				func() *Value { return ctx.NewUint8Array([]uint8{0, 1, 128, 255}) },
+				func(ctx *Context) *Value { return ctx.NewUint8Array([]uint8{0, 1, 128, 255}) },
 				func(v *Value) bool { return v.IsUint8Array() },
-				func() *Value { return ctx.NewUint8Array([]uint8{}) },
-				func() *Value { return ctx.NewUint8Array(nil) },
+				func(ctx *Context) *Value { return ctx.NewUint8Array([]uint8{}) },
+				func(ctx *Context) *Value { return ctx.NewUint8Array(nil) },
 			},
 			{
 				"Uint8ClampedArray",
-				func() *Value { return ctx.NewUint8ClampedArray([]uint8{0, 127, 255}) },
+				func(ctx *Context) *Value { return ctx.NewUint8ClampedArray([]uint8{0, 127, 255}) },
 				func(v *Value) bool { return v.IsUint8ClampedArray() },
-				func() *Value { return ctx.NewUint8ClampedArray([]uint8{}) },
-				func() *Value { return ctx.NewUint8ClampedArray(nil) },
+				func(ctx *Context) *Value { return ctx.NewUint8ClampedArray([]uint8{}) },
+				func(ctx *Context) *Value { return ctx.NewUint8ClampedArray(nil) },
 			},
 			{
 				"Int16Array",
-				func() *Value { return ctx.NewInt16Array([]int16{-32768, -1, 0, 1, 32767}) },
+				func(ctx *Context) *Value { return ctx.NewInt16Array([]int16{-32768, -1, 0, 1, 32767}) },
 				func(v *Value) bool { return v.IsInt16Array() },
-				func() *Value { return ctx.NewInt16Array([]int16{}) },
-				func() *Value { return ctx.NewInt16Array(nil) },
+				func(ctx *Context) *Value { return ctx.NewInt16Array([]int16{}) },
+				func(ctx *Context) *Value { return ctx.NewInt16Array(nil) },
 			},
 			{
 				"Uint16Array",
-				func() *Value { return ctx.NewUint16Array([]uint16{0, 1, 32768, 65535}) },
+				func(ctx *Context) *Value { return ctx.NewUint16Array([]uint16{0, 1, 32768, 65535}) },
 				func(v *Value) bool { return v.IsUint16Array() },
-				func() *Value { return ctx.NewUint16Array([]uint16{}) },
-				func() *Value { return ctx.NewUint16Array(nil) },
+				func(ctx *Context) *Value { return ctx.NewUint16Array([]uint16{}) },
+				func(ctx *Context) *Value { return ctx.NewUint16Array(nil) },
 			},
 			{
 				"Int32Array",
-				func() *Value { return ctx.NewInt32Array([]int32{-2147483648, -1, 0, 1, 2147483647}) },
+				func(ctx *Context) *Value { return ctx.NewInt32Array([]int32{-2147483648, -1, 0, 1, 2147483647}) },
 				func(v *Value) bool { return v.IsInt32Array() },
-				func() *Value { return ctx.NewInt32Array([]int32{}) },
-				func() *Value { return ctx.NewInt32Array(nil) },
+				func(ctx *Context) *Value { return ctx.NewInt32Array([]int32{}) },
+				func(ctx *Context) *Value { return ctx.NewInt32Array(nil) },
 			},
 			{
 				"Uint32Array",
-				func() *Value { return ctx.NewUint32Array([]uint32{0, 1, 2147483648, 4294967295}) },
+				func(ctx *Context) *Value { return ctx.NewUint32Array([]uint32{0, 1, 2147483648, 4294967295}) },
 				func(v *Value) bool { return v.IsUint32Array() },
-				func() *Value { return ctx.NewUint32Array([]uint32{}) },
-				func() *Value { return ctx.NewUint32Array(nil) },
+				func(ctx *Context) *Value { return ctx.NewUint32Array([]uint32{}) },
+				func(ctx *Context) *Value { return ctx.NewUint32Array(nil) },
 			},
 			{
 				"Float32Array",
-				func() *Value { return ctx.NewFloat32Array([]float32{-3.14, 0.0, 1.5, 3.14159}) },
+				func(ctx *Context) *Value { return ctx.NewFloat32Array([]float32{-3.14, 0.0, 1.5, 3.14159}) },
 				func(v *Value) bool { return v.IsFloat32Array() },
-				func() *Value { return ctx.NewFloat32Array([]float32{}) },
-				func() *Value { return ctx.NewFloat32Array(nil) },
+				func(ctx *Context) *Value { return ctx.NewFloat32Array([]float32{}) },
+				func(ctx *Context) *Value { return ctx.NewFloat32Array(nil) },
 			},
 			{
 				"Float64Array",
-				func() *Value {
+				func(ctx *Context) *Value {
 					return ctx.NewFloat64Array([]float64{-3.141592653589793, 0.0, 1.5, 3.141592653589793})
 				},
 				func(v *Value) bool { return v.IsFloat64Array() },
-				func() *Value { return ctx.NewFloat64Array([]float64{}) },
-				func() *Value { return ctx.NewFloat64Array(nil) },
+				func(ctx *Context) *Value { return ctx.NewFloat64Array([]float64{}) },
+				func(ctx *Context) *Value { return ctx.NewFloat64Array(nil) },
 			},
 			{
 				"BigInt64Array",
-				func() *Value {
+				func(ctx *Context) *Value {
 					return ctx.NewBigInt64Array([]int64{-9223372036854775808, -1, 0, 1, 9223372036854775807})
 				},
 				func(v *Value) bool { return v.IsBigInt64Array() },
-				func() *Value { return ctx.NewBigInt64Array([]int64{}) },
-				func() *Value { return ctx.NewBigInt64Array(nil) },
+				func(ctx *Context) *Value { return ctx.NewBigInt64Array([]int64{}) },
+				func(ctx *Context) *Value { return ctx.NewBigInt64Array(nil) },
 			},
 			{
 				"BigUint64Array",
-				func() *Value {
+				func(ctx *Context) *Value {
 					return ctx.NewBigUint64Array([]uint64{0, 1, 9223372036854775808, 18446744073709551615})
 				},
 				func(v *Value) bool { return v.IsBigUint64Array() },
-				func() *Value { return ctx.NewBigUint64Array([]uint64{}) },
-				func() *Value { return ctx.NewBigUint64Array(nil) },
+				func(ctx *Context) *Value { return ctx.NewBigUint64Array([]uint64{}) },
+				func(ctx *Context) *Value { return ctx.NewBigUint64Array(nil) },
 			},
 		}
 
 		for _, tt := range typedArrayTests {
 			t.Run(tt.name, func(t *testing.T) {
+				ctx := newCtx(t)
 				// Test with data
-				arr := tt.createFunc()
+				arr := tt.createFunc(ctx)
 				defer arr.Free()
 				require.True(t, arr.IsTypedArray())
 				require.True(t, tt.checkFunc(arr))
 
 				// Test empty array
-				emptyArr := tt.testEmpty()
+				emptyArr := tt.testEmpty(ctx)
 				defer emptyArr.Free()
 				require.True(t, tt.checkFunc(emptyArr))
 				require.EqualValues(t, 0, emptyArr.Len())
 
 				// Test nil slice
-				nilArr := tt.testNil()
+				nilArr := tt.testNil(ctx)
 				defer nilArr.Free()
 				require.True(t, tt.checkFunc(nilArr))
 				require.EqualValues(t, 0, nilArr.Len())
@@ -1326,6 +4030,7 @@ func TestContextTypedArrays(t *testing.T) {
 	})
 
 	t.Run("TypedArrayInterop", func(t *testing.T) {
+		ctx := newCtx(t)
 		// Go to JavaScript
 		goData := []int32{1, 2, 3, 4, 5}
 		goArray := ctx.NewInt32Array(goData)
@@ -1356,6 +4061,7 @@ func TestContextTypedArrays(t *testing.T) {
 	})
 
 	t.Run("TypedArrayPrecision", func(t *testing.T) {
+		ctx := newCtx(t)
 		// Test Float32 precision
 		float32Data := []float32{3.14159265359, -2.718281828, 0.0, 1.23456789}
 		float32Array := ctx.NewFloat32Array(float32Data)
@@ -1384,6 +4090,7 @@ func TestContextTypedArrays(t *testing.T) {
 	})
 
 	t.Run("TypedArrayErrors", func(t *testing.T) {
+		ctx := newCtx(t)
 		// Test conversion errors for wrong types
 		wrongTypeVal := ctx.NewString("not a typed array")
 		defer wrongTypeVal.Free()
@@ -1401,10 +4108,8 @@ func TestContextTypedArrays(t *testing.T) {
 			func() error { _, err := wrongTypeVal.ToBigUint64Array(); return err },
 		}
 
-		for i, testFn := range conversionTests {
-			t.Run(fmt.Sprintf("ConversionError%d", i), func(t *testing.T) {
-				require.Error(t, testFn())
-			})
+		for _, testFn := range conversionTests {
+			require.Error(t, testFn())
 		}
 
 		// Test type mismatch conversion
@@ -1417,6 +4122,7 @@ func TestContextTypedArrays(t *testing.T) {
 	})
 
 	t.Run("SharedMemoryTest", func(t *testing.T) {
+		ctx := newCtx(t)
 		// Test that TypedArrays share memory with their underlying ArrayBuffer
 		data := []uint8{1, 2, 3, 4, 5, 6, 7, 8}
 		arrayBuffer := ctx.NewArrayBuffer(data)
@@ -1497,12 +4203,18 @@ func TestContextMemoryPressure(t *testing.T) {
 }
 
 func TestContextAsyncFunction(t *testing.T) {
-	rt := NewRuntime()
-	defer rt.Close()
-	ctx := rt.NewContext()
-	defer ctx.Close()
+	newCtx := func(t *testing.T) *Context {
+		rt := NewRuntime()
+		ctx := rt.NewContext()
+		t.Cleanup(func() {
+			ctx.Close()
+			rt.Close()
+		})
+		return ctx
+	}
 
 	t.Run("AsyncFunctionResolveNoArgs", func(t *testing.T) {
+		ctx := newCtx(t)
 		// Test the resolve(ctx.NewUndefined()) branch when no arguments are passed
 		asyncFn := ctx.NewAsyncFunction(func(ctx *Context, this *Value, promise *Value, args []*Value) *Value {
 			resolve := promise.Get("resolve")
@@ -1521,6 +4233,7 @@ func TestContextAsyncFunction(t *testing.T) {
 	})
 
 	t.Run("AsyncFunctionRejectWithArgs", func(t *testing.T) {
+		ctx := newCtx(t)
 		// Test the reject(args[0]) branch when arguments are passed to reject
 		asyncFn := ctx.NewAsyncFunction(func(ctx *Context, this *Value, promise *Value, args []*Value) *Value {
 			reject := promise.Get("reject")
@@ -1544,6 +4257,7 @@ func TestContextAsyncFunction(t *testing.T) {
 	})
 
 	t.Run("AsyncFunctionRejectNoArgs", func(t *testing.T) {
+		ctx := newCtx(t)
 		// Test the reject without arguments branch (else clause in reject function)
 		asyncFn := ctx.NewAsyncFunction(func(ctx *Context, this *Value, promise *Value, args []*Value) *Value {
 			reject := promise.Get("reject")
@@ -1566,6 +4280,7 @@ func TestContextAsyncFunction(t *testing.T) {
 	})
 
 	t.Run("AsyncFunctionDirectReturnValue", func(t *testing.T) {
+		ctx := newCtx(t)
 		// Test the resolve(result) branch when function returns a non-undefined value
 		asyncFn := ctx.NewAsyncFunction(func(ctx *Context, this *Value, promise *Value, args []*Value) *Value {
 			// Don't call promise.resolve or promise.reject, return a value directly
@@ -1581,6 +4296,7 @@ func TestContextAsyncFunction(t *testing.T) {
 	})
 
 	t.Run("AsyncFunctionReturnUndefined", func(t *testing.T) {
+		ctx := newCtx(t)
 		// Test that returning undefined doesn't trigger the resolve(result) branch
 		resolvedByPromise := false
 
@@ -1605,6 +4321,7 @@ func TestContextAsyncFunction(t *testing.T) {
 	})
 
 	t.Run("AsyncFunctionComplexScenario", func(t *testing.T) {
+		ctx := newCtx(t)
 		// Test complex async function scenario to ensure complete coverage
 		asyncFn := ctx.NewAsyncFunction(func(ctx *Context, this *Value, promise *Value, args []*Value) *Value {
 			resolve := promise.Get("resolve")
@@ -1666,12 +4383,18 @@ func TestContextAsyncFunction(t *testing.T) {
 // TestDeprecatedAPIs tests all deprecated methods to ensure they still work
 // Each deprecated method is called once for test coverage
 func TestDeprecatedAPIs(t *testing.T) {
-	rt := NewRuntime()
-	defer rt.Close()
-	ctx := rt.NewContext()
-	defer ctx.Close()
+	newCtx := func(t *testing.T) *Context {
+		rt := NewRuntime()
+		ctx := rt.NewContext()
+		t.Cleanup(func() {
+			ctx.Close()
+			rt.Close()
+		})
+		return ctx
+	}
 
 	t.Run("DeprecatedValueCreation", func(t *testing.T) {
+		ctx := newCtx(t)
 		// Test all deprecated value creation methods
 		val1 := ctx.Null()
 		defer val1.Free()
@@ -1731,6 +4454,7 @@ func TestDeprecatedAPIs(t *testing.T) {
 	})
 
 	t.Run("DeprecatedTypedArrays", func(t *testing.T) {
+		ctx := newCtx(t)
 		// Test all deprecated TypedArray creation methods
 		val1 := ctx.Int8Array([]int8{1, 2, 3})
 		defer val1.Free()
@@ -1778,6 +4502,7 @@ func TestDeprecatedAPIs(t *testing.T) {
 	})
 
 	t.Run("DeprecatedFunctions", func(t *testing.T) {
+		ctx := newCtx(t)
 		// Test deprecated Function method
 		fn := ctx.Function(func(ctx *Context, this *Value, args []*Value) *Value {
 			return ctx.NewString("hello")
@@ -1804,6 +4529,7 @@ func TestDeprecatedAPIs(t *testing.T) {
 	})
 
 	t.Run("DeprecatedAtoms", func(t *testing.T) {
+		ctx := newCtx(t)
 		// Test deprecated Atom methods
 		atom1 := ctx.Atom("test")
 		defer atom1.Free()
@@ -1815,6 +4541,7 @@ func TestDeprecatedAPIs(t *testing.T) {
 	})
 
 	t.Run("DeprecatedInvoke", func(t *testing.T) {
+		ctx := newCtx(t)
 		// Test deprecated Invoke method
 		fn := ctx.NewFunction(func(ctx *Context, this *Value, args []*Value) *Value {
 			return ctx.NewString("invoked")

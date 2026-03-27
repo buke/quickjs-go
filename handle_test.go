@@ -3,6 +3,7 @@ package quickjs
 import (
 	"math"
 	"reflect"
+	"runtime/cgo"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -309,4 +310,70 @@ func TestHandleStore_ComplexTypes(t *testing.T) {
 	assert.True(t, reflect.DeepEqual(complexData, loaded))
 
 	assert.True(t, hs.Delete(id))
+}
+
+func TestHandleStore_HandleReplacementPattern(t *testing.T) {
+	hs := newHandleStore()
+	id := hs.Store("original")
+
+	raw, ok := hs.handles.Load(id)
+	require.True(t, ok)
+	originalHandle, ok := raw.(cgo.Handle)
+	require.True(t, ok)
+	require.Equal(t, "original", originalHandle.Value())
+
+	replacementHandle := cgo.NewHandle("replacement")
+	hs.handles.Store(id, replacementHandle)
+
+	loaded, ok := hs.Load(id)
+	require.True(t, ok)
+	require.Equal(t, "replacement", loaded)
+
+	// Safe restoration pattern: keep original handle alive, restore it, then
+	// delete only the temporary replacement handle.
+	hs.handles.Store(id, originalHandle)
+	replacementHandle.Delete()
+
+	loadedRestored, ok := hs.Load(id)
+	require.True(t, ok)
+	require.Equal(t, "original", loadedRestored)
+
+	require.True(t, hs.Delete(id))
+	require.False(t, hs.Delete(id))
+}
+
+func TestHandleStore_NilAndCorruptedSafety(t *testing.T) {
+	t.Run("NilReceiverFailClosed", func(t *testing.T) {
+		var hs *handleStore
+		require.Equal(t, int32(0), hs.Store("x"))
+		v, ok := hs.Load(1)
+		require.False(t, ok)
+		require.Nil(t, v)
+		require.False(t, hs.Delete(1))
+		hs.Clear()
+		require.Equal(t, 0, hs.Count())
+	})
+
+	t.Run("CorruptedEntryTypeFailClosed", func(t *testing.T) {
+		hs := newHandleStore()
+		id := hs.Store("ok")
+
+		hs.handles.Store(id, "not-a-handle")
+
+		v, ok := hs.Load(id)
+		require.False(t, ok)
+		require.Nil(t, v)
+
+		require.False(t, hs.Delete(id))
+		require.Equal(t, 0, hs.Count())
+	})
+
+	t.Run("CorruptedEntryDeleteBranch", func(t *testing.T) {
+		hs := newHandleStore()
+		id := hs.Store("ok")
+
+		hs.handles.Store(id, "not-a-handle")
+		require.False(t, hs.Delete(id))
+		require.Equal(t, 0, hs.Count())
+	})
 }

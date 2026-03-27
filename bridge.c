@@ -2,8 +2,66 @@
 #include "quickjs.h"
 #include "quickjs-libc.h"
 #include "cutils.h" 
+#include <pthread.h>
 #include <string.h>
 #include <time.h>
+
+#define CLASS_OPAQUE_MAGIC 0x514A4F50u
+
+typedef struct {
+    uint32_t magic;
+    JSContext *ctx;
+    int32_t handle_id;
+} ClassOpaqueData;
+
+typedef struct RuntimeFailInjectEntry {
+    JSRuntime *rt;
+    int fail_new_context;
+    struct RuntimeFailInjectEntry *next;
+} RuntimeFailInjectEntry;
+
+typedef struct RuntimeOwnerThreadEntry {
+    JSRuntime *rt;
+    pthread_t owner_thread;
+    struct RuntimeOwnerThreadEntry *next;
+} RuntimeOwnerThreadEntry;
+
+static RuntimeFailInjectEntry *runtime_fail_inject_head = NULL;
+static pthread_mutex_t runtime_fail_inject_mutex = PTHREAD_MUTEX_INITIALIZER;
+static RuntimeOwnerThreadEntry *runtime_owner_thread_head = NULL;
+static pthread_mutex_t runtime_owner_thread_mutex = PTHREAD_MUTEX_INITIALIZER;
+static int fail_new_runtime_for_test = 0;
+
+static int class_opaque_alloc_count = 0;
+static int class_opaque_free_count = 0;
+static pthread_mutex_t class_opaque_counter_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+static RuntimeFailInjectEntry *find_runtime_fail_inject_entry_unlocked(JSRuntime *rt) {
+    RuntimeFailInjectEntry *entry = runtime_fail_inject_head;
+    while (entry) {
+        if (entry->rt == rt) {
+            return entry;
+        }
+        entry = entry->next;
+    }
+    return NULL;
+}
+
+static RuntimeOwnerThreadEntry *find_runtime_owner_thread_entry_unlocked(JSRuntime *rt, RuntimeOwnerThreadEntry **prev) {
+    RuntimeOwnerThreadEntry *entry = runtime_owner_thread_head;
+    RuntimeOwnerThreadEntry *local_prev = NULL;
+    while (entry) {
+        if (entry->rt == rt) {
+            break;
+        }
+        local_prev = entry;
+        entry = entry->next;
+    }
+    if (prev) {
+        *prev = local_prev;
+    }
+    return entry;
+}
 
 // ============================================================================
 // MACRO WRAPPER FUNCTIONS
@@ -164,6 +222,280 @@ void* IntToOpaque(int32_t id) {
 
 int32_t OpaqueToInt(void* opaque) {
     return (int32_t)(intptr_t)opaque;
+}
+
+void* NewClassOpaque(JSContext *ctx, int32_t handle_id) {
+    ClassOpaqueData *data = (ClassOpaqueData *)malloc(sizeof(ClassOpaqueData));
+    if (!data) {
+        return NULL;
+    }
+    data->magic = CLASS_OPAQUE_MAGIC;
+    data->ctx = ctx;
+    data->handle_id = handle_id;
+
+    pthread_mutex_lock(&class_opaque_counter_mutex);
+    class_opaque_alloc_count++;
+    pthread_mutex_unlock(&class_opaque_counter_mutex);
+
+    return (void *)data;
+}
+
+int ClassOpaqueIsValid(void* opaque) {
+    ClassOpaqueData *data = (ClassOpaqueData *)opaque;
+    if (!data) {
+        return 0;
+    }
+    return data->magic == CLASS_OPAQUE_MAGIC;
+}
+
+JSContext* ClassOpaqueContext(void* opaque) {
+    ClassOpaqueData *data = (ClassOpaqueData *)opaque;
+    if (!ClassOpaqueIsValid(opaque)) {
+        return NULL;
+    }
+    return data->ctx;
+}
+
+int32_t ClassOpaqueHandleID(void* opaque) {
+    ClassOpaqueData *data = (ClassOpaqueData *)opaque;
+    if (!ClassOpaqueIsValid(opaque)) {
+        return 0;
+    }
+    return data->handle_id;
+}
+
+void FreeClassOpaque(void* opaque) {
+    ClassOpaqueData *data = (ClassOpaqueData *)opaque;
+    if (!ClassOpaqueIsValid(opaque)) {
+        return;
+    }
+    data->magic = 0;
+
+    pthread_mutex_lock(&class_opaque_counter_mutex);
+    class_opaque_free_count++;
+    pthread_mutex_unlock(&class_opaque_counter_mutex);
+
+    free(data);
+}
+
+int GetClassOpaqueAllocationCount(void) {
+    int count;
+    pthread_mutex_lock(&class_opaque_counter_mutex);
+    count = class_opaque_alloc_count;
+    pthread_mutex_unlock(&class_opaque_counter_mutex);
+    return count;
+}
+
+int GetClassOpaqueFreeCount(void) {
+    int count;
+    pthread_mutex_lock(&class_opaque_counter_mutex);
+    count = class_opaque_free_count;
+    pthread_mutex_unlock(&class_opaque_counter_mutex);
+    return count;
+}
+
+int GetClassOpaqueOutstandingCount(void) {
+    int alloc_count;
+    int free_count;
+    pthread_mutex_lock(&class_opaque_counter_mutex);
+    alloc_count = class_opaque_alloc_count;
+    free_count = class_opaque_free_count;
+    pthread_mutex_unlock(&class_opaque_counter_mutex);
+    return alloc_count - free_count;
+}
+
+void ResetClassOpaqueCountersForTest(void) {
+    pthread_mutex_lock(&class_opaque_counter_mutex);
+    class_opaque_alloc_count = 0;
+    class_opaque_free_count = 0;
+    pthread_mutex_unlock(&class_opaque_counter_mutex);
+}
+
+int CorruptClassOpaqueMagicForTest(JSValue val) {
+    JSClassID class_id;
+    void *opaque;
+    ClassOpaqueData *data;
+
+    class_id = JS_GetClassID(val);
+    opaque = JS_GetOpaque(val, class_id);
+    if (!opaque || !ClassOpaqueIsValid(opaque)) {
+        return 0;
+    }
+
+    data = (ClassOpaqueData *)opaque;
+    data->magic ^= 0xFFFFFFFFu;
+    return 1;
+}
+
+int SetClassOpaqueHandleIDForTest(JSValue val, int32_t handle_id) {
+    JSClassID class_id;
+    void *opaque;
+    ClassOpaqueData *data;
+
+    class_id = JS_GetClassID(val);
+    opaque = JS_GetOpaque(val, class_id);
+    if (!opaque || !ClassOpaqueIsValid(opaque)) {
+        return 0;
+    }
+
+    data = (ClassOpaqueData *)opaque;
+    data->handle_id = handle_id;
+    return 1;
+}
+
+int SetClassOpaqueContextNullForTest(JSValue val) {
+    JSClassID class_id;
+    void *opaque;
+    ClassOpaqueData *data;
+
+    class_id = JS_GetClassID(val);
+    opaque = JS_GetOpaque(val, class_id);
+    if (!opaque || !ClassOpaqueIsValid(opaque)) {
+        return 0;
+    }
+
+    data = (ClassOpaqueData *)opaque;
+    data->ctx = NULL;
+    return 1;
+}
+
+JSContext* JS_NewContext_Go(JSRuntime *rt) {
+    int fail_new_context = 0;
+    RuntimeFailInjectEntry *entry;
+
+    pthread_mutex_lock(&runtime_fail_inject_mutex);
+    entry = find_runtime_fail_inject_entry_unlocked(rt);
+    if (entry) {
+        fail_new_context = entry->fail_new_context;
+    }
+    pthread_mutex_unlock(&runtime_fail_inject_mutex);
+
+    if (fail_new_context) {
+        return NULL;
+    }
+    return JS_NewContext(rt);
+}
+
+JSRuntime* JS_NewRuntime_Go(void) {
+    if (fail_new_runtime_for_test) {
+        return NULL;
+    }
+    return JS_NewRuntime();
+}
+
+void SetJSNewRuntimeFailForTest(int enabled) {
+    fail_new_runtime_for_test = enabled ? 1 : 0;
+}
+
+void SetJSNewContextFailForTest(JSRuntime *rt, int enabled) {
+    RuntimeFailInjectEntry *entry;
+    RuntimeFailInjectEntry *prev;
+
+    if (!rt) {
+        return;
+    }
+
+    pthread_mutex_lock(&runtime_fail_inject_mutex);
+
+    prev = NULL;
+    entry = runtime_fail_inject_head;
+    while (entry) {
+        if (entry->rt == rt) {
+            break;
+        }
+        prev = entry;
+        entry = entry->next;
+    }
+
+    if (!enabled) {
+        if (entry) {
+            if (prev) {
+                prev->next = entry->next;
+            } else {
+                runtime_fail_inject_head = entry->next;
+            }
+            free(entry);
+        }
+        pthread_mutex_unlock(&runtime_fail_inject_mutex);
+        return;
+    }
+
+    if (!entry) {
+        entry = (RuntimeFailInjectEntry *)malloc(sizeof(RuntimeFailInjectEntry));
+        if (!entry) {
+            pthread_mutex_unlock(&runtime_fail_inject_mutex);
+            return;
+        }
+        entry->rt = rt;
+        entry->next = runtime_fail_inject_head;
+        runtime_fail_inject_head = entry;
+    }
+    entry->fail_new_context = 1;
+
+    pthread_mutex_unlock(&runtime_fail_inject_mutex);
+}
+
+void RegisterRuntimeOwnerThread(JSRuntime *rt) {
+    RuntimeOwnerThreadEntry *entry;
+
+    if (!rt) {
+        return;
+    }
+
+    pthread_mutex_lock(&runtime_owner_thread_mutex);
+    entry = find_runtime_owner_thread_entry_unlocked(rt, NULL);
+    if (!entry) {
+        entry = (RuntimeOwnerThreadEntry *)malloc(sizeof(RuntimeOwnerThreadEntry));
+        if (!entry) {
+            pthread_mutex_unlock(&runtime_owner_thread_mutex);
+            return;
+        }
+        entry->rt = rt;
+        entry->next = runtime_owner_thread_head;
+        runtime_owner_thread_head = entry;
+    }
+    entry->owner_thread = pthread_self();
+    pthread_mutex_unlock(&runtime_owner_thread_mutex);
+}
+
+int IsRuntimeOwnerThread(JSRuntime *rt) {
+    RuntimeOwnerThreadEntry *entry;
+    int is_owner = 0;
+
+    if (!rt) {
+        return 0;
+    }
+
+    pthread_mutex_lock(&runtime_owner_thread_mutex);
+    entry = find_runtime_owner_thread_entry_unlocked(rt, NULL);
+    if (entry) {
+        is_owner = pthread_equal(entry->owner_thread, pthread_self()) != 0;
+    }
+    pthread_mutex_unlock(&runtime_owner_thread_mutex);
+
+    return is_owner;
+}
+
+void UnregisterRuntimeOwnerThread(JSRuntime *rt) {
+    RuntimeOwnerThreadEntry *entry;
+    RuntimeOwnerThreadEntry *prev;
+
+    if (!rt) {
+        return;
+    }
+
+    pthread_mutex_lock(&runtime_owner_thread_mutex);
+    prev = NULL;
+    entry = find_runtime_owner_thread_entry_unlocked(rt, &prev);
+    if (entry) {
+        if (prev) {
+            prev->next = entry->next;
+        } else {
+            runtime_owner_thread_head = entry->next;
+        }
+        free(entry);
+    }
+    pthread_mutex_unlock(&runtime_owner_thread_mutex);
 }
 
 // Efficient proxy function for regular functions
@@ -359,7 +691,13 @@ JSValue CreateClass(JSContext *ctx,
     }
     
     // Step 7: Associate constructor with prototype (corresponds to point.c: JS_SetConstructor)
-    JS_SetConstructor(ctx, constructor, proto);
+    // JS_SetConstructor may fail (e.g. OOM), so this path must propagate the
+    // exception and clean local references.
+    if (JS_SetConstructor(ctx, constructor, proto) < 0) {
+        JS_FreeValue(ctx, constructor);
+        JS_FreeValue(ctx, proto);
+        return JS_EXCEPTION;
+    }
     
     // Step 8: Set class prototype (corresponds to point.c: JS_SetClassProto)
     JS_SetClassProto(ctx, *class_id, proto);
@@ -429,11 +767,12 @@ JSValue BindMethodToObject(JSContext *ctx, JSValue obj, const MethodEntry *metho
         return method_func;
     }
     
-    // Define property
+    // Define property.
+    // Ownership note: JS_DefinePropertyValueStr consumes method_func on both
+    // success and failure paths.
     int result = JS_DefinePropertyValueStr(ctx, obj, method->name, method_func,
                                           GetPropertyWritableConfigurable());
     if (result < 0) {
-        JS_FreeValue(ctx, method_func);
         return JS_ThrowInternalError(ctx, "failed to bind method: %s", method->name);
     }
     
@@ -445,6 +784,10 @@ JSValue BindAccessorToObject(JSContext *ctx, JSValue obj, const AccessorEntry *a
     JSAtom accessor_atom = JS_NewAtom(ctx, accessor->name);
     JSValue getter = JS_UNDEFINED;
     JSValue setter = JS_UNDEFINED;
+
+    if (accessor_atom == JS_ATOM_NULL) {
+        return JS_EXCEPTION;
+    }
     
     // Create getter
     if (accessor->getter_id != 0) {
@@ -469,15 +812,15 @@ JSValue BindAccessorToObject(JSContext *ctx, JSValue obj, const AccessorEntry *a
         }
     }
     
-    // Define accessor
+    // Define accessor.
+    // Ownership note: JS_DefinePropertyGetSet consumes getter/setter on both
+    // success and failure paths.
     int result = JS_DefinePropertyGetSet(ctx, obj, accessor_atom, getter, setter,
                                         GetPropertyConfigurable());
     
     JS_FreeAtom(ctx, accessor_atom);
     
     if (result < 0) {
-        if (!JS_IsUndefined(getter)) JS_FreeValue(ctx, getter);
-        if (!JS_IsUndefined(setter)) JS_FreeValue(ctx, setter);
         return JS_ThrowInternalError(ctx, "failed to bind accessor: %s", accessor->name);
     }
     
@@ -487,8 +830,9 @@ JSValue BindAccessorToObject(JSContext *ctx, JSValue obj, const AccessorEntry *a
 // BindPropertyToObject - Bind a data property to a JavaScript object
 // This creates real data properties using JS_DefinePropertyValueStr
 JSValue BindPropertyToObject(JSContext *ctx, JSValue obj, const PropertyEntry *property) {
-    // Duplicate the value to ensure proper reference counting
-    // JS_DefinePropertyValueStr takes ownership of the value
+    // Duplicate the value to ensure proper reference counting.
+    // Ownership note: JS_DefinePropertyValueStr consumes property_value on both
+    // success and failure paths.
     JSValue property_value = JS_DupValue(ctx, property->value);
     
     // Define the data property using QuickJS API
@@ -497,8 +841,6 @@ JSValue BindPropertyToObject(JSContext *ctx, JSValue obj, const PropertyEntry *p
                                           property_value, property->flags);
     
     if (result < 0) {
-        // If define failed, we need to free the duplicated value
-        JS_FreeValue(ctx, property_value);
         return JS_ThrowInternalError(ctx, "failed to bind property: %s", property->name);
     }
     
@@ -588,33 +930,129 @@ int interruptHandler(JSRuntime *rt, void *opaque) {
     return goInterruptHandler(runtimePtr);
 }
 
+// Timeout handler implementation with explicit lifecycle tracking.
+typedef struct {
+    time_t start;
+    time_t timeout;
+} TimeoutStruct;
+
+typedef struct TimeoutRegistryEntry {
+    JSRuntime *rt;
+    TimeoutStruct *ts;
+    struct TimeoutRegistryEntry *next;
+} TimeoutRegistryEntry;
+
+static TimeoutRegistryEntry *timeout_registry_head = NULL;
+static int timeout_allocation_count = 0;
+static pthread_mutex_t timeout_registry_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+static TimeoutRegistryEntry *find_timeout_registry_entry_unlocked(JSRuntime *rt) {
+    TimeoutRegistryEntry *entry = timeout_registry_head;
+    while (entry) {
+        if (entry->rt == rt) {
+            return entry;
+        }
+        entry = entry->next;
+    }
+    return NULL;
+}
+
+static TimeoutRegistryEntry *ensure_timeout_registry_entry(JSRuntime *rt) {
+    TimeoutRegistryEntry *entry = find_timeout_registry_entry_unlocked(rt);
+    if (entry) {
+        return entry;
+    }
+    entry = malloc(sizeof(TimeoutRegistryEntry));
+    if (!entry) {
+        return NULL;
+    }
+    entry->rt = rt;
+    entry->ts = NULL;
+    entry->next = timeout_registry_head;
+    timeout_registry_head = entry;
+    return entry;
+}
+
+static void consume_timeout_struct(JSRuntime *rt, TimeoutStruct *ts) {
+    TimeoutRegistryEntry *entry;
+
+    pthread_mutex_lock(&timeout_registry_mutex);
+    entry = find_timeout_registry_entry_unlocked(rt);
+    if (entry && entry->ts == ts) {
+        entry->ts = NULL;
+    }
+    pthread_mutex_unlock(&timeout_registry_mutex);
+}
+
+static void remove_timeout_registry_entry(JSRuntime *rt) {
+    TimeoutRegistryEntry *prev = NULL;
+    TimeoutRegistryEntry *entry;
+
+    pthread_mutex_lock(&timeout_registry_mutex);
+    entry = timeout_registry_head;
+
+    while (entry) {
+        if (entry->rt == rt) {
+            if (entry->ts) {
+                free(entry->ts);
+                entry->ts = NULL;
+                if (timeout_allocation_count > 0) {
+                    timeout_allocation_count--;
+                }
+            }
+
+            if (prev) {
+                prev->next = entry->next;
+            } else {
+                timeout_registry_head = entry->next;
+            }
+
+            free(entry);
+            pthread_mutex_unlock(&timeout_registry_mutex);
+            return;
+        }
+        prev = entry;
+        entry = entry->next;
+    }
+
+    pthread_mutex_unlock(&timeout_registry_mutex);
+}
+
 void SetInterruptHandler(JSRuntime *rt) {
+    remove_timeout_registry_entry(rt);
     // Use rt itself as opaque parameter for Go lookup
     JS_SetInterruptHandler(rt, interruptHandler, (void*)rt);
 }
 
 void ClearInterruptHandler(JSRuntime *rt) {
+    remove_timeout_registry_entry(rt);
     JS_SetInterruptHandler(rt, NULL, NULL);
 }
-
-// Timeout handler implementation (unchanged but improved cleanup)
-typedef struct {
-    time_t start;
-    time_t timeout;
-} TimeoutStruct;
 
 int timeoutHandler(JSRuntime *rt, void *opaque) {
     TimeoutStruct* ts = (TimeoutStruct*)opaque;
     time_t timeout = ts->timeout;
     time_t start = ts->start;
     if (timeout <= 0) {
+        consume_timeout_struct(rt, ts);
         free(ts); // Free memory if timeout is disabled
+        pthread_mutex_lock(&timeout_registry_mutex);
+        if (timeout_allocation_count > 0) {
+            timeout_allocation_count--;
+        }
+        pthread_mutex_unlock(&timeout_registry_mutex);
         return 0;
     }
 
     time_t now = time(NULL);
     if (now - start > timeout) {
+        consume_timeout_struct(rt, ts);
         free(ts); // Free memory on timeout
+        pthread_mutex_lock(&timeout_registry_mutex);
+        if (timeout_allocation_count > 0) {
+            timeout_allocation_count--;
+        }
+        pthread_mutex_unlock(&timeout_registry_mutex);
         return 1;
     }
 
@@ -622,10 +1060,60 @@ int timeoutHandler(JSRuntime *rt, void *opaque) {
 }
 
 void SetExecuteTimeout(JSRuntime *rt, time_t timeout) {
+    TimeoutRegistryEntry *entry;
+
+    remove_timeout_registry_entry(rt);
+
+    if (timeout <= 0) {
+        JS_SetInterruptHandler(rt, NULL, NULL);
+        return;
+    }
+
     TimeoutStruct* ts = malloc(sizeof(TimeoutStruct));
+    if (!ts) {
+        JS_SetInterruptHandler(rt, NULL, NULL);
+        return;
+    }
+
     ts->start = time(NULL);
     ts->timeout = timeout;
+
+    pthread_mutex_lock(&timeout_registry_mutex);
+    entry = ensure_timeout_registry_entry(rt);
+    if (!entry) {
+        pthread_mutex_unlock(&timeout_registry_mutex);
+        free(ts);
+        JS_SetInterruptHandler(rt, NULL, NULL);
+        return;
+    }
+
+    entry->ts = ts;
+    timeout_allocation_count++;
+    pthread_mutex_unlock(&timeout_registry_mutex);
+
     JS_SetInterruptHandler(rt, timeoutHandler, ts);
+}
+
+int GetTimeoutAllocationCount(void) {
+    int count;
+    pthread_mutex_lock(&timeout_registry_mutex);
+    count = timeout_allocation_count;
+    pthread_mutex_unlock(&timeout_registry_mutex);
+    return count;
+}
+
+int GetTimeoutRegistryEntryCount(void) {
+    int count = 0;
+    TimeoutRegistryEntry *entry;
+
+    pthread_mutex_lock(&timeout_registry_mutex);
+    entry = timeout_registry_head;
+    while (entry) {
+        count++;
+        entry = entry->next;
+    }
+    pthread_mutex_unlock(&timeout_registry_mutex);
+    return count;
 }
 
 // ============================================================================
@@ -711,6 +1199,8 @@ int CreateModule(JSContext *ctx, const char *module_name,
     
     // Step 2: Pre-declare all exports (JS_AddModuleExport phase)
     // This must be done before module instantiation
+    // Ownership note: export_name is a borrowed C string; QuickJS does not
+    // take ownership of this pointer.
     for (int i = 0; i < export_count; i++) {
         const char *export_name = export_names[i];
         
@@ -737,7 +1227,12 @@ int CreateModule(JSContext *ctx, const char *module_name,
     }
     
     // Store builder_id as module private value
-    JS_SetModulePrivateValue(ctx, module, builder_value);
+    // Ownership note: JS_SetModulePrivateValue stores builder_value into module
+    // private storage. After this call, builder_value must be treated as moved.
+    if (JS_SetModulePrivateValue(ctx, module, builder_value) < 0) {
+        JS_ThrowInternalError(ctx, "CreateModule: failed to set module private value");
+        return -1;
+    }
     
     // Success
     return 0;

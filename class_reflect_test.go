@@ -258,16 +258,6 @@ func TestReflectionMultipleReturnValues(t *testing.T) {
 // =============================================================================
 
 func TestReflectionConstructorModes(t *testing.T) {
-	rt := NewRuntime()
-	defer rt.Close()
-	ctx := rt.NewContext()
-	defer ctx.Close()
-
-	constructor, _ := ctx.BindClass(&Person{})
-	require.False(t, constructor.IsException())
-
-	ctx.Globals().Set("Person", constructor)
-
 	testCases := []struct {
 		name string
 		js   string
@@ -297,6 +287,15 @@ func TestReflectionConstructorModes(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
+			rt := NewRuntime()
+			defer rt.Close()
+			ctx := rt.NewContext()
+			defer ctx.Close()
+
+			constructor, _ := ctx.BindClass(&Person{})
+			require.False(t, constructor.IsException())
+			ctx.Globals().Set("Person", constructor)
+
 			result := ctx.Eval(fmt.Sprintf(`
                 (function() {
                     let person = %s;
@@ -521,18 +520,22 @@ func TestReflectionInputValidation(t *testing.T) {
 }
 
 func TestReflectionMethodArgumentErrors(t *testing.T) {
-	rt := NewRuntime()
-	defer rt.Close()
-	ctx := rt.NewContext()
-	defer ctx.Close()
-
-	constructor, _ := ctx.BindClass(&MethodTestStruct{})
-	require.False(t, constructor.IsException())
-
-	ctx.Globals().Set("MethodTest", constructor)
+	newMethodTestContext := func(t *testing.T) *Context {
+		rt := NewRuntime()
+		ctx := rt.NewContext()
+		constructor, _ := ctx.BindClass(&MethodTestStruct{})
+		require.False(t, constructor.IsException())
+		ctx.Globals().Set("MethodTest", constructor)
+		t.Cleanup(func() {
+			ctx.Close()
+			rt.Close()
+		})
+		return ctx
+	}
 
 	// Test too many arguments
 	t.Run("TooManyArguments", func(t *testing.T) {
+		ctx := newMethodTestContext(t)
 		result := ctx.Eval(`
             (function() {
                 let obj = new MethodTest();
@@ -551,6 +554,7 @@ func TestReflectionMethodArgumentErrors(t *testing.T) {
 
 	// Test argument conversion errors
 	t.Run("ArgumentConversionError", func(t *testing.T) {
+		ctx := newMethodTestContext(t)
 		result := ctx.Eval(`
             (function() {
                 let obj = new MethodTest();
@@ -569,6 +573,7 @@ func TestReflectionMethodArgumentErrors(t *testing.T) {
 
 	// Test missing arguments (zero value filling)
 	t.Run("MissingArguments", func(t *testing.T) {
+		ctx := newMethodTestContext(t)
 		result := ctx.Eval(`
             (function() {
                 let obj = new MethodTest();
@@ -587,17 +592,22 @@ func TestReflectionMethodArgumentErrors(t *testing.T) {
 // =============================================================================
 
 func TestReflectionConstructorErrors(t *testing.T) {
-	rt := NewRuntime()
-	defer rt.Close()
-	ctx := rt.NewContext()
-	defer ctx.Close()
-
-	constructor, _ := ctx.BindClass(&Person{})
-	require.False(t, constructor.IsException())
-	ctx.Globals().Set("Person", constructor)
+	newPersonContext := func(t *testing.T) *Context {
+		rt := NewRuntime()
+		ctx := rt.NewContext()
+		constructor, _ := ctx.BindClass(&Person{})
+		require.False(t, constructor.IsException())
+		ctx.Globals().Set("Person", constructor)
+		t.Cleanup(func() {
+			ctx.Close()
+			rt.Close()
+		})
+		return ctx
+	}
 
 	// Test positional argument conversion error
 	t.Run("PositionalArgumentError", func(t *testing.T) {
+		ctx := newPersonContext(t)
 		ret := ctx.Eval(`
             try {
                 // Pass an object where an int is expected for age
@@ -616,6 +626,7 @@ func TestReflectionConstructorErrors(t *testing.T) {
 
 	// Test object argument conversion error
 	t.Run("ObjectArgumentError", func(t *testing.T) {
+		ctx := newPersonContext(t)
 		ret := ctx.Eval(`
             try {
                 // Pass an object where an int is expected for age accessor
@@ -638,6 +649,7 @@ func TestReflectionConstructorErrors(t *testing.T) {
 
 	// Test positional args with unexported fields - covers the continue branch
 	t.Run("PositionalArgsSkipUnexportedFields", func(t *testing.T) {
+		ctx := newPersonContext(t)
 		// Person struct has: FirstName, LastName, Age, Salary, IsActive (exported)
 		// and private (unexported) - this should be skipped during positional initialization
 		result := ctx.Eval(`
@@ -836,13 +848,19 @@ func TestReflectionComplexTypes(t *testing.T) {
 }
 
 func TestReflectionEdgeCases(t *testing.T) {
-	rt := NewRuntime()
-	defer rt.Close()
-	ctx := rt.NewContext()
-	defer ctx.Close()
+	newContext := func(t *testing.T) *Context {
+		rt := NewRuntime()
+		ctx := rt.NewContext()
+		t.Cleanup(func() {
+			ctx.Close()
+			rt.Close()
+		})
+		return ctx
+	}
 
 	// Test empty struct
 	t.Run("EmptyStruct", func(t *testing.T) {
+		ctx := newContext(t)
 		constructor, _ := ctx.BindClass(&EmptyStruct{})
 		require.False(t, constructor.IsException())
 
@@ -861,6 +879,7 @@ func TestReflectionEdgeCases(t *testing.T) {
 
 	// Test struct with only private fields
 	t.Run("OnlyPrivateFields", func(t *testing.T) {
+		ctx := newContext(t)
 		constructor, _ := ctx.BindClass(&PrivateStruct{})
 		require.False(t, constructor.IsException())
 
@@ -879,6 +898,7 @@ func TestReflectionEdgeCases(t *testing.T) {
 
 	// Test method with zero return values
 	t.Run("VoidMethod", func(t *testing.T) {
+		ctx := newContext(t)
 		constructor, _ := ctx.BindClass(&VoidStruct{})
 		require.False(t, constructor.IsException())
 
@@ -898,6 +918,7 @@ func TestReflectionEdgeCases(t *testing.T) {
 
 	// Test valid reflect.Type input
 	t.Run("ValidReflectType", func(t *testing.T) {
+		ctx := newContext(t)
 		personType := reflect.TypeOf(Person{})
 		constructor, _ := ctx.BindClass(personType)
 		require.False(t, constructor.IsException())

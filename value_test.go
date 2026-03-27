@@ -176,6 +176,59 @@ func TestValueJSON(t *testing.T) {
 	}
 }
 
+// TestValueJSONStringifyRegression ensures repeated stringify calls keep working.
+func TestValueJSONStringifyRegression(t *testing.T) {
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	obj := ctx.NewObject()
+	defer obj.Free()
+	obj.Set("name", ctx.NewString("regression"))
+	obj.Set("n", ctx.NewInt32(42))
+
+	for i := 0; i < 2000; i++ {
+		jsonStr := obj.JSONStringify()
+		require.Contains(t, jsonStr, "\"name\":\"regression\"")
+		require.Contains(t, jsonStr, "\"n\":42")
+	}
+
+	// Circular object JSON stringify should fail gracefully and not crash.
+	circular := ctx.Eval(`
+        const a = {};
+        a.self = a;
+        a;
+    `)
+	defer circular.Free()
+	require.False(t, circular.IsException())
+	require.Equal(t, "", circular.JSONStringify())
+}
+
+// TestValuePropertyNamesRegression ensures atom lifetime in PropertyNames is correct.
+func TestValuePropertyNamesRegression(t *testing.T) {
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	obj := ctx.NewObject()
+	defer obj.Free()
+
+	for i := 0; i < 32; i++ {
+		obj.SetIdx(int64(i), ctx.NewInt32(int32(i)))
+	}
+	obj.Set("alpha", ctx.NewString("a"))
+	obj.Set("beta", ctx.NewString("b"))
+
+	for i := 0; i < 1000; i++ {
+		names, err := obj.PropertyNames()
+		require.NoError(t, err)
+		require.Contains(t, names, "alpha")
+		require.Contains(t, names, "beta")
+	}
+}
+
 // TestValueArrayBuffer tests ArrayBuffer operations
 func TestValueArrayBuffer(t *testing.T) {
 	rt := NewRuntime()
@@ -232,10 +285,15 @@ func TestValueArrayBuffer(t *testing.T) {
 
 // TestValueTypedArrays tests TypedArray detection and conversion
 func TestValueTypedArrays(t *testing.T) {
-	rt := NewRuntime()
-	defer rt.Close()
-	ctx := rt.NewContext()
-	defer ctx.Close()
+	newCtx := func(t *testing.T) *Context {
+		rt := NewRuntime()
+		ctx := rt.NewContext()
+		t.Cleanup(func() {
+			ctx.Close()
+			rt.Close()
+		})
+		return ctx
+	}
 
 	// Test TypedArray detection
 	typedArrayTests := []struct {
@@ -260,6 +318,7 @@ func TestValueTypedArrays(t *testing.T) {
 
 	for _, tt := range typedArrayTests {
 		t.Run(tt.name, func(t *testing.T) {
+			ctx := newCtx(t)
 			val := ctx.Eval(tt.jsCode)
 			defer val.Free()
 			require.False(t, val.IsException()) // Check for exceptions instead of error
@@ -314,6 +373,7 @@ func TestValueTypedArrays(t *testing.T) {
 
 	for _, tt := range conversionTests {
 		t.Run(tt.name, func(t *testing.T) {
+			ctx := newCtx(t)
 			val := ctx.Eval(tt.jsCode)
 			defer val.Free()
 			require.False(t, val.IsException()) // Check for exceptions instead of error
@@ -384,6 +444,7 @@ func TestValueTypedArrays(t *testing.T) {
 
 	for _, tt := range additionalTests {
 		t.Run(tt.name, func(t *testing.T) {
+			ctx := newCtx(t)
 			val := ctx.Eval(tt.jsCode)
 			defer val.Free()
 			require.False(t, val.IsException()) // Check for exceptions instead of error
@@ -407,6 +468,11 @@ func TestValueProperties(t *testing.T) {
 	obj.Set("name", ctx.NewString("test"))
 	obj.Set("value", ctx.NewInt32(42))
 
+	ownedVal := ctx.NewString("owned")
+	obj.Set("owned", ownedVal)
+	require.True(t, ownedVal.IsUndefined())
+	ownedVal.Free()
+
 	require.True(t, obj.Has("name"))
 	require.False(t, obj.Has("nonexistent"))
 
@@ -419,7 +485,12 @@ func TestValueProperties(t *testing.T) {
 
 	// Test indexed operations
 	obj.SetIdx(0, ctx.NewString("index0"))
+	ownedIdxVal := ctx.NewString("index-owned")
+	obj.SetIdx(1, ownedIdxVal)
+	require.True(t, ownedIdxVal.IsUndefined())
+	ownedIdxVal.Free()
 	require.True(t, obj.HasIdx(0))
+	require.True(t, obj.HasIdx(1))
 	require.False(t, obj.HasIdx(99))
 
 	idx0Val := obj.GetIdx(0)
@@ -481,8 +552,10 @@ func TestValueFunctionCalls(t *testing.T) {
 	defer noArgsResult.Free()
 	require.Equal(t, "no arguments", noArgsResult.String())
 
-	// Execute method
-	execResult := addFunc.Execute(ctx.NewNull(), ctx.NewInt32(5), ctx.NewInt32(6))
+	// Execute method via retrieved property (Set transfers ownership of addFunc)
+	addFuncFromObj := obj.Get("add")
+	defer addFuncFromObj.Free()
+	execResult := addFuncFromObj.Execute(ctx.NewNull(), ctx.NewInt32(5), ctx.NewInt32(6))
 	defer execResult.Free()
 	require.Equal(t, int32(11), execResult.ToInt32())
 
@@ -606,6 +679,16 @@ func TestValueSpecialTypes(t *testing.T) {
 	ctx := rt.NewContext()
 	defer ctx.Close()
 
+	newCtx := func(t *testing.T) *Context {
+		rt := NewRuntime()
+		ctx := rt.NewContext()
+		t.Cleanup(func() {
+			ctx.Close()
+			rt.Close()
+		})
+		return ctx
+	}
+
 	// Test function - UPDATED: function signature now uses pointers and New* methods
 	funcVal := ctx.NewFunction(func(ctx *Context, this *Value, args []*Value) *Value {
 		return ctx.NewNull()
@@ -632,6 +715,7 @@ func TestValueSpecialTypes(t *testing.T) {
 
 	for _, tt := range promiseTests {
 		t.Run(tt.name, func(t *testing.T) {
+			ctx := newCtx(t)
 			promiseVal := ctx.Eval(tt.jsCode)
 			defer promiseVal.Free()
 			require.False(t, promiseVal.IsException()) // Check for exceptions instead of error
@@ -642,16 +726,17 @@ func TestValueSpecialTypes(t *testing.T) {
 	// Test non-Promise objects for IsPromise method (covers return false branch) - Updated to use New* methods
 	nonPromiseTests := []struct {
 		name      string
-		createVal func() *Value // Changed to return pointer
+		createVal func(*Context) *Value // Changed to return pointer
 	}{
-		{"Object", func() *Value { return ctx.NewObject() }},
-		{"String", func() *Value { return ctx.NewString("not a promise") }},
-		{"Number", func() *Value { return ctx.NewInt32(42) }},
+		{"Object", func(ctx *Context) *Value { return ctx.NewObject() }},
+		{"String", func(ctx *Context) *Value { return ctx.NewString("not a promise") }},
+		{"Number", func(ctx *Context) *Value { return ctx.NewInt32(42) }},
 	}
 
 	for _, tt := range nonPromiseTests {
 		t.Run(tt.name+"NotPromise", func(t *testing.T) {
-			val := tt.createVal()
+			ctx := newCtx(t)
+			val := tt.createVal(ctx)
 			defer val.Free()
 			require.False(t, val.IsPromise())
 		})
@@ -687,10 +772,15 @@ func TestValueSpecialTypes(t *testing.T) {
 
 // TestPromiseState tests promise state handling
 func TestPromiseState(t *testing.T) {
-	rt := NewRuntime()
-	defer rt.Close()
-	ctx := rt.NewContext()
-	defer ctx.Close()
+	newCtx := func(t *testing.T) *Context {
+		rt := NewRuntime()
+		ctx := rt.NewContext()
+		t.Cleanup(func() {
+			ctx.Close()
+			rt.Close()
+		})
+		return ctx
+	}
 
 	// Test all known promise states
 	testCases := []struct {
@@ -705,6 +795,7 @@ func TestPromiseState(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
+			ctx := newCtx(t)
 			promise := ctx.Eval(tc.jsCode)
 			defer promise.Free()
 			require.False(t, promise.IsException()) // Check for exceptions instead of error
@@ -716,6 +807,7 @@ func TestPromiseState(t *testing.T) {
 	}
 
 	// Test non-promise value (covers first if branch) - Updated to use New* methods
+	ctx := newCtx(t)
 	nonPromise := ctx.NewString("not a promise")
 	defer nonPromise.Free()
 	require.Equal(t, PromisePending, nonPromise.PromiseState())
@@ -892,13 +984,19 @@ func TestValueClassInstanceEdgeCases(t *testing.T) {
 // TestValueCallConstructorEdgeCases tests edge cases and error conditions in CallConstructor
 // MODIFIED FOR SCHEME C: Removed all NewInstance tests, enhanced CallConstructor coverage
 func TestValueCallConstructorEdgeCases(t *testing.T) {
-	rt := NewRuntime()
-	defer rt.Close()
-	ctx := rt.NewContext()
-	defer ctx.Close()
+	newCtx := func(t *testing.T) *Context {
+		rt := NewRuntime()
+		ctx := rt.NewContext()
+		t.Cleanup(func() {
+			ctx.Close()
+			rt.Close()
+		})
+		return ctx
+	}
 
 	// Test Case 1: CallConstructor called on non-constructor value
 	t.Run("CallConstructor_NonConstructor", func(t *testing.T) {
+		ctx := newCtx(t)
 		// Test with regular object (not a constructor) - Updated to use New* methods
 		obj := ctx.NewObject()
 		defer obj.Free()
@@ -917,6 +1015,7 @@ func TestValueCallConstructorEdgeCases(t *testing.T) {
 
 	// Test Case 2: CallConstructor called on string (definitely not a constructor)
 	t.Run("CallConstructor_String", func(t *testing.T) {
+		ctx := newCtx(t)
 		str := ctx.NewString("not a constructor")
 		defer str.Free()
 
@@ -930,19 +1029,20 @@ func TestValueCallConstructorEdgeCases(t *testing.T) {
 
 	// Test Case 3: CallConstructor with various non-constructor types - Updated to use New* methods
 	t.Run("CallConstructor_VariousNonConstructors", func(t *testing.T) {
+		ctx := newCtx(t)
 		testCases := []struct {
 			name string
-			val  func() *Value // Changed to return pointer
+			val  func(*Context) *Value // Changed to return pointer
 		}{
-			{"Number", func() *Value { return ctx.NewInt32(42) }},
-			{"Boolean", func() *Value { return ctx.NewBool(true) }},
-			{"Null", func() *Value { return ctx.NewNull() }},
-			{"Undefined", func() *Value { return ctx.NewUndefined() }},
+			{"Number", func(ctx *Context) *Value { return ctx.NewInt32(42) }},
+			{"Boolean", func(ctx *Context) *Value { return ctx.NewBool(true) }},
+			{"Null", func(ctx *Context) *Value { return ctx.NewNull() }},
+			{"Undefined", func(ctx *Context) *Value { return ctx.NewUndefined() }},
 		}
 
 		for _, tc := range testCases {
 			t.Run(tc.name, func(t *testing.T) {
-				val := tc.val()
+				val := tc.val(ctx)
 				defer val.Free()
 
 				result := val.CallConstructor()
@@ -956,6 +1056,7 @@ func TestValueCallConstructorEdgeCases(t *testing.T) {
 
 	// Test Case 4: CallConstructor with unregistered constructor - FIXED: removed error handling
 	t.Run("CallConstructor_UnregisteredConstructor", func(t *testing.T) {
+		ctx := newCtx(t)
 		// Create a constructor function that's not registered in our class system
 		unregisteredConstructor := ctx.Eval(`
             function UnregisteredClass(value) {
@@ -981,6 +1082,7 @@ func TestValueCallConstructorEdgeCases(t *testing.T) {
 
 	// Test Case 5: CallConstructor with proxy constructor - FIXED: removed error handling
 	t.Run("CallConstructor_ProxyConstructor", func(t *testing.T) {
+		ctx := newCtx(t)
 		// Create a constructor wrapped in a Proxy
 		proxyConstructor := ctx.Eval(`
             function BaseClass(value) {
@@ -1013,6 +1115,7 @@ func TestValueCallConstructorEdgeCases(t *testing.T) {
 
 	// Test Case 6: CallConstructor with arrow function (not a constructor) - FIXED: removed error handling
 	t.Run("CallConstructor_ArrowFunction", func(t *testing.T) {
+		ctx := newCtx(t)
 		arrowFunc := ctx.Eval(`(() => {})`)
 		defer arrowFunc.Free()
 		require.False(t, arrowFunc.IsException()) // Check for exceptions instead of error
@@ -1026,6 +1129,7 @@ func TestValueCallConstructorEdgeCases(t *testing.T) {
 
 	// Test Case 7: CallConstructor with bound function - FIXED: removed error handling
 	t.Run("CallConstructor_BoundFunction", func(t *testing.T) {
+		ctx := newCtx(t)
 		boundFunc := ctx.Eval(`
             function OriginalConstructor(value) {
                 this.value = value || "bound_default";
@@ -1046,15 +1150,17 @@ func TestValueCallConstructorEdgeCases(t *testing.T) {
 	// Test Case 8: CallConstructor with built-in constructors
 	t.Run("CallConstructor_BuiltInConstructors", func(t *testing.T) {
 		builtInTests := []struct {
-			name     string
-			jsCode   string
-			args     []*Value     // Changed to slice of pointers
-			validate func(*Value) // Changed parameter to pointer
+			name      string
+			jsCode    string
+			argsMaker func(*Context) []*Value
+			validate  func(*Value)
 		}{
 			{
 				name:   "Array",
 				jsCode: "Array",
-				args:   []*Value{ctx.NewInt32(3)},
+				argsMaker: func(ctx *Context) []*Value {
+					return []*Value{ctx.NewInt32(3)}
+				},
 				validate: func(v *Value) {
 					require.True(t, v.IsArray())
 					require.Equal(t, int64(3), v.Len())
@@ -1063,7 +1169,9 @@ func TestValueCallConstructorEdgeCases(t *testing.T) {
 			{
 				name:   "Object",
 				jsCode: "Object",
-				args:   nil,
+				argsMaker: func(ctx *Context) []*Value {
+					return nil
+				},
 				validate: func(v *Value) {
 					require.True(t, v.IsObject())
 					require.False(t, v.IsArray())
@@ -1072,7 +1180,9 @@ func TestValueCallConstructorEdgeCases(t *testing.T) {
 			{
 				name:   "Date",
 				jsCode: "Date",
-				args:   []*Value{ctx.NewString("2023-01-01")},
+				argsMaker: func(ctx *Context) []*Value {
+					return []*Value{ctx.NewString("2023-01-01")}
+				},
 				validate: func(v *Value) {
 					require.True(t, v.IsObject())
 					// Date objects have getTime method
@@ -1085,13 +1195,19 @@ func TestValueCallConstructorEdgeCases(t *testing.T) {
 
 		for _, tt := range builtInTests {
 			t.Run(tt.name, func(t *testing.T) {
+				ctx := newCtx(t)
 				constructor := ctx.Eval(tt.jsCode)
 				defer constructor.Free()
 				require.False(t, constructor.IsException()) // Check for exceptions instead of error
 
+				args := tt.argsMaker(ctx)
+				for _, arg := range args {
+					defer arg.Free()
+				}
+
 				var result *Value
-				if len(tt.args) > 0 {
-					result = constructor.CallConstructor(tt.args...)
+				if len(args) > 0 {
+					result = constructor.CallConstructor(args...)
 				} else {
 					result = constructor.CallConstructor()
 				}
@@ -1105,6 +1221,7 @@ func TestValueCallConstructorEdgeCases(t *testing.T) {
 
 	// Test Case 9: Successful CallConstructor with registered class (for comparison)
 	t.Run("CallConstructor_RegisteredClass", func(t *testing.T) {
+		ctx := newCtx(t)
 		// Create a Point class using our class system - UPDATED: constructor signature now uses pointers and New* methods
 		pointConstructor, _ := NewClassBuilder("Point").
 			Constructor(func(ctx *Context, instance *Value, args []*Value) (interface{}, error) {
@@ -1159,13 +1276,19 @@ func TestValueCallConstructorEdgeCases(t *testing.T) {
 // TestValueCallConstructorComprehensive tests comprehensive CallConstructor scenarios
 // NEW TEST: Comprehensive coverage for CallConstructor API
 func TestValueCallConstructorComprehensive(t *testing.T) {
-	rt := NewRuntime()
-	defer rt.Close()
-	ctx := rt.NewContext()
-	defer ctx.Close()
+	newCtx := func(t *testing.T) *Context {
+		rt := NewRuntime()
+		ctx := rt.NewContext()
+		t.Cleanup(func() {
+			ctx.Close()
+			rt.Close()
+		})
+		return ctx
+	}
 
 	// Test Case 1: CallConstructor with different argument counts - FIXED: removed error handling
 	t.Run("CallConstructor_ArgumentCounts", func(t *testing.T) {
+		ctx := newCtx(t)
 		constructor := ctx.Eval(`
             function TestClass() {
                 this.argCount = arguments.length;
@@ -1210,6 +1333,7 @@ func TestValueCallConstructorComprehensive(t *testing.T) {
 
 	// Test Case 2: CallConstructor with inheritance chain - FIXED: removed error handling
 	t.Run("CallConstructor_InheritanceChain", func(t *testing.T) {
+		ctx := newCtx(t)
 		// Set up inheritance chain
 		ret := ctx.Eval(`
             function Base(value) {
@@ -1262,6 +1386,7 @@ func TestValueCallConstructorComprehensive(t *testing.T) {
 
 	// Test Case 3: CallConstructor with ES6 classes - FIXED: removed error handling
 	t.Run("CallConstructor_ES6Classes", func(t *testing.T) {
+		ctx := newCtx(t)
 		es6Constructor := ctx.Eval(`
             class ES6Class {
                 constructor(name, value) {
@@ -1311,6 +1436,7 @@ func TestValueCallConstructorComprehensive(t *testing.T) {
 
 	// Test Case 4: CallConstructor error scenarios - FIXED: removed error handling
 	t.Run("CallConstructor_ErrorScenarios", func(t *testing.T) {
+		ctx := newCtx(t)
 		// Constructor that throws
 		throwingConstructor := ctx.Eval(`
             function ThrowingConstructor() {
@@ -1343,6 +1469,7 @@ func TestValueCallConstructorComprehensive(t *testing.T) {
 
 	// Test Case 5: CallConstructor performance test - FIXED: removed error handling
 	t.Run("CallConstructor_Performance", func(t *testing.T) {
+		ctx := newCtx(t)
 		constructor := ctx.Eval(`
             function PerfTestClass(id) {
                 this.id = id;
@@ -1370,4 +1497,651 @@ func TestValueCallConstructorComprehensive(t *testing.T) {
 			instance.Free()
 		}
 	})
+}
+
+func TestValueToStringNilSafety(t *testing.T) {
+	var nilValue *Value
+	require.Equal(t, "", nilValue.ToString())
+
+	orphan := &Value{}
+	require.Equal(t, "", orphan.ToString())
+}
+
+func TestValueConversionNilSafety(t *testing.T) {
+	var nilValue *Value
+	require.False(t, nilValue.ToBool())
+	require.Equal(t, int32(0), nilValue.ToInt32())
+	require.Equal(t, int64(0), nilValue.ToInt64())
+	require.Equal(t, uint32(0), nilValue.ToUint32())
+	require.Equal(t, float64(0), nilValue.ToFloat64())
+	require.Nil(t, nilValue.ToBigInt())
+	require.Equal(t, "", nilValue.JSONStringify())
+	_, err := nilValue.ToByteArray(1)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "invalid value context")
+
+	orphan := &Value{}
+	require.False(t, orphan.ToBool())
+	require.Equal(t, int32(0), orphan.ToInt32())
+	require.Equal(t, int64(0), orphan.ToInt64())
+	require.Equal(t, uint32(0), orphan.ToUint32())
+	require.Equal(t, float64(0), orphan.ToFloat64())
+	require.Nil(t, orphan.ToBigInt())
+	require.Equal(t, "", orphan.JSONStringify())
+	_, err = orphan.ToByteArray(1)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "invalid value context")
+}
+
+func TestValueTypeAndPromiseNilSafety(t *testing.T) {
+	var nilValue *Value
+	require.False(t, nilValue.IsBigInt())
+	require.False(t, nilValue.IsFunction())
+	require.False(t, nilValue.IsConstructor())
+	require.False(t, nilValue.IsPromise())
+	require.Equal(t, PromisePending, nilValue.PromiseState())
+	require.Nil(t, nilValue.Await())
+	require.False(t, nilValue.GlobalInstanceof("Array"))
+	require.False(t, nilValue.HasInstanceData())
+	_, err := nilValue.GetGoObject()
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "invalid value context")
+	require.False(t, nilValue.IsInstanceOfConstructor(&Value{}))
+
+	orphan := &Value{}
+	require.False(t, orphan.IsBigInt())
+	require.False(t, orphan.IsFunction())
+	require.False(t, orphan.IsConstructor())
+	require.False(t, orphan.IsPromise())
+	require.Equal(t, PromisePending, orphan.PromiseState())
+	require.Nil(t, orphan.Await())
+	require.False(t, orphan.GlobalInstanceof("Array"))
+	require.False(t, orphan.HasInstanceData())
+	_, err = orphan.GetGoObject()
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "invalid value context")
+	require.False(t, orphan.IsInstanceOfConstructor(&Value{}))
+}
+
+func TestValueClassInstanceHandleStoreNilSafety(t *testing.T) {
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	constructor, _ := NewClassBuilder("HandleStoreNilClass").
+		Constructor(func(ctx *Context, instance *Value, args []*Value) (interface{}, error) {
+			return &Point{X: 1, Y: 2}, nil
+		}).
+		Build(ctx)
+	require.False(t, constructor.IsException())
+	ctx.Globals().Set("HandleStoreNilClass", constructor)
+
+	instance := ctx.Eval(`new HandleStoreNilClass()`)
+	defer instance.Free()
+	require.False(t, instance.IsException())
+
+	originalStore := ctx.handleStore
+	ctx.handleStore = nil
+	defer func() { ctx.handleStore = originalStore }()
+
+	require.False(t, instance.HasInstanceData())
+	_, err := instance.GetGoObject()
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "invalid handle store")
+}
+
+func TestValueCrossContextGuards(t *testing.T) {
+	t.Run("SetIgnoresForeignValue", func(t *testing.T) {
+		rt1 := NewRuntime()
+		defer rt1.Close()
+		ctx1 := rt1.NewContext()
+		defer ctx1.Close()
+
+		rt2 := NewRuntime()
+		defer rt2.Close()
+		ctx2 := rt2.NewContext()
+		defer ctx2.Close()
+
+		obj := ctx1.NewObject()
+		defer obj.Free()
+
+		foreign := ctx2.NewString("foreign")
+		defer foreign.Free()
+
+		obj.Set("x", foreign)
+		require.False(t, foreign.IsUndefined())
+
+		got := obj.Get("x")
+		defer got.Free()
+		require.True(t, got.IsUndefined())
+	})
+
+	t.Run("CallRejectsForeignArgs", func(t *testing.T) {
+		rt1 := NewRuntime()
+		defer rt1.Close()
+		ctx1 := rt1.NewContext()
+		defer ctx1.Close()
+
+		rt2 := NewRuntime()
+		defer rt2.Close()
+		ctx2 := rt2.NewContext()
+		defer ctx2.Close()
+
+		obj := ctx1.Eval(`({ m(v){ return v; } })`)
+		defer obj.Free()
+		require.False(t, obj.IsException())
+
+		foreign := ctx2.NewInt32(7)
+		defer foreign.Free()
+
+		res := obj.Call("m", foreign)
+		defer res.Free()
+		require.True(t, res.IsException())
+		require.Contains(t, ctx1.Exception().Error(), "cross-context argument")
+	})
+
+	t.Run("ExecuteRejectsForeignThis", func(t *testing.T) {
+		rt1 := NewRuntime()
+		defer rt1.Close()
+		ctx1 := rt1.NewContext()
+		defer ctx1.Close()
+
+		rt2 := NewRuntime()
+		defer rt2.Close()
+		ctx2 := rt2.NewContext()
+		defer ctx2.Close()
+
+		fn := ctx1.Eval(`(function(){ return this; })`)
+		defer fn.Free()
+		require.False(t, fn.IsException())
+
+		foreignThis := ctx2.NewObject()
+		defer foreignThis.Free()
+
+		res := fn.Execute(foreignThis)
+		defer res.Free()
+		require.True(t, res.IsException())
+		require.Contains(t, ctx1.Exception().Error(), "cross-context this value")
+	})
+
+	t.Run("CallConstructorRejectsForeignArgs", func(t *testing.T) {
+		rt1 := NewRuntime()
+		defer rt1.Close()
+		ctx1 := rt1.NewContext()
+		defer ctx1.Close()
+
+		rt2 := NewRuntime()
+		defer rt2.Close()
+		ctx2 := rt2.NewContext()
+		defer ctx2.Close()
+
+		ctor := ctx1.Eval(`(function C(v){ this.v = v; })`)
+		defer ctor.Free()
+		require.False(t, ctor.IsException())
+
+		foreign := ctx2.NewInt32(3)
+		defer foreign.Free()
+
+		res := ctor.CallConstructor(foreign)
+		defer res.Free()
+		require.True(t, res.IsException())
+		require.Contains(t, ctx1.Exception().Error(), "cross-context argument")
+	})
+}
+
+func TestValueObjectOpsNilSafety(t *testing.T) {
+	var nilValue *Value
+	require.Nil(t, nilValue.Context())
+	nilValue.Free()
+	require.Equal(t, int64(0), nilValue.Len())
+	require.Equal(t, int64(0), nilValue.ByteLen())
+	nilValue.Set("x", nil)
+	nilValue.SetIdx(1, nil)
+	require.Nil(t, nilValue.Get("x"))
+	require.Nil(t, nilValue.GetIdx(0))
+	require.Nil(t, nilValue.Call("fn"))
+	require.Nil(t, nilValue.Execute(nil))
+	require.Nil(t, nilValue.CallConstructor())
+	require.False(t, nilValue.Has("x"))
+	require.False(t, nilValue.HasIdx(1))
+	require.False(t, nilValue.Delete("x"))
+	require.False(t, nilValue.DeleteIdx(1))
+	_, err := nilValue.PropertyNames()
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "invalid value context")
+	require.Equal(t, uint32(0), nilValue.GetClassID())
+
+	orphan := &Value{}
+	require.Nil(t, orphan.Context())
+	orphan.Free()
+	require.Equal(t, int64(0), orphan.Len())
+	require.Equal(t, int64(0), orphan.ByteLen())
+	orphan.Set("x", nil)
+	orphan.SetIdx(1, nil)
+	require.Nil(t, orphan.Get("x"))
+	require.Nil(t, orphan.GetIdx(0))
+	require.Nil(t, orphan.Call("fn"))
+	require.Nil(t, orphan.Execute(nil))
+	require.Nil(t, orphan.CallConstructor())
+	require.False(t, orphan.Has("x"))
+	require.False(t, orphan.HasIdx(1))
+	require.False(t, orphan.Delete("x"))
+	require.False(t, orphan.DeleteIdx(1))
+	_, err = orphan.PropertyNames()
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "invalid value context")
+	require.Equal(t, uint32(0), orphan.GetClassID())
+}
+
+func TestValueCallExecuteConstructorArgumentGuards(t *testing.T) {
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	rt2 := NewRuntime()
+	defer rt2.Close()
+	ctx2 := rt2.NewContext()
+	defer ctx2.Close()
+
+	obj := ctx.Eval(`({
+		echo(v) { return v === undefined ? "undef" : String(v); }
+	})`)
+	defer obj.Free()
+	require.False(t, obj.IsException())
+
+	orphanArg := &Value{}
+	callResult := obj.Call("echo", nil, orphanArg)
+	defer callResult.Free()
+	require.False(t, callResult.IsException())
+	require.Equal(t, "undef", callResult.ToString())
+
+	echoFn := obj.Get("echo")
+	defer echoFn.Free()
+	execResult := echoFn.Execute(nil, nil, orphanArg)
+	defer execResult.Free()
+	require.False(t, execResult.IsException())
+	require.Equal(t, "undef", execResult.ToString())
+
+	ctor := ctx.Eval(`(function C(v){ this.v = (v === undefined ? "undef" : String(v)); })`)
+	defer ctor.Free()
+	require.False(t, ctor.IsException())
+
+	instance := ctor.CallConstructor(nil, orphanArg)
+	defer instance.Free()
+	require.False(t, instance.IsException())
+	iv := instance.Get("v")
+	defer iv.Free()
+	require.Equal(t, "undef", iv.ToString())
+
+	arr := ctx.NewObject()
+	defer arr.Free()
+	arr.SetIdx(3, nil)
+	require.False(t, arr.HasIdx(3))
+
+	foreign := ctx2.NewInt32(99)
+	defer foreign.Free()
+	arr.SetIdx(4, foreign)
+	require.False(t, foreign.IsUndefined())
+	require.False(t, arr.HasIdx(4))
+}
+
+func TestValueClassOpaqueHelpersFailClosedBranches(t *testing.T) {
+	var nilValue *Value
+
+	ctxKey, handleID, ok := nilValue.classOpaqueContextKeyAndHandleIDForTest()
+	require.False(t, ok)
+	require.Zero(t, ctxKey)
+	require.Zero(t, handleID)
+	require.False(t, nilValue.corruptClassOpaqueMagicForTest())
+	require.False(t, nilValue.setClassOpaqueHandleIDForTest(1))
+
+	orphan := &Value{}
+	ctxKey, handleID, ok = orphan.classOpaqueContextKeyAndHandleIDForTest()
+	require.False(t, ok)
+	require.Zero(t, ctxKey)
+	require.Zero(t, handleID)
+	require.False(t, orphan.corruptClassOpaqueMagicForTest())
+	require.False(t, orphan.setClassOpaqueHandleIDForTest(1))
+	require.False(t, orphan.setClassOpaqueContextNullForTest())
+
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	nonObject := ctx.NewInt32(7)
+	defer nonObject.Free()
+	ctxKey, handleID, ok = nonObject.classOpaqueContextKeyAndHandleIDForTest()
+	require.False(t, ok)
+	require.Zero(t, ctxKey)
+	require.Zero(t, handleID)
+	require.False(t, nonObject.corruptClassOpaqueMagicForTest())
+	require.False(t, nonObject.setClassOpaqueHandleIDForTest(1))
+	require.False(t, nonObject.setClassOpaqueContextNullForTest())
+
+	plainObj := ctx.NewObject()
+	defer plainObj.Free()
+	ctxKey, handleID, ok = plainObj.classOpaqueContextKeyAndHandleIDForTest()
+	require.False(t, ok)
+	require.Zero(t, ctxKey)
+	require.Zero(t, handleID)
+	require.False(t, plainObj.corruptClassOpaqueMagicForTest())
+	require.False(t, plainObj.setClassOpaqueHandleIDForTest(1))
+	require.False(t, plainObj.setClassOpaqueContextNullForTest())
+}
+
+func TestValueClassOpaqueContextNullBranches(t *testing.T) {
+	var nilValue *Value
+	require.False(t, nilValue.setClassOpaqueContextNullForTest())
+
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	constructor, _ := NewClassBuilder("OpaqueContextNullClass").
+		Constructor(func(ctx *Context, instance *Value, args []*Value) (interface{}, error) {
+			return &Point{X: 1, Y: 2}, nil
+		}).
+		Build(ctx)
+	require.False(t, constructor.IsException())
+	ctx.Globals().Set("OpaqueContextNullClass", constructor)
+
+	obj := ctx.Eval(`new OpaqueContextNullClass()`)
+	defer obj.Free()
+	require.False(t, obj.IsException())
+
+	require.True(t, obj.setClassOpaqueContextNullForTest())
+	ctxKey, handleID, ok := obj.classOpaqueContextKeyAndHandleIDForTest()
+	require.False(t, ok)
+	require.Zero(t, ctxKey)
+	require.Zero(t, handleID)
+}
+
+func TestValueGetTypedArrayInfoBranches(t *testing.T) {
+	var nilValue *Value
+	buf, off, blen, bpe := nilValue.getTypedArrayInfo()
+	require.Nil(t, buf)
+	require.Equal(t, 0, off)
+	require.Equal(t, 0, blen)
+	require.Equal(t, 0, bpe)
+
+	orphan := &Value{}
+	buf, off, blen, bpe = orphan.getTypedArrayInfo()
+	require.Nil(t, buf)
+	require.Equal(t, 0, off)
+	require.Equal(t, 0, blen)
+	require.Equal(t, 0, bpe)
+
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	nonTyped := ctx.NewString("x")
+	defer nonTyped.Free()
+	buf, off, blen, bpe = nonTyped.getTypedArrayInfo()
+	require.NotNil(t, buf)
+	defer buf.Free()
+	require.True(t, buf.IsUndefined() || buf.IsException())
+	require.Equal(t, 0, off)
+	require.Equal(t, 0, blen)
+	require.Equal(t, 0, bpe)
+
+	typed := ctx.NewUint8Array([]uint8{1, 2, 3, 4})
+	defer typed.Free()
+	buf, off, blen, bpe = typed.getTypedArrayInfo()
+	require.NotNil(t, buf)
+	defer buf.Free()
+	require.Equal(t, 0, off)
+	require.Equal(t, 4, blen)
+	require.Equal(t, 1, bpe)
+}
+
+func TestValueClassInstanceDataAdditionalBranches(t *testing.T) {
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	// !IsObject branch
+	num := ctx.NewInt32(1)
+	defer num.Free()
+	require.False(t, num.HasInstanceData())
+	_, err := num.GetGoObject()
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "value is not an object")
+
+	constructor, _ := NewClassBuilder("BranchDataClass").
+		Constructor(func(ctx *Context, instance *Value, args []*Value) (interface{}, error) {
+			return &Point{X: 3, Y: 4}, nil
+		}).
+		Build(ctx)
+	require.False(t, constructor.IsException())
+	ctx.Globals().Set("BranchDataClass", constructor)
+
+	obj := ctx.Eval(`new BranchDataClass()`)
+	defer obj.Free()
+	require.False(t, obj.IsException())
+	require.True(t, obj.HasInstanceData())
+
+	// Invalid magic branch
+	require.True(t, obj.corruptClassOpaqueMagicForTest())
+	require.False(t, obj.HasInstanceData())
+	_, err = obj.GetGoObject()
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "instance data not found in handle store")
+
+	// handleID <= 0 branch
+	obj2 := ctx.Eval(`new BranchDataClass()`)
+	defer obj2.Free()
+	require.False(t, obj2.IsException())
+	require.True(t, obj2.setClassOpaqueHandleIDForTest(0))
+	require.False(t, obj2.HasInstanceData())
+	_, err = obj2.GetGoObject()
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "instance data not found in handle store")
+
+	// handle missing branch
+	obj3 := ctx.Eval(`new BranchDataClass()`)
+	defer obj3.Free()
+	require.False(t, obj3.IsException())
+	_, handleID, ok := obj3.classOpaqueContextKeyAndHandleIDForTest()
+	require.True(t, ok)
+	require.True(t, ctx.handleStore.Delete(handleID))
+	require.False(t, obj3.HasInstanceData())
+	_, err = obj3.GetGoObject()
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "instance data not found in handle store")
+}
+
+func TestValueClassOpaqueContextKeyAndHandleIDHandleInvalid(t *testing.T) {
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	constructor, _ := NewClassBuilder("OpaqueHelperInvalidHandleClass").
+		Constructor(func(ctx *Context, instance *Value, args []*Value) (interface{}, error) {
+			return &Point{X: 1, Y: 2}, nil
+		}).
+		Build(ctx)
+	require.False(t, constructor.IsException())
+	ctx.Globals().Set("OpaqueHelperInvalidHandleClass", constructor)
+
+	obj := ctx.Eval(`new OpaqueHelperInvalidHandleClass()`)
+	defer obj.Free()
+	require.False(t, obj.IsException())
+
+	require.True(t, obj.setClassOpaqueHandleIDForTest(0))
+	ctxKey, handleID, ok := obj.classOpaqueContextKeyAndHandleIDForTest()
+	require.False(t, ok)
+	require.Zero(t, ctxKey)
+	require.Zero(t, handleID)
+}
+
+func TestValueClassOpaqueContextKeyAndHandleIDInvalidMagic(t *testing.T) {
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	constructor, _ := NewClassBuilder("OpaqueHelperInvalidMagicClass").
+		Constructor(func(ctx *Context, instance *Value, args []*Value) (interface{}, error) {
+			return &Point{X: 1, Y: 2}, nil
+		}).
+		Build(ctx)
+	require.False(t, constructor.IsException())
+	ctx.Globals().Set("OpaqueHelperInvalidMagicClass", constructor)
+
+	obj := ctx.Eval(`new OpaqueHelperInvalidMagicClass()`)
+	defer obj.Free()
+	require.False(t, obj.IsException())
+
+	require.True(t, obj.corruptClassOpaqueMagicForTest())
+	ctxKey, handleID, ok := obj.classOpaqueContextKeyAndHandleIDForTest()
+	require.False(t, ok)
+	require.Zero(t, ctxKey)
+	require.Zero(t, handleID)
+}
+
+func TestValueResolveClassIDFromInheritanceBranches(t *testing.T) {
+	var nilValue *Value
+	classID, ok := nilValue.resolveClassIDFromInheritance()
+	require.False(t, ok)
+	require.Zero(t, classID)
+
+	orphan := &Value{}
+	classID, ok = orphan.resolveClassIDFromInheritance()
+	require.False(t, ok)
+	require.Zero(t, classID)
+
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	baseCtor, baseClassID := NewClassBuilder("ResolveBaseClass").
+		Constructor(func(ctx *Context, instance *Value, args []*Value) (interface{}, error) {
+			return &Point{X: 1, Y: 2}, nil
+		}).
+		Build(ctx)
+	require.False(t, baseCtor.IsException())
+	require.Greater(t, baseClassID, uint32(0))
+	ctx.Globals().Set("ResolveBaseClass", baseCtor)
+
+	childCtor := ctx.Eval(`class ResolveChildClass extends ResolveBaseClass {}; ResolveChildClass`)
+	defer childCtor.Free()
+	require.False(t, childCtor.IsException())
+
+	resolvedID, resolved := childCtor.resolveClassIDFromInheritance()
+	require.True(t, resolved)
+	require.Equal(t, baseClassID, resolvedID)
+
+	plainCtor := ctx.Eval(`function ResolvePlainClass() {}; ResolvePlainClass`)
+	defer plainCtor.Free()
+	require.False(t, plainCtor.IsException())
+
+	resolvedID, resolved = plainCtor.resolveClassIDFromInheritance()
+	require.False(t, resolved)
+	require.Zero(t, resolvedID)
+}
+
+func TestValueFreeOffOwnerThreadScheduleFallbackWhenSchedulerClosed(t *testing.T) {
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	v := ctx.NewString("fallback-free")
+	require.NotNil(t, v)
+
+	// Simulate close-window: schedule path should fail for non-owner thread calls.
+	close(ctx.jobClosed)
+
+	done := make(chan interface{}, 1)
+	go func() {
+		defer func() { done <- recover() }()
+		v.Free()
+	}()
+
+	rec := <-done
+	require.Nil(t, rec)
+
+	// Drain possible fallback job best-effort.
+	ctx.ProcessJobs()
+
+	// Idempotent free after fallback path.
+	v.Free()
+}
+
+func TestValueFreeOffOwnerThreadScheduleSuccess(t *testing.T) {
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	v := ctx.NewString("schedule-success-free")
+	require.NotNil(t, v)
+
+	done := make(chan interface{}, 1)
+	go func() {
+		defer func() { done <- recover() }()
+		v.Free()
+	}()
+
+	rec := <-done
+	require.Nil(t, rec)
+
+	// Execute scheduled owner-thread free job.
+	ctx.ProcessJobs()
+
+	// Free remains idempotent after scheduled free.
+	v.Free()
+}
+
+func TestValueFreeRuntimeStateGuardBranches(t *testing.T) {
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	v1 := ctx.NewString("runtime-nil-free")
+	require.NotNil(t, v1)
+	originalRuntime := ctx.runtime
+	ctx.runtime = nil
+	require.NotPanics(t, func() { v1.Free() })
+	ctx.runtime = originalRuntime
+	v1.Free()
+
+	v2 := ctx.NewString("runtime-ref-nil-free")
+	require.NotNil(t, v2)
+	ctx.runtime = &Runtime{}
+	require.NotPanics(t, func() { v2.Free() })
+	ctx.runtime = originalRuntime
+	v2.Free()
+}
+
+func TestValueFreeScheduledGuardWhenContextRefTurnsNil(t *testing.T) {
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	v := ctx.NewString("schedule-guard-free")
+	require.NotNil(t, v)
+
+	done := make(chan struct{})
+	go func() {
+		v.Free()
+		close(done)
+	}()
+	<-done
+
+	originalRef := ctx.ref
+	ctx.ref = nil
+	require.NotPanics(t, func() { ctx.ProcessJobs() })
+	ctx.ref = originalRef
 }

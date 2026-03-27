@@ -64,6 +64,7 @@ In other words, Windows users do not need vendored binary archives anymore, but 
 ### Memory Management
 - Call  `value.Free()` for `*Value` objects you create or receive. QuickJS uses reference counting for memory management, so if a value is referenced by other objects, you only need to ensure the referencing objects are properly freed.
 - Runtime and Context objects have their own cleanup methods (`Close()`). Close them once you are done using them.
+- `Context.NewFunction()` registers a Go callback handle that is always cleaned in `Context.Close()`. For short-lived callback functions in long-running contexts, call `ctx.ReleaseFunction(fn)` when you can guarantee JavaScript will not call `fn` again.
 - Use `runtime.SetFinalizer()` cautiously as it may interfere with QuickJS's GC.
 
 ### Performance Tips
@@ -71,6 +72,19 @@ In other words, Windows users do not need vendored binary archives anymore, but 
 - Reuse Runtime and Context objects when possible.
 - Avoid frequent conversion between Go and JS values.
 - Consider using bytecode compilation for frequently executed scripts.
+
+### Runtime Thread Ownership
+- `Runtime` is thread-affine. Call `Runtime.Close()` on the same goroutine/OS thread that created the runtime.
+- Calling `Runtime.Close()` from a different goroutine is treated as contract violation and will panic with a clear error message.
+- Recommended pattern: create, use, and close a runtime within the same worker goroutine.
+
+### Runtime Debug Snapshots
+- `Context.SnapshotPromiseCleanupObservability()` and `Context.SnapshotAndResetPromiseCleanupObservability()` expose Promise cleanup trigger sources: `cancel`, `finally`, and `fallback`.
+- `Context.SnapshotCloseEnqueueObservability()` and `Context.SnapshotAndResetCloseEnqueueObservability()` expose close-window fallback enqueue behavior: total `Succeeded` / `Dropped`, and dropped source buckets (`ValueFreeDropped`, `PromiseCallbackDropped`, `OtherDropped`).
+- Recommended debugging workflow under pressure tests:
+    1. Capture snapshot before load.
+    2. Run workload and close/recreate cycles.
+    3. Capture and compare snapshot deltas to identify which path drives dropped enqueues or cleanup fallback usage.
 
 ### Best Practices
 - Use appropriate `EvalOptions` for different script types.
@@ -287,7 +301,32 @@ func main() {
 //   before creating values or resolving/rejecting Promises.
 // - ctx.Await will internally drive pending jobs and the
 //   scheduler until the Promise settles.
+// - If a Promise may stay pending for a long time (or forever),
+//   use NewPromiseWithCancel and call cancel() when abandoning it
+//   to release internal resolve/reject callback references.
+// - If resolve and reject race, only the first settled callback wins;
+//   later callbacks are ignored.
 ```
+
+### Optional Pending Promise Cleanup
+
+```go
+promise, cancel := ctx.NewPromiseWithCancel(func(resolve, reject func(*quickjs.Value)) {
+    // pending work that may never settle
+})
+defer promise.Free()
+
+// If the caller gives up waiting, explicitly release callback references.
+cancel()
+
+// cancel() does not resolve/reject the Promise itself.
+// The Promise can remain pending unless your logic settles it.
+```
+
+Contract summary:
+- `cancel()` is idempotent and safe to call multiple times.
+- `cancel()` only releases internal callback references.
+- `cancel()` does not change Promise state (`pending`/`fulfilled`/`rejected`).
 
 ### Error Handling
 
