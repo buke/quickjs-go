@@ -96,6 +96,15 @@ func TestAtomSpecialCases(t *testing.T) {
 	longAtom := ctx.NewAtom(longString) // Changed: Atom() → NewAtom()
 	defer longAtom.Free()
 	require.EqualValues(t, longString, longAtom.ToString()) // Changed: String() → ToString()
+
+	t.Run("EmbeddedNUL", func(t *testing.T) {
+		atom := ctx.NewAtom("a\x00b")
+		defer atom.Free()
+
+		atomValue := atom.ToValue()
+		defer atomValue.Free()
+		require.Equal(t, `"a\u0000b"`, atomValue.JSONStringify())
+	})
 }
 
 // TestAtomMemoryManagement tests proper memory management

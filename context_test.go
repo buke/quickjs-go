@@ -77,6 +77,17 @@ func TestContextBasics(t *testing.T) {
 		}
 	})
 
+	t.Run("StringWithEmbeddedNUL", func(t *testing.T) {
+		ctx := newCtx(t)
+		nulString := ctx.NewString("a\x00b")
+		ctx.Globals().Set("nulString", nulString)
+
+		check := ctx.Eval(`nulString.length === 3 && nulString.charCodeAt(1) === 0 && nulString.charCodeAt(2) === 98`)
+		defer check.Free()
+		require.False(t, check.IsException())
+		require.True(t, check.ToBool())
+	})
+
 }
 
 func TestContextEvaluation(t *testing.T) {
@@ -2274,6 +2285,11 @@ func TestContextUtilities(t *testing.T) {
 		invalidJSON := ctx.ParseJSON(`{invalid}`)
 		defer invalidJSON.Free()
 		require.True(t, invalidJSON.IsException())
+
+		// Empty JSON input should also be a JSON parse exception.
+		emptyJSON := ctx.ParseJSON("")
+		defer emptyJSON.Free()
+		require.True(t, emptyJSON.IsException())
 	})
 
 	t.Run("InterruptHandler", func(t *testing.T) {

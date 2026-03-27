@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -612,9 +613,13 @@ func (ctx *Context) NewString(v string) *Value {
 	if ctx == nil || ctx.ref == nil {
 		return nil
 	}
-	ptr := C.CString(v)
-	defer C.free(unsafe.Pointer(ptr))
-	return &Value{ctx: ctx, ref: C.JS_NewString(ctx.ref, ptr)}
+	var ptr *C.char
+	if len(v) > 0 {
+		ptr = (*C.char)(unsafe.Pointer(unsafe.StringData(v)))
+	}
+	val := &Value{ctx: ctx, ref: C.JS_NewStringLen_Wrapper(ctx.ref, ptr, C.size_t(len(v)))}
+	runtime.KeepAlive(v)
+	return val
 }
 
 // String returns a string value with given string.
@@ -845,13 +850,18 @@ func (ctx *Context) ParseJSON(v string) *Value {
 	if ctx == nil || ctx.ref == nil {
 		return nil
 	}
-	ptr := C.CString(v)
-	defer C.free(unsafe.Pointer(ptr))
+	// QuickJS parsing paths may read a sentinel byte, so provide a NUL-terminated
+	// buffer while still passing the exact payload length.
+	buf := append([]byte(v), 0)
+	ptr := (*C.char)(unsafe.Pointer(&buf[0]))
 
 	filenamePtr := C.CString("")
 	defer C.free(unsafe.Pointer(filenamePtr))
 
-	return &Value{ctx: ctx, ref: C.JS_ParseJSON(ctx.ref, ptr, C.size_t(len(v)), filenamePtr)}
+	val := &Value{ctx: ctx, ref: C.JS_ParseJSON(ctx.ref, ptr, C.size_t(len(v)), filenamePtr)}
+	runtime.KeepAlive(v)
+	runtime.KeepAlive(buf)
+	return val
 }
 
 // NewFunction returns a js function value with given function template
@@ -1209,9 +1219,13 @@ func (ctx *Context) NewAtom(v string) *Atom {
 	if ctx == nil || ctx.ref == nil {
 		return nil
 	}
-	ptr := C.CString(v)
-	defer C.free(unsafe.Pointer(ptr))
-	return &Atom{ctx: ctx, ref: C.JS_NewAtom(ctx.ref, ptr)}
+	var ptr *C.char
+	if len(v) > 0 {
+		ptr = (*C.char)(unsafe.Pointer(unsafe.StringData(v)))
+	}
+	atom := &Atom{ctx: ctx, ref: C.JS_NewAtomLen_Wrapper(ctx.ref, ptr, C.size_t(len(v)))}
+	runtime.KeepAlive(v)
+	return atom
 }
 
 // Atom returns a new Atom value with given string.
@@ -1333,12 +1347,7 @@ func EvalLoadOnly(loadOnly bool) EvalOption {
 	}
 }
 
-// Eval returns a js value with given code.
-// Need call Free() `quickjs.Value`'s returned by `Eval()` and `EvalFile()` and `EvalBytecode()`.
-// func (ctx *Context) Eval(code string) (*Value, error) { return ctx.EvalFile(code, "code") }
-func (ctx *Context) Eval(code string, opts ...EvalOption) *Value {
-	ctx.requireOwnerThread("Context.Eval")
-
+func buildEvalOptions(opts ...EvalOption) EvalOptions {
 	options := EvalOptions{
 		js_eval_type_global: true,
 		filename:            "<input>",
@@ -1347,7 +1356,10 @@ func (ctx *Context) Eval(code string, opts ...EvalOption) *Value {
 	for _, fn := range opts {
 		fn(&options)
 	}
+	return options
+}
 
+func buildEvalFlags(options EvalOptions) C.int {
 	cFlag := C.int(0)
 	if options.js_eval_type_global {
 		cFlag |= C.int(C.GetEvalTypeGlobal())
@@ -1361,24 +1373,54 @@ func (ctx *Context) Eval(code string, opts ...EvalOption) *Value {
 	if options.js_eval_flag_compile_only {
 		cFlag |= C.int(C.GetEvalFlagCompileOnly())
 	}
+	return cFlag
+}
 
-	codePtr := C.CString(code)
-	defer C.free(unsafe.Pointer(codePtr))
+func bytesDataPtr(buf []byte) *C.char {
+	if len(buf) == 0 {
+		return nil
+	}
+	return (*C.char)(unsafe.Pointer(&buf[0]))
+}
+
+func (ctx *Context) evalBuffer(codePtr *C.char, codeLen C.size_t, options EvalOptions) *Value {
+	ctx.requireOwnerThread("Context.Eval")
+
+	cFlag := buildEvalFlags(options)
 
 	filenamePtr := C.CString(options.filename)
 	defer C.free(unsafe.Pointer(filenamePtr))
 
-	if C.JS_DetectModule_Wrapper(codePtr, C.size_t(len(code))) != 0 {
+	if C.JS_DetectModule_Wrapper(codePtr, codeLen) != 0 {
 		cFlag |= C.int(C.GetEvalTypeModule())
 	}
 
-	var val *Value
 	if options.await {
-		val = &Value{ctx: ctx, ref: C.js_std_await(ctx.ref, C.JS_Eval(ctx.ref, codePtr, C.size_t(len(code)), filenamePtr, cFlag))}
-	} else {
-		val = &Value{ctx: ctx, ref: C.JS_Eval(ctx.ref, codePtr, C.size_t(len(code)), filenamePtr, cFlag)}
+		return &Value{ctx: ctx, ref: C.js_std_await(ctx.ref, C.JS_Eval(ctx.ref, codePtr, codeLen, filenamePtr, cFlag))}
 	}
+	return &Value{ctx: ctx, ref: C.JS_Eval(ctx.ref, codePtr, codeLen, filenamePtr, cFlag)}
+}
 
+func (ctx *Context) evalBytes(code []byte, opts ...EvalOption) *Value {
+	options := buildEvalOptions(opts...)
+	codePtr := bytesDataPtr(code)
+	val := ctx.evalBuffer(codePtr, C.size_t(len(code)), options)
+	runtime.KeepAlive(code)
+	return val
+}
+
+// Eval returns a js value with given code.
+// Need call Free() `quickjs.Value`'s returned by `Eval()` and `EvalFile()` and `EvalBytecode()`.
+// func (ctx *Context) Eval(code string) (*Value, error) { return ctx.EvalFile(code, "code") }
+func (ctx *Context) Eval(code string, opts ...EvalOption) *Value {
+	options := buildEvalOptions(opts...)
+	// QuickJS parsing paths may read a sentinel byte, so provide a NUL-terminated
+	// buffer while still passing the exact payload length.
+	buf := append([]byte(code), 0)
+	codePtr := (*C.char)(unsafe.Pointer(&buf[0]))
+	val := ctx.evalBuffer(codePtr, C.size_t(len(code)), options)
+	runtime.KeepAlive(code)
+	runtime.KeepAlive(buf)
 	return val
 }
 
@@ -1390,32 +1432,59 @@ func (ctx *Context) EvalFile(filePath string, opts ...EvalOption) *Value {
 		return ctx.ThrowError(err)
 	}
 	opts = append(opts, EvalFileName(filePath))
-	return ctx.Eval(string(b), opts...)
+	return ctx.evalBytes(b, opts...)
 }
 
-// LoadModule returns a js value with given code and module name.
-func (ctx *Context) LoadModule(code string, moduleName string, opts ...EvalOption) *Value {
-	options := EvalOptions{
-		load_only: false,
+func (ctx *Context) compileFromValue(val *Value) ([]byte, error) {
+	defer val.Free()
+
+	var kSize C.size_t = 0
+	ptr := C.JS_WriteObject(ctx.ref, &kSize, val.ref, C.int(C.GetWriteObjBytecode()))
+
+	if ptr == nil {
+		return nil, ctx.Exception()
 	}
+
+	defer C.js_free(ctx.ref, unsafe.Pointer(ptr))
+
+	ret := make([]byte, C.int(kSize))
+	if kSize > 0 {
+		copy(ret, C.GoBytes(unsafe.Pointer(ptr), C.int(kSize)))
+	}
+
+	return ret, nil
+}
+
+func (ctx *Context) compileBytes(code []byte, opts ...EvalOption) ([]byte, error) {
+	opts = append(opts, EvalFlagCompileOnly(true))
+	val := ctx.evalBytes(code, opts...)
+	return ctx.compileFromValue(val)
+}
+
+func (ctx *Context) loadModuleBytes(code []byte, moduleName string, opts ...EvalOption) *Value {
+	options := EvalOptions{load_only: false}
 	for _, fn := range opts {
 		fn(&options)
 	}
 
-	codePtr := C.CString(code)
-	defer C.free(unsafe.Pointer(codePtr))
-
+	codePtr := bytesDataPtr(code)
 	if C.JS_DetectModule_Wrapper(codePtr, C.size_t(len(code))) == 0 {
+		runtime.KeepAlive(code)
 		return ctx.ThrowSyntaxError("not a module: %s", moduleName)
 	}
+	runtime.KeepAlive(code)
 
-	codeByte, err := ctx.Compile(code, EvalFlagModule(true), EvalFlagCompileOnly(true), EvalFileName(moduleName))
+	codeByte, err := ctx.compileBytes(code, EvalFlagModule(true), EvalFlagCompileOnly(true), EvalFileName(moduleName))
 	if err != nil {
 		return ctx.ThrowError(err)
 	}
 
 	return ctx.LoadModuleBytecode(codeByte, EvalLoadOnly(options.load_only))
+}
 
+// LoadModule returns a js value with given code and module name.
+func (ctx *Context) LoadModule(code string, moduleName string, opts ...EvalOption) *Value {
+	return ctx.loadModuleBytes([]byte(code), moduleName, opts...)
 }
 
 // LoadModuleFile returns a js value with given file path and module name.
@@ -1424,7 +1493,7 @@ func (ctx *Context) LoadModuleFile(filePath string, moduleName string) *Value {
 	if err != nil {
 		return ctx.ThrowError(err)
 	}
-	return ctx.LoadModule(string(b), moduleName)
+	return ctx.loadModuleBytes(b, moduleName)
 }
 
 // CompileModule returns a compiled bytecode with given code and module name.
@@ -1458,9 +1527,11 @@ func (ctx *Context) LoadModuleBytecode(buf []byte, opts ...EvalOption) *Value {
 // EvalBytecode returns a js value with given bytecode.
 // Need call Free() `quickjs.Value`'s returned by `Eval()` and `EvalFile()` and `EvalBytecode()`.
 func (ctx *Context) EvalBytecode(buf []byte) *Value {
-	cbuf := C.CBytes(buf)
-	obj := &Value{ctx: ctx, ref: C.JS_ReadObject(ctx.ref, (*C.uint8_t)(cbuf), C.size_t(len(buf)), C.int(C.GetReadObjBytecode()))}
-	defer C.free(cbuf)
+	if len(buf) == 0 {
+		return &Value{ctx: ctx, ref: C.JS_ReadObject(ctx.ref, nil, 0, C.int(C.GetReadObjBytecode()))}
+	}
+	obj := &Value{ctx: ctx, ref: C.JS_ReadObject(ctx.ref, (*C.uint8_t)(unsafe.Pointer(&buf[0])), C.size_t(len(buf)), C.int(C.GetReadObjBytecode()))}
+	runtime.KeepAlive(buf)
 	if obj.IsException() {
 		return obj
 	}
@@ -1472,23 +1543,7 @@ func (ctx *Context) EvalBytecode(buf []byte) *Value {
 func (ctx *Context) Compile(code string, opts ...EvalOption) ([]byte, error) {
 	opts = append(opts, EvalFlagCompileOnly(true))
 	val := ctx.Eval(code, opts...)
-	defer val.Free()
-
-	var kSize C.size_t = 0
-	ptr := C.JS_WriteObject(ctx.ref, &kSize, val.ref, C.int(C.GetWriteObjBytecode()))
-
-	if ptr == nil {
-		return nil, ctx.Exception()
-	}
-
-	defer C.js_free(ctx.ref, unsafe.Pointer(ptr))
-
-	ret := make([]byte, C.int(kSize))
-	if kSize > 0 {
-		copy(ret, C.GoBytes(unsafe.Pointer(ptr), C.int(kSize)))
-	}
-
-	return ret, nil
+	return ctx.compileFromValue(val)
 }
 
 // Compile returns a compiled bytecode with given filename.
@@ -1506,7 +1561,7 @@ func (ctx *Context) CompileFile(filePath string, opts ...EvalOption) ([]byte, er
 		opts = append(opts, EvalFileName(filePath))
 	}
 
-	return ctx.Compile(string(b), opts...)
+	return ctx.compileBytes(b, opts...)
 }
 
 // Global returns a context's global object.

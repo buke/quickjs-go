@@ -23,6 +23,8 @@ extern JSValue ThrowInternalError(JSContext *ctx, const char *fmt);
 
 // Type checking functions
 extern JSValue JS_NewBool_Wrapper(JSContext *ctx, int val);
+extern JSValue JS_NewStringLen_Wrapper(JSContext *ctx, const char *str, size_t len);
+extern JSAtom JS_NewAtomLen_Wrapper(JSContext *ctx, const char *str, size_t len);
 extern int JS_IsNumber_Wrapper(JSValue val);
 extern int JS_IsBigInt_Wrapper(JSContext *ctx, JSValue val);
 extern int JS_IsBool_Wrapper(JSValue val);

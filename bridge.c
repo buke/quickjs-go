@@ -86,6 +86,8 @@ JSValue ThrowInternalError(JSContext *ctx, const char *fmt) { return JS_ThrowInt
 
 // Type checking macros -> functions (these are heavily used in Go code)
 JSValue JS_NewBool_Wrapper(JSContext *ctx, int val) { return JS_NewBool(ctx, val != 0); }
+JSValue JS_NewStringLen_Wrapper(JSContext *ctx, const char *str, size_t len) { return JS_NewStringLen(ctx, str, len); }
+JSAtom JS_NewAtomLen_Wrapper(JSContext *ctx, const char *str, size_t len) { return JS_NewAtomLen(ctx, str, len); }
 int JS_IsNumber_Wrapper(JSValue val) { return JS_IsNumber(val); }
 int JS_IsBigInt_Wrapper(JSContext *ctx, JSValue val) { (void)ctx; return JS_IsBigInt(val); }
 int JS_IsBool_Wrapper(JSValue val) { return JS_IsBool(val); }
