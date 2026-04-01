@@ -31,7 +31,7 @@ func (a *Atom) Free() {
 
 // ToString returns the string representation of the atom.
 func (a *Atom) ToString() string {
-	if a == nil || a.ctx == nil || a.ctx.ref == nil {
+	if a == nil || a.ctx == nil || a.ctx.ref == nil || a.ref == 0 {
 		return ""
 	}
 	ptr := C.JS_AtomToCString(a.ctx.ref, a.ref)

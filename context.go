@@ -19,6 +19,7 @@ import "C"
 
 // Context represents a Javascript context (or Realm). Each JSContext has its own global objects and system objects. There can be several JSContexts per JSRuntime and they can share objects, similar to frames of the same origin sharing Javascript objects in a web browser.
 type Context struct {
+	lifecycleMu                  sync.RWMutex
 	runtime                      *Runtime
 	ref                          *C.JSContext
 	globals                      *Value
@@ -227,13 +228,25 @@ func (ctx *Context) wrapPromiseCallback(fn *Value) (func(*Value), func()) {
 	freeFnRef := func() {
 		if !freed.Swap(true) && fnRef != nil {
 			freeOnOwner := func(inner *Context) {
-				if inner != nil && inner.ref != nil {
+				if inner == nil {
+					return
+				}
+				inner.lifecycleMu.RLock()
+				hasRef := inner.ref != nil
+				inner.lifecycleMu.RUnlock()
+				if hasRef {
 					fnRef.Free()
 				}
 			}
 
 			// Keep all C-side JSValue release on owner thread.
-			if ctx.runtime == nil || ctx.runtime.ref == nil || C.IsRuntimeOwnerThread(ctx.runtime.ref) != 0 {
+			ctx.lifecycleMu.RLock()
+			var runtimeRef *C.JSRuntime
+			if ctx.runtime != nil {
+				runtimeRef = ctx.runtime.ref
+			}
+			ctx.lifecycleMu.RUnlock()
+			if runtimeRef != nil && C.IsRuntimeOwnerThread(runtimeRef) != 0 {
 				freeOnOwner(ctx)
 				ctx.promiseCallbackRefCount.Add(-1)
 				return
@@ -380,12 +393,21 @@ func (ctx *Context) requireOwnerThread(op string) {
 
 // Free will free context and all associated objects.
 func (ctx *Context) Close() {
-	if ctx == nil || ctx.ref == nil {
+	if ctx == nil {
 		return
 	}
-	ctx.requireOwnerThread("Context.Close")
 
+	ctx.lifecycleMu.RLock()
 	ctxRef := ctx.ref
+	runtimeRef := ctx.runtime
+	ctx.lifecycleMu.RUnlock()
+
+	if ctxRef == nil {
+		return
+	}
+	if runtimeRef != nil && runtimeRef.ref != nil {
+		requireRuntimeOwnerThread(runtimeRef, "Context.Close")
+	}
 	// Drain already queued jobs first so deferred owner-thread releases can run.
 	drainUntilStable := func(timeout time.Duration, stableRequired int) {
 		if ctx.jobQueue == nil {
@@ -448,10 +470,14 @@ func (ctx *Context) Close() {
 	// Remove from global mapping
 	unregisterContext(ctxRef)
 
-	C.JS_FreeContext(ctxRef)
+	ctx.lifecycleMu.Lock()
+	if ctx.ref != nil {
+		C.JS_FreeContext(ctx.ref)
+	}
 	ctx.ref = nil
 	ctx.globals = nil
 	ctx.runtime = nil
+	ctx.lifecycleMu.Unlock()
 }
 
 // NewNull returns a null value.

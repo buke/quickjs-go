@@ -25,8 +25,19 @@ func (v *Value) Free() {
 	if v == nil {
 		return
 	}
-	if v.ctx == nil || v.ctx.ref == nil || C.JS_IsUndefined_Wrapper(v.ref) == 1 {
+	if v.ctx == nil || C.JS_IsUndefined_Wrapper(v.ref) == 1 {
 		return // No context or undefined value, nothing to free
+	}
+
+	v.ctx.lifecycleMu.RLock()
+	ctxRef := v.ctx.ref
+	var runtimeRef *C.JSRuntime
+	if v.ctx.runtime != nil {
+		runtimeRef = v.ctx.runtime.ref
+	}
+	v.ctx.lifecycleMu.RUnlock()
+	if ctxRef == nil {
+		return
 	}
 
 	// Invalidate first to make Free idempotent even if actual C release is deferred.
@@ -34,13 +45,18 @@ func (v *Value) Free() {
 	v.ref = C.JS_NewUndefined()
 
 	freeOnOwner := func(inner *Context) {
-		if inner == nil || inner.ref == nil {
+		if inner == nil {
 			return
 		}
-		C.JS_FreeValue(inner.ref, ref)
+		inner.lifecycleMu.RLock()
+		innerRef := inner.ref
+		if innerRef != nil {
+			C.JS_FreeValue(innerRef, ref)
+		}
+		inner.lifecycleMu.RUnlock()
 	}
 
-	if v.ctx.runtime == nil || v.ctx.runtime.ref == nil || C.IsRuntimeOwnerThread(v.ctx.runtime.ref) != 0 {
+	if runtimeRef != nil && C.IsRuntimeOwnerThread(runtimeRef) != 0 {
 		freeOnOwner(v.ctx)
 		return
 	}
