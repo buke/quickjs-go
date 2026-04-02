@@ -3,6 +3,7 @@ package quickjs
 import (
 	"fmt"
 	"os"
+	goruntime "runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -46,6 +47,12 @@ func mayContainModuleSyntax(code string) bool {
 	return strings.Contains(code, "import") ||
 		strings.Contains(code, "export") ||
 		strings.Contains(code, "await")
+}
+
+func zeroTerminatedBytes(s string) []byte {
+	b := make([]byte, len(s)+1)
+	copy(b, s)
+	return b
 }
 
 func (ctx *Context) detectModuleSource(code string, codePtr *C.char) bool {
@@ -351,9 +358,11 @@ func (ctx *Context) Float64(v float64) *Value {
 
 // NewString returns a string value with given string.
 func (ctx *Context) NewString(v string) *Value {
-	ptr := C.CString(v)
-	defer C.free(unsafe.Pointer(ptr))
-	return &Value{ctx: ctx, ref: C.JS_NewString(ctx.ref, ptr)}
+	var ptr *C.char
+	if len(v) > 0 {
+		ptr = (*C.char)(unsafe.Pointer(unsafe.StringData(v)))
+	}
+	return &Value{ctx: ctx, ref: C.JS_NewStringLen(ctx.ref, ptr, C.size_t(len(v)))}
 }
 
 // String returns a string value with given string.
@@ -571,13 +580,21 @@ func (ctx *Context) Object() *Value {
 
 // ParseJson parses given json string and returns a object value.
 func (ctx *Context) ParseJSON(v string) *Value {
-	ptr := C.CString(v)
-	defer C.free(unsafe.Pointer(ptr))
+	jsonBuf := zeroTerminatedBytes(v)
+	ptr := (*C.char)(unsafe.Pointer(&jsonBuf[0]))
 
-	filenamePtr := C.CString("")
-	defer C.free(unsafe.Pointer(filenamePtr))
+	filenameBuf := []byte{0}
+	filenamePtr := (*C.char)(unsafe.Pointer(&filenameBuf[0]))
 
-	return &Value{ctx: ctx, ref: C.JS_ParseJSON(ctx.ref, ptr, C.size_t(len(v)), filenamePtr)}
+	var pinner goruntime.Pinner
+	pinner.Pin(&jsonBuf[0])
+	pinner.Pin(&filenameBuf[0])
+	defer pinner.Unpin()
+
+	parsed := C.JS_ParseJSON(ctx.ref, ptr, C.size_t(len(v)), filenamePtr)
+	goruntime.KeepAlive(jsonBuf)
+	goruntime.KeepAlive(filenameBuf)
+	return &Value{ctx: ctx, ref: parsed}
 }
 
 // NewFunction returns a js function value with given function template
@@ -687,9 +704,11 @@ func (ctx *Context) SetInterruptHandler(handler InterruptHandler) {
 
 // NewAtom returns a new Atom value with given string.
 func (ctx *Context) NewAtom(v string) *Atom {
-	ptr := C.CString(v)
-	defer C.free(unsafe.Pointer(ptr))
-	return &Atom{ctx: ctx, ref: C.JS_NewAtom(ctx.ref, ptr)}
+	var ptr *C.char
+	if len(v) > 0 {
+		ptr = (*C.char)(unsafe.Pointer(unsafe.StringData(v)))
+	}
+	return &Atom{ctx: ctx, ref: C.JS_NewAtomLen(ctx.ref, ptr, C.size_t(len(v)))}
 }
 
 // Atom returns a new Atom value with given string.
@@ -806,24 +825,31 @@ func (ctx *Context) Eval(code string, opts ...EvalOption) *Value {
 		cFlag |= C.int(C.JS_EVAL_FLAG_COMPILE_ONLY)
 	}
 
-	codePtr := C.CString(code)
-	defer C.free(unsafe.Pointer(codePtr))
+	codeBuf := zeroTerminatedBytes(code)
+	codePtr := (*C.char)(unsafe.Pointer(&codeBuf[0]))
 
-	filenamePtr := C.CString(options.filename)
-	defer C.free(unsafe.Pointer(filenamePtr))
+	filenameBuf := zeroTerminatedBytes(options.filename)
+	filenamePtr := (*C.char)(unsafe.Pointer(&filenameBuf[0]))
+
+	var pinner goruntime.Pinner
+	pinner.Pin(&codeBuf[0])
+	pinner.Pin(&filenameBuf[0])
+	defer pinner.Unpin()
 
 	if ctx.detectModuleSource(code, codePtr) {
 		cFlag |= C.int(C.JS_EVAL_TYPE_MODULE)
 	}
 
-	var val *Value
+	var evalResult C.JSValue
 	if options.await {
-		val = &Value{ctx: ctx, ref: C.js_std_await(ctx.ref, C.JS_Eval(ctx.ref, codePtr, C.size_t(len(code)), filenamePtr, cFlag))}
+		evalResult = C.js_std_await(ctx.ref, C.JS_Eval(ctx.ref, codePtr, C.size_t(len(code)), filenamePtr, cFlag))
 	} else {
-		val = &Value{ctx: ctx, ref: C.JS_Eval(ctx.ref, codePtr, C.size_t(len(code)), filenamePtr, cFlag)}
+		evalResult = C.JS_Eval(ctx.ref, codePtr, C.size_t(len(code)), filenamePtr, cFlag)
 	}
 
-	return val
+	goruntime.KeepAlive(codeBuf)
+	goruntime.KeepAlive(filenameBuf)
+	return &Value{ctx: ctx, ref: evalResult}
 }
 
 // EvalFile returns a js value with given code and filename.
@@ -846,10 +872,16 @@ func (ctx *Context) LoadModule(code string, moduleName string, opts ...EvalOptio
 		fn(&options)
 	}
 
-	codePtr := C.CString(code)
-	defer C.free(unsafe.Pointer(codePtr))
+	codeBuf := zeroTerminatedBytes(code)
+	codePtr := (*C.char)(unsafe.Pointer(&codeBuf[0]))
 
-	if !ctx.detectModuleSource(code, codePtr) {
+	var pinner goruntime.Pinner
+	pinner.Pin(&codeBuf[0])
+	defer pinner.Unpin()
+
+	isModule := ctx.detectModuleSource(code, codePtr)
+	goruntime.KeepAlive(codeBuf)
+	if !isModule {
 		return ctx.ThrowSyntaxError("not a module: %s", moduleName)
 	}
 
@@ -902,9 +934,8 @@ func (ctx *Context) LoadModuleBytecode(buf []byte, opts ...EvalOption) *Value {
 // EvalBytecode returns a js value with given bytecode.
 // Need call Free() `quickjs.Value`'s returned by `Eval()` and `EvalFile()` and `EvalBytecode()`.
 func (ctx *Context) EvalBytecode(buf []byte) *Value {
-	cbuf := C.CBytes(buf)
-	obj := &Value{ctx: ctx, ref: C.JS_ReadObject(ctx.ref, (*C.uint8_t)(cbuf), C.size_t(len(buf)), C.int(C.JS_READ_OBJ_BYTECODE))}
-	defer C.free(cbuf)
+	cbuf := (*C.uint8_t)(unsafe.Pointer(unsafe.SliceData(buf)))
+	obj := &Value{ctx: ctx, ref: C.JS_ReadObject(ctx.ref, cbuf, C.size_t(len(buf)), C.int(C.JS_READ_OBJ_BYTECODE))}
 	if obj.IsException() {
 		return obj
 	}

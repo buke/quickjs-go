@@ -156,9 +156,13 @@ func (v *Value) ByteLen() int64 {
 
 // Set sets the value of the property with the given name.
 func (v *Value) Set(name string, val *Value) {
-	namePtr := C.CString(name)
-	defer C.free(unsafe.Pointer(namePtr))
-	C.JS_SetPropertyStr(v.ctx.ref, v.ref, namePtr, val.ref)
+	var namePtr *C.char
+	if len(name) > 0 {
+		namePtr = (*C.char)(unsafe.Pointer(unsafe.StringData(name)))
+	}
+	atom := C.JS_NewAtomLen(v.ctx.ref, namePtr, C.size_t(len(name)))
+	defer C.JS_FreeAtom(v.ctx.ref, atom)
+	C.JS_SetProperty(v.ctx.ref, v.ref, atom, val.ref)
 }
 
 // SetIdx sets the value of the property with the given index.
@@ -168,9 +172,13 @@ func (v *Value) SetIdx(idx int64, val *Value) {
 
 // Get returns the value of the property with the given name.
 func (v *Value) Get(name string) *Value {
-	namePtr := C.CString(name)
-	defer C.free(unsafe.Pointer(namePtr))
-	return &Value{ctx: v.ctx, ref: C.JS_GetPropertyStr(v.ctx.ref, v.ref, namePtr)}
+	var namePtr *C.char
+	if len(name) > 0 {
+		namePtr = (*C.char)(unsafe.Pointer(unsafe.StringData(name)))
+	}
+	atom := C.JS_NewAtomLen(v.ctx.ref, namePtr, C.size_t(len(name)))
+	defer C.JS_FreeAtom(v.ctx.ref, atom)
+	return &Value{ctx: v.ctx, ref: C.JS_GetProperty(v.ctx.ref, v.ref, atom)}
 }
 
 // GetIdx returns the value of the property with the given index.
