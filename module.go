@@ -3,6 +3,7 @@ package quickjs
 import (
 	"errors"
 	"fmt"
+	"sync"
 	"unsafe"
 )
 
@@ -28,10 +29,22 @@ type ModuleBuilder struct {
 	exports []ModuleExportEntry // All exports (including default)
 }
 
-var createModuleResultHookForTest func(ctx *Context, builder *ModuleBuilder) (int, bool)
+var (
+	createModuleResultHookMu      sync.RWMutex
+	createModuleResultHookForTest func(ctx *Context, builder *ModuleBuilder) (int, bool)
+)
 
 func setCreateModuleResultHookForTest(hook func(ctx *Context, builder *ModuleBuilder) (int, bool)) {
+	createModuleResultHookMu.Lock()
 	createModuleResultHookForTest = hook
+	createModuleResultHookMu.Unlock()
+}
+
+func getCreateModuleResultHookForTest() func(ctx *Context, builder *ModuleBuilder) (int, bool) {
+	createModuleResultHookMu.RLock()
+	hook := createModuleResultHookForTest
+	createModuleResultHookMu.RUnlock()
+	return hook
 }
 
 // =============================================================================
@@ -132,7 +145,7 @@ func createModule(ctx *Context, builder *ModuleBuilder) error {
 
 	// Step 4: Call C function to create module
 	var result C.int
-	if hook := createModuleResultHookForTest; hook != nil {
+	if hook := getCreateModuleResultHookForTest(); hook != nil {
 		if override, ok := hook(ctx, builder); ok {
 			result = C.int(override)
 		} else {

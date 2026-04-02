@@ -84,6 +84,7 @@ var contextReleaseFunctionForceZeroKeyForTest atomic.Bool
 var contextFunctionHandleIDForceZeroKeyForTest atomic.Bool
 var contextEnsureAutoReleaseForceFactoryExceptionForTest atomic.Bool
 var contextEnsureAutoReleaseForceFactoryEvalExceptionForTest atomic.Bool
+var contextAwaitHooksMu sync.RWMutex
 
 func setContextNewFunctionForceExceptionForTest(enabled bool) {
 	contextNewFunctionForceExceptionForTest.Store(enabled)
@@ -123,8 +124,56 @@ var (
 	newPromiseWithCancelPostSettleCASHookForTest func()
 )
 
+func setAwaitPromiseStateHookForTest(hook func(ctx *Context, promise *Value, current int) (int, bool)) {
+	contextAwaitHooksMu.Lock()
+	awaitPromiseStateHook = hook
+	contextAwaitHooksMu.Unlock()
+}
+
+func getAwaitPromiseStateHookForTest() func(ctx *Context, promise *Value, current int) (int, bool) {
+	contextAwaitHooksMu.RLock()
+	hook := awaitPromiseStateHook
+	contextAwaitHooksMu.RUnlock()
+	return hook
+}
+
+func setAwaitExecutePendingJobHookForTest(hook func(ctx *Context, promise *Value, current int) (int, bool)) {
+	contextAwaitHooksMu.Lock()
+	awaitExecutePendingJobHook = hook
+	contextAwaitHooksMu.Unlock()
+}
+
+func getAwaitExecutePendingJobHookForTest() func(ctx *Context, promise *Value, current int) (int, bool) {
+	contextAwaitHooksMu.RLock()
+	hook := awaitExecutePendingJobHook
+	contextAwaitHooksMu.RUnlock()
+	return hook
+}
+
+func setAwaitHasPendingGoJobsHookForTest(hook func(ctx *Context, promise *Value, current bool) (bool, bool)) {
+	contextAwaitHooksMu.Lock()
+	awaitHasPendingGoJobsHook = hook
+	contextAwaitHooksMu.Unlock()
+}
+
+func getAwaitHasPendingGoJobsHookForTest() func(ctx *Context, promise *Value, current bool) (bool, bool) {
+	contextAwaitHooksMu.RLock()
+	hook := awaitHasPendingGoJobsHook
+	contextAwaitHooksMu.RUnlock()
+	return hook
+}
+
 func setNewPromiseWithCancelPostSettleCASHookForTest(hook func()) {
+	contextAwaitHooksMu.Lock()
 	newPromiseWithCancelPostSettleCASHookForTest = hook
+	contextAwaitHooksMu.Unlock()
+}
+
+func getNewPromiseWithCancelPostSettleCASHookForTest() func() {
+	contextAwaitHooksMu.RLock()
+	hook := newPromiseWithCancelPostSettleCASHookForTest
+	contextAwaitHooksMu.RUnlock()
+	return hook
 }
 
 func (ctx *Context) initScheduler() {
@@ -1817,7 +1866,7 @@ func (ctx *Context) Await(v *Value) *Value {
 		ctx.ProcessJobs()
 
 		state := C.JS_PromiseState(ctx.ref, promise.ref)
-		if hook := awaitPromiseStateHook; hook != nil {
+		if hook := getAwaitPromiseStateHookForTest(); hook != nil {
 			if override, ok := hook(ctx, promise, int(state)); ok {
 				state = C.JSPromiseStateEnum(override)
 			}
@@ -1831,7 +1880,7 @@ func (ctx *Context) Await(v *Value) *Value {
 		case pendingState:
 			// Process JS microtasks (Promise.then callbacks, queueMicrotask)
 			executed := C.JS_ExecutePendingJob_Wrapper(runtimeRef)
-			if hook := awaitExecutePendingJobHook; hook != nil {
+			if hook := getAwaitExecutePendingJobHookForTest(); hook != nil {
 				if override, ok := hook(ctx, promise, int(executed)); ok {
 					executed = C.int(override)
 				}
@@ -1853,7 +1902,7 @@ func (ctx *Context) Await(v *Value) *Value {
 				// If so, keep polling. If not, yield briefly — a goroutine will
 				// Schedule work soon (HTTP response, storage result, etc.)
 				hasPendingGoJobs := len(ctx.jobQueue) > 0
-				if hook := awaitHasPendingGoJobsHook; hook != nil {
+				if hook := getAwaitHasPendingGoJobsHookForTest(); hook != nil {
 					if override, ok := hook(ctx, promise, hasPendingGoJobs); ok {
 						hasPendingGoJobs = override
 					}
@@ -1950,7 +1999,7 @@ func (ctx *Context) NewPromiseWithCancel(executor func(resolve, reject func(*Val
 	wrap := func(target int32, callback func(*Value), releaseOther func()) func(*Value) {
 		return func(val *Value) {
 			if atomic.CompareAndSwapInt32(&settled, 0, target) {
-				if hook := newPromiseWithCancelPostSettleCASHookForTest; hook != nil {
+				if hook := getNewPromiseWithCancelPostSettleCASHookForTest(); hook != nil {
 					hook()
 				}
 				if cancelled.Load() {

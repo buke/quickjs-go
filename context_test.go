@@ -3803,14 +3803,14 @@ func TestContextInternalsCoverage(t *testing.T) {
 		defer promise.Free()
 
 		triggered := false
-		awaitExecutePendingJobHook = func(hookCtx *Context, _ *Value, current int) (int, bool) {
+		setAwaitExecutePendingJobHookForTest(func(hookCtx *Context, _ *Value, current int) (int, bool) {
 			if hookCtx == ctx && !triggered {
 				triggered = true
 				return -1, true
 			}
 			return current, false
-		}
-		t.Cleanup(func() { awaitExecutePendingJobHook = nil })
+		})
+		t.Cleanup(func() { setAwaitExecutePendingJobHookForTest(nil) })
 
 		result := ctx.Await(promise)
 		defer result.Free()
@@ -3836,7 +3836,7 @@ func TestContextInternalsCoverage(t *testing.T) {
 		defer promise.Free()
 
 		firstCall := true
-		awaitExecutePendingJobHook = func(hookCtx *Context, _ *Value, current int) (int, bool) {
+		setAwaitExecutePendingJobHookForTest(func(hookCtx *Context, _ *Value, current int) (int, bool) {
 			if hookCtx != ctx {
 				return current, false
 			}
@@ -3853,8 +3853,8 @@ func TestContextInternalsCoverage(t *testing.T) {
 				return 0, true // force executed=0
 			}
 			return current, false
-		}
-		t.Cleanup(func() { awaitExecutePendingJobHook = nil })
+		})
+		t.Cleanup(func() { setAwaitExecutePendingJobHookForTest(nil) })
 
 		result := ctx.Await(promise)
 		defer result.Free()
@@ -3876,13 +3876,13 @@ func TestContextInternalsCoverage(t *testing.T) {
 		defer promise.Free()
 
 		forcedPendingGoJobs := false
-		awaitExecutePendingJobHook = func(hookCtx *Context, _ *Value, current int) (int, bool) {
+		setAwaitExecutePendingJobHookForTest(func(hookCtx *Context, _ *Value, current int) (int, bool) {
 			if hookCtx != ctx {
 				return current, false
 			}
 			return 0, true
-		}
-		awaitHasPendingGoJobsHook = func(hookCtx *Context, _ *Value, current bool) (bool, bool) {
+		})
+		setAwaitHasPendingGoJobsHookForTest(func(hookCtx *Context, _ *Value, current bool) (bool, bool) {
 			if hookCtx != ctx || forcedPendingGoJobs {
 				return current, false
 			}
@@ -3893,10 +3893,10 @@ func TestContextInternalsCoverage(t *testing.T) {
 				resolvePromise(val)
 			})
 			return true, true
-		}
+		})
 		t.Cleanup(func() {
-			awaitExecutePendingJobHook = nil
-			awaitHasPendingGoJobsHook = nil
+			setAwaitExecutePendingJobHookForTest(nil)
+			setAwaitHasPendingGoJobsHookForTest(nil)
 		})
 
 		result := ctx.Await(promise)
@@ -3916,14 +3916,14 @@ func TestContextInternalsCoverage(t *testing.T) {
 		defer promise.Free()
 
 		forced := false
-		awaitPromiseStateHook = func(hookCtx *Context, _ *Value, current int) (int, bool) {
+		setAwaitPromiseStateHookForTest(func(hookCtx *Context, _ *Value, current int) (int, bool) {
 			if hookCtx == ctxB && !forced {
 				forced = true
 				return current + 99, true
 			}
 			return current, false
-		}
-		t.Cleanup(func() { awaitPromiseStateHook = nil })
+		})
+		t.Cleanup(func() { setAwaitPromiseStateHookForTest(nil) })
 
 		result := ctxB.Await(promise)
 		require.Same(t, promise, result)
