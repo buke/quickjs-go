@@ -26,6 +26,11 @@ extern int32_t OpaqueToInt(void* opaque);
 extern int ValueGetTag(JSValueConst v);
 extern void* JS_VALUE_GET_PTR_Wrapper(JSValue val); 
 extern int JS_DeletePropertyInt64(JSContext *ctx, JSValueConst obj, int64_t idx, int flags);
+extern int SetPropertyByNameLen(JSContext *ctx, JSValueConst obj, const char *name, size_t name_len, JSValue val);
+extern JSValue GetPropertyByNameLen(JSContext *ctx, JSValueConst obj, const char *name, size_t name_len);
+extern JSValue CallPropertyByNameLen(JSContext *ctx, JSValueConst obj, const char *name, size_t name_len, int argc, JSValue *argv);
+extern int DetectModuleSourceWithProbe(JSContext *ctx, const char *code, size_t code_len);
+extern JSValue EvalAndAwait(JSContext *ctx, const char *input, size_t input_len, const char *filename, int eval_flags);
 
 // Class creation structures
 // Method configuration structure

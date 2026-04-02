@@ -59,24 +59,7 @@ func (ctx *Context) detectModuleSource(code string, codePtr *C.char) bool {
 	if ctx == nil || ctx.ref == nil || !mayContainModuleSyntax(code) {
 		return false
 	}
-
-	if !bool(C.JS_DetectModule(codePtr, C.size_t(len(code)))) {
-		return false
-	}
-
-	probeFilename := C.CString("<module-detect>")
-	defer C.free(unsafe.Pointer(probeFilename))
-
-	probeFlags := C.int(C.JS_EVAL_TYPE_GLOBAL) | C.int(C.JS_EVAL_FLAG_COMPILE_ONLY)
-	probe := C.JS_Eval(ctx.ref, codePtr, C.size_t(len(code)), probeFilename, probeFlags)
-	if bool(C.JS_IsException(probe)) {
-		exception := C.JS_GetException(ctx.ref)
-		C.JS_FreeValue(ctx.ref, exception)
-		return true
-	}
-
-	C.JS_FreeValue(ctx.ref, probe)
-	return false
+	return C.DetectModuleSourceWithProbe(ctx.ref, codePtr, C.size_t(len(code))) != 0
 }
 
 func (ctx *Context) initScheduler() {
@@ -842,7 +825,7 @@ func (ctx *Context) Eval(code string, opts ...EvalOption) *Value {
 
 	var evalResult C.JSValue
 	if options.await {
-		evalResult = C.js_std_await(ctx.ref, C.JS_Eval(ctx.ref, codePtr, C.size_t(len(code)), filenamePtr, cFlag))
+		evalResult = C.EvalAndAwait(ctx.ref, codePtr, C.size_t(len(code)), filenamePtr, cFlag)
 	} else {
 		evalResult = C.JS_Eval(ctx.ref, codePtr, C.size_t(len(code)), filenamePtr, cFlag)
 	}
