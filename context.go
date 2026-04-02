@@ -29,6 +29,8 @@ type Context struct {
 	autoReleaseFinalizerRegistry *Value
 	jobQueue                     chan func(*Context)
 	jobClosed                    chan struct{}
+	closeOverflowMu              sync.Mutex
+	closeOverflowJobs            []func(*Context)
 	promiseCallbackRefCount      atomic.Int64
 	promiseCleanupCancelCount    atomic.Uint64
 	promiseCleanupFinallyCount   atomic.Uint64
@@ -130,6 +132,53 @@ func (ctx *Context) initScheduler() {
 	ctx.jobClosed = make(chan struct{})
 }
 
+func (ctx *Context) pushCloseOverflowJob(job func(*Context)) {
+	if ctx == nil || job == nil {
+		return
+	}
+	ctx.closeOverflowMu.Lock()
+	ctx.closeOverflowJobs = append(ctx.closeOverflowJobs, job)
+	ctx.closeOverflowMu.Unlock()
+}
+
+func (ctx *Context) popCloseOverflowJobs() []func(*Context) {
+	if ctx == nil {
+		return nil
+	}
+	ctx.closeOverflowMu.Lock()
+	jobs := ctx.closeOverflowJobs
+	ctx.closeOverflowJobs = nil
+	ctx.closeOverflowMu.Unlock()
+	return jobs
+}
+
+func (ctx *Context) closeOverflowLen() int {
+	if ctx == nil {
+		return 0
+	}
+	ctx.closeOverflowMu.Lock()
+	n := len(ctx.closeOverflowJobs)
+	ctx.closeOverflowMu.Unlock()
+	return n
+}
+
+func (ctx *Context) drainCloseOverflowJobs() {
+	if ctx == nil {
+		return
+	}
+	for {
+		jobs := ctx.popCloseOverflowJobs()
+		if len(jobs) == 0 {
+			return
+		}
+		for _, job := range jobs {
+			if job != nil {
+				job(ctx)
+			}
+		}
+	}
+}
+
 func (ctx *Context) enqueueJobDuringClose(job func(*Context)) bool {
 	return ctx.enqueueJobDuringCloseWithSource(job, closeEnqueueSourceOther)
 }
@@ -152,6 +201,8 @@ func (ctx *Context) enqueueJobDuringCloseWithSource(job func(*Context), source c
 		default:
 			ctx.closeEnqueueOtherDropped.Add(1)
 		}
+		// Preserve critical release jobs even when the bounded close queue is full.
+		ctx.pushCloseOverflowJob(job)
 		return false
 	}
 }
@@ -414,19 +465,25 @@ func (ctx *Context) Close() {
 			return
 		}
 		deadline := time.Now().Add(timeout)
-		lastLen := -1
+		lastQueueLen := -1
+		lastOverflowLen := -1
 		stableCount := 0
 		for {
 			ctx.ProcessJobs()
-			currentLen := len(ctx.jobQueue)
-			if currentLen == lastLen {
+			ctx.drainCloseOverflowJobs()
+			ctx.ProcessJobs()
+
+			queueLen := len(ctx.jobQueue)
+			overflowLen := ctx.closeOverflowLen()
+			if queueLen == lastQueueLen && overflowLen == lastOverflowLen {
 				stableCount++
 			} else {
 				stableCount = 0
-				lastLen = currentLen
+				lastQueueLen = queueLen
+				lastOverflowLen = overflowLen
 			}
 
-			if currentLen == 0 && stableCount >= stableRequired {
+			if queueLen == 0 && overflowLen == 0 && stableCount >= stableRequired {
 				return
 			}
 			if time.Now().After(deadline) {

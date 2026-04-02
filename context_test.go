@@ -1216,6 +1216,24 @@ func TestCloseHighQueuePressureEnqueueDropCounterStable(t *testing.T) {
 	ctx.Close()
 }
 
+func TestCloseQueueOverflowJobsDrainedDuringClose(t *testing.T) {
+	rt := NewRuntime()
+	ctx := rt.NewContext()
+	require.NotNil(t, ctx)
+
+	for i := 0; i < defaultJobQueueSize; i++ {
+		require.True(t, ctx.enqueueJobDuringClose(func(*Context) {}))
+	}
+
+	ran := 0
+	require.False(t, ctx.enqueueJobDuringClose(func(*Context) { ran++ }))
+
+	ctx.Close()
+	require.Equal(t, 1, ran)
+
+	rt.Close()
+}
+
 func TestCloseQueueSustainedPressureCloseRecreateExtremeGate(t *testing.T) {
 	const rounds = 2000
 	const warmupQueueFill = defaultJobQueueSize
