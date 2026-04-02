@@ -42,6 +42,27 @@ void* JS_VALUE_GET_PTR_Wrapper(JSValue val) {
 static int isExecuteTimeoutExceeded(JSRuntime *rt);
 static int ThrowUnhandledPromiseRejectionIfAny(JSContext *ctx);
 
+static int g_await_poll_slice_ms = 10;
+static pthread_mutex_t g_await_poll_slice_mu = PTHREAD_MUTEX_INITIALIZER;
+
+int GetAwaitPollSliceMs(void) {
+    int value;
+    pthread_mutex_lock(&g_await_poll_slice_mu);
+    value = g_await_poll_slice_ms;
+    pthread_mutex_unlock(&g_await_poll_slice_mu);
+    return value;
+}
+
+void SetAwaitPollSliceMs(int timeout_ms) {
+    if (timeout_ms <= 0) {
+        return;
+    }
+
+    pthread_mutex_lock(&g_await_poll_slice_mu);
+    g_await_poll_slice_ms = timeout_ms;
+    pthread_mutex_unlock(&g_await_poll_slice_mu);
+}
+
 typedef struct RejectionEntry {
     JSValue promise;
     JSValue reason;
@@ -355,20 +376,38 @@ JSValue AwaitValue(JSContext *ctx, JSValue obj) {
 
         /* Bound host IO polling to avoid an uninterruptible blocking wait. */
         if (err == 0) {
-            int poll_ret = js_std_poll_io(ctx, 10);
+            /*
+             * Drive timers/microtasks so promises resolved by setTimeout can
+             * progress while awaiting.
+             */
+            int loop_once_ret = js_std_loop_once(ctx);
+            if (loop_once_ret == -2) {
+                JS_FreeValue(ctx, obj);
+                return JS_EXCEPTION;
+            }
+            if (loop_once_ret == 0) {
+                continue;
+            }
+
+            int poll_timeout_ms = GetAwaitPollSliceMs();
+            if (loop_once_ret > 0 && loop_once_ret < poll_timeout_ms) {
+                poll_timeout_ms = loop_once_ret;
+            }
+
+            int poll_ret = js_std_poll_io(ctx, poll_timeout_ms);
             if (poll_ret < 0) {
                 JS_FreeValue(ctx, obj);
                 return JS_EXCEPTION;
             }
-        }
 
-        /* Force a VM step so QuickJS interrupt handler can run reliably. */
-        JSValue interrupt_probe = JS_Eval(ctx, "", 0, "<await-interrupt>", JS_EVAL_TYPE_GLOBAL);
-        if (JS_IsException(interrupt_probe)) {
-            JS_FreeValue(ctx, obj);
-            return JS_EXCEPTION;
+            /* Force a VM step after idle polling for interrupt visibility. */
+            JSValue interrupt_probe = JS_Eval(ctx, "", 0, "<await-interrupt>", JS_EVAL_TYPE_GLOBAL);
+            if (JS_IsException(interrupt_probe)) {
+                JS_FreeValue(ctx, obj);
+                return JS_EXCEPTION;
+            }
+            JS_FreeValue(ctx, interrupt_probe);
         }
-        JS_FreeValue(ctx, interrupt_probe);
     }
 }
 

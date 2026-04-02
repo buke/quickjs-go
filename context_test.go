@@ -453,6 +453,28 @@ func TestContextLoadModuleAsyncPromiseExecutorUnhandledRejectionWithoutExecuteTi
 	require.Less(t, elapsed, 5*time.Second)
 }
 
+func TestContextLoadModuleAwaitSetTimeoutResolution(t *testing.T) {
+	rt := NewRuntime(WithModuleImport(true), WithExecuteTimeout(2))
+	defer rt.Close()
+
+	ctx := rt.NewContext()
+	require.NotNil(t, ctx)
+	defer ctx.Close()
+
+	start := time.Now()
+	result := ctx.LoadModule(`
+		export default 123;
+		await new Promise((resolve) => {
+		  setTimeout(() => resolve(true), 20);
+		});
+	`, "issue_471_timer_resolution")
+	defer result.Free()
+
+	elapsed := time.Since(start)
+	require.False(t, result.IsException())
+	require.Less(t, elapsed, 2*time.Second)
+}
+
 func TestContextFunctions(t *testing.T) {
 	rt := NewRuntime()
 	defer rt.Close()

@@ -132,6 +132,22 @@ func TestRuntimeConfiguration(t *testing.T) {
 	require.Equal(t, "configuration test", result.ToString())
 }
 
+func TestAwaitPollSliceMsConfig(t *testing.T) {
+	original := GetAwaitPollSliceMs()
+	t.Cleanup(func() {
+		SetAwaitPollSliceMs(original)
+	})
+
+	SetAwaitPollSliceMs(7)
+	require.Equal(t, 7, GetAwaitPollSliceMs())
+
+	SetAwaitPollSliceMs(0)
+	require.Equal(t, 7, GetAwaitPollSliceMs())
+
+	SetAwaitPollSliceMs(-3)
+	require.Equal(t, 7, GetAwaitPollSliceMs())
+}
+
 // TestRuntimeInterruptHandler tests interrupt handler functionality and coverage
 func TestRuntimeInterruptHandler(t *testing.T) {
 	rt := NewRuntime()

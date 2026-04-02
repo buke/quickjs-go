@@ -170,6 +170,20 @@ func (r *Runtime) RunGC() {
 	C.JS_RunGC(r.ref)
 }
 
+// SetAwaitPollSliceMs configures AwaitValue idle poll slice duration in milliseconds.
+// Values <= 0 are ignored.
+func SetAwaitPollSliceMs(timeoutMs int) {
+	if timeoutMs <= 0 {
+		return
+	}
+	C.SetAwaitPollSliceMs(C.int(timeoutMs))
+}
+
+// GetAwaitPollSliceMs returns AwaitValue idle poll slice duration in milliseconds.
+func GetAwaitPollSliceMs() int {
+	return int(C.GetAwaitPollSliceMs())
+}
+
 // Close will free the runtime pointer with proper cleanup.
 func (r *Runtime) Close() {
 	if r == nil {
