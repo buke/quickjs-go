@@ -6,6 +6,7 @@ package quickjs
 */
 import "C"
 import (
+	goruntime "runtime"
 	"sync"
 	"sync/atomic"
 	"unsafe"
@@ -476,13 +477,20 @@ func initializeContextGlobals(ctx *C.JSContext, code string, filename string) bo
 		return true
 	}
 
-	codePtr := C.CString(code)
-	defer C.free(unsafe.Pointer(codePtr))
-	filenamePtr := C.CString(filename)
-	defer C.free(unsafe.Pointer(filenamePtr))
+	codeBuf := zeroTerminatedBytes(code)
+	codePtr := (*C.char)(unsafe.Pointer(&codeBuf[0]))
+	filenameBuf := zeroTerminatedBytes(filename)
+	filenamePtr := (*C.char)(unsafe.Pointer(&filenameBuf[0]))
+
+	var pinner goruntime.Pinner
+	pinner.Pin(&codeBuf[0])
+	pinner.Pin(&filenameBuf[0])
+	defer pinner.Unpin()
 
 	evalFlags := C.int(C.JS_EVAL_TYPE_MODULE) | C.int(C.JS_EVAL_FLAG_COMPILE_ONLY)
 	initCompile := C.JS_Eval(ctx, codePtr, C.size_t(len(code)), filenamePtr, evalFlags)
+	goruntime.KeepAlive(codeBuf)
+	goruntime.KeepAlive(filenameBuf)
 	if bool(C.JS_IsException(initCompile)) {
 		C.JS_FreeValue(ctx, initCompile)
 		return false
