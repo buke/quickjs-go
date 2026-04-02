@@ -862,7 +862,7 @@ func (ctx *Context) LoadModuleBytecode(buf []byte, opts ...EvalOption) *Value {
 func (ctx *Context) EvalBytecode(buf []byte) *Value {
 	cbuf := C.CBytes(buf)
 	obj := &Value{ctx: ctx, ref: C.JS_ReadObject(ctx.ref, (*C.uint8_t)(cbuf), C.size_t(len(buf)), C.int(C.GetReadObjBytecode()))}
-	defer C.js_free(ctx.ref, unsafe.Pointer(cbuf))
+	defer C.free(cbuf)
 	if obj.IsException() {
 		return obj
 	}
