@@ -85,6 +85,29 @@ JSValue CallPropertyByNameLen(JSContext *ctx, JSValueConst obj, const char *name
     return ret;
 }
 
+int DetectModuleSourceWithProbe(JSContext *ctx, const char *code, size_t code_len) {
+    if (!JS_DetectModule(code, code_len)) {
+        return 0;
+    }
+
+    static const char *probe_filename = "<module-detect>";
+    int probe_flags = JS_EVAL_TYPE_GLOBAL | JS_EVAL_FLAG_COMPILE_ONLY;
+    JSValue probe = JS_Eval(ctx, code, code_len, probe_filename, probe_flags);
+    if (JS_IsException(probe)) {
+        JSValue exception = JS_GetException(ctx);
+        JS_FreeValue(ctx, exception);
+        return 1;
+    }
+
+    JS_FreeValue(ctx, probe);
+    return 0;
+}
+
+JSValue EvalAndAwait(JSContext *ctx, const char *input, size_t input_len, const char *filename, int eval_flags) {
+    JSValue eval_result = JS_Eval(ctx, input, input_len, filename, eval_flags);
+    return js_std_await(ctx, eval_result);
+}
+
 // Efficient proxy function for regular functions
 JSValue GoFunctionProxy(JSContext *ctx, JSValueConst this_val, 
                        int argc, JSValueConst *argv, int magic) {
