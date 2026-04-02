@@ -124,6 +124,7 @@ func NewRuntime(opts ...Option) *Runtime {
 		options: options,
 	}
 	registerRuntime(rt.ref, rt)
+	C.SetPromiseRejectionTracker(rt.ref, 1)
 
 	// Configure runtime options
 	if rt.options.memoryLimit > 0 {
@@ -198,6 +199,7 @@ func (r *Runtime) Close() {
 		ref := r.ref
 		r.interruptHandlerState.Store(nil)
 		C.ClearInterruptHandler(ref)
+		C.SetPromiseRejectionTracker(ref, 0)
 
 		r.constructorRegistry.Range(func(key, _ interface{}) bool {
 			r.constructorRegistry.Delete(key)
@@ -507,7 +509,7 @@ func initializeContextGlobals(ctx *C.JSContext, code string, filename string) bo
 		return false
 	}
 
-	initRun := C.js_std_await(ctx, initEval)
+	initRun := C.AwaitValue(ctx, initEval)
 	if bool(C.JS_IsException(initRun)) {
 		C.JS_FreeValue(ctx, initRun)
 		return false

@@ -373,6 +373,86 @@ func TestContextModules(t *testing.T) {
 
 }
 
+func TestContextLoadModuleAsyncPromiseExecutorTimeout(t *testing.T) {
+	rt := NewRuntime(WithModuleImport(true), WithExecuteTimeout(1))
+	defer rt.Close()
+
+	ctx := rt.NewContext()
+	require.NotNil(t, ctx)
+	defer ctx.Close()
+
+	start := time.Now()
+	result := ctx.LoadModule(`
+		export default 123;
+		await new Promise((res, rej) => {
+		  // keep pending forever to exercise timeout fallback
+		});
+	`, "issue_471_async_executor")
+	defer result.Free()
+
+	elapsed := time.Since(start)
+	require.True(t, result.IsException())
+
+	err := ctx.Exception()
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "interrupted")
+	require.Less(t, elapsed, 3*time.Second)
+}
+
+func TestContextLoadModuleAsyncPromiseExecutorUnhandledRejection(t *testing.T) {
+	rt := NewRuntime(WithModuleImport(true), WithExecuteTimeout(30))
+	defer rt.Close()
+
+	ctx := rt.NewContext()
+	require.NotNil(t, ctx)
+	defer ctx.Close()
+
+	start := time.Now()
+	result := ctx.LoadModule(`
+		export default 123;
+		await new Promise(async (res, rej) => {
+		  undefinedVariable(3)
+		  res(true)
+		});
+	`, "issue_471_async_executor_rejection")
+	defer result.Free()
+
+	elapsed := time.Since(start)
+	require.True(t, result.IsException())
+
+	err := ctx.Exception()
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "undefinedVariable")
+	require.Less(t, elapsed, 5*time.Second)
+}
+
+func TestContextLoadModuleAsyncPromiseExecutorUnhandledRejectionWithoutExecuteTimeout(t *testing.T) {
+	rt := NewRuntime(WithModuleImport(true))
+	defer rt.Close()
+
+	ctx := rt.NewContext()
+	require.NotNil(t, ctx)
+	defer ctx.Close()
+
+	start := time.Now()
+	result := ctx.LoadModule(`
+		export default 123;
+		await new Promise(async (res, rej) => {
+		  undefinedVariable(3)
+		  res(true)
+		});
+	`, "issue_471_async_executor_rejection_no_timeout")
+	defer result.Free()
+
+	elapsed := time.Since(start)
+	require.True(t, result.IsException())
+
+	err := ctx.Exception()
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "undefinedVariable")
+	require.Less(t, elapsed, 5*time.Second)
+}
+
 func TestContextFunctions(t *testing.T) {
 	rt := NewRuntime()
 	defer rt.Close()

@@ -39,6 +39,205 @@ void* JS_VALUE_GET_PTR_Wrapper(JSValue val) {
 // HELPER FUNCTIONS 
 // ============================================================================
 
+static int isExecuteTimeoutExceeded(JSRuntime *rt);
+static int ThrowUnhandledPromiseRejectionIfAny(JSContext *ctx);
+
+typedef struct RejectionEntry {
+    JSValue promise;
+    JSValue reason;
+    struct RejectionEntry *next;
+} RejectionEntry;
+
+typedef struct RejectionStateEntry {
+    JSRuntime *rt;
+    RejectionEntry *head;
+    RejectionEntry *tail;
+    struct RejectionStateEntry *next;
+} RejectionStateEntry;
+
+static RejectionStateEntry *g_rejection_states = NULL;
+static pthread_mutex_t g_rejection_states_mu = PTHREAD_MUTEX_INITIALIZER;
+
+static void freeRejectionEntry(JSRuntime *rt, RejectionEntry *entry) {
+    if (!entry) {
+        return;
+    }
+    JS_FreeValueRT(rt, entry->promise);
+    JS_FreeValueRT(rt, entry->reason);
+    free(entry);
+}
+
+static RejectionStateEntry *getRejectionState(JSRuntime *rt, int create) {
+    RejectionStateEntry *current = g_rejection_states;
+    while (current) {
+        if (current->rt == rt) {
+            return current;
+        }
+        current = current->next;
+    }
+
+    if (!create) {
+        return NULL;
+    }
+
+    RejectionStateEntry *state = malloc(sizeof(RejectionStateEntry));
+    if (!state) {
+        return NULL;
+    }
+
+    state->rt = rt;
+    state->head = NULL;
+    state->tail = NULL;
+    state->next = g_rejection_states;
+    g_rejection_states = state;
+    return state;
+}
+
+static void clearRejectionState(JSRuntime *rt) {
+    pthread_mutex_lock(&g_rejection_states_mu);
+
+    RejectionStateEntry *prev = NULL;
+    RejectionStateEntry *current = g_rejection_states;
+    while (current) {
+        if (current->rt == rt) {
+            RejectionEntry *entry = current->head;
+            while (entry) {
+                RejectionEntry *next = entry->next;
+                freeRejectionEntry(rt, entry);
+                entry = next;
+            }
+
+            if (prev) {
+                prev->next = current->next;
+            } else {
+                g_rejection_states = current->next;
+            }
+            free(current);
+            break;
+        }
+        prev = current;
+        current = current->next;
+    }
+
+    pthread_mutex_unlock(&g_rejection_states_mu);
+}
+
+static void QuickjsGoPromiseRejectionTracker(JSContext *ctx,
+                                             JSValueConst promise,
+                                             JSValueConst reason,
+                                             bool is_handled,
+                                             void *opaque) {
+    JSRuntime *rt = JS_GetRuntime(ctx);
+    (void)opaque;
+
+    pthread_mutex_lock(&g_rejection_states_mu);
+    RejectionStateEntry *state = getRejectionState(rt, 1);
+    if (!state) {
+        pthread_mutex_unlock(&g_rejection_states_mu);
+        return;
+    }
+
+    RejectionEntry *prev = NULL;
+    RejectionEntry *current = state->head;
+    while (current) {
+        if (JS_IsSameValue(ctx, current->promise, promise)) {
+            break;
+        }
+        prev = current;
+        current = current->next;
+    }
+
+    if (is_handled) {
+        if (current) {
+            if (prev) {
+                prev->next = current->next;
+            } else {
+                state->head = current->next;
+            }
+            if (state->tail == current) {
+                state->tail = prev;
+            }
+            freeRejectionEntry(rt, current);
+        }
+        pthread_mutex_unlock(&g_rejection_states_mu);
+        return;
+    }
+
+    if (current) {
+        JS_FreeValueRT(rt, current->reason);
+        current->reason = JS_DupValueRT(rt, reason);
+        pthread_mutex_unlock(&g_rejection_states_mu);
+        return;
+    }
+
+    RejectionEntry *entry = malloc(sizeof(RejectionEntry));
+    if (!entry) {
+        pthread_mutex_unlock(&g_rejection_states_mu);
+        return;
+    }
+
+    entry->promise = JS_DupValueRT(rt, promise);
+    entry->reason = JS_DupValueRT(rt, reason);
+    entry->next = NULL;
+
+    if (state->tail) {
+        state->tail->next = entry;
+    } else {
+        state->head = entry;
+    }
+    state->tail = entry;
+
+    pthread_mutex_unlock(&g_rejection_states_mu);
+}
+
+void SetPromiseRejectionTracker(JSRuntime *rt, int enabled) {
+    if (!rt) {
+        return;
+    }
+
+    if (enabled) {
+        JS_SetHostPromiseRejectionTracker(rt, QuickjsGoPromiseRejectionTracker, NULL);
+        return;
+    }
+
+    JS_SetHostPromiseRejectionTracker(rt, NULL, NULL);
+    clearRejectionState(rt);
+}
+
+static int popUnhandledPromiseRejection(JSContext *ctx, JSValue *reason_out) {
+    JSRuntime *rt = JS_GetRuntime(ctx);
+
+    pthread_mutex_lock(&g_rejection_states_mu);
+    RejectionStateEntry *state = getRejectionState(rt, 0);
+    if (!state || !state->head) {
+        pthread_mutex_unlock(&g_rejection_states_mu);
+        return 0;
+    }
+
+    RejectionEntry *entry = state->head;
+    state->head = entry->next;
+    if (!state->head) {
+        state->tail = NULL;
+    }
+
+    *reason_out = entry->reason;
+    JS_FreeValueRT(rt, entry->promise);
+    free(entry);
+
+    pthread_mutex_unlock(&g_rejection_states_mu);
+    return 1;
+}
+
+static int ThrowUnhandledPromiseRejectionIfAny(JSContext *ctx) {
+    JSValue reason;
+    if (!popUnhandledPromiseRejection(ctx, &reason)) {
+        return 0;
+    }
+
+    JS_Throw(ctx, reason);
+    return 1;
+}
+
 // Helper functions for safe opaque data handling
 void* IntToOpaque(int32_t id) {
     return (void*)(intptr_t)id;
@@ -104,9 +303,78 @@ int DetectModuleSourceWithProbe(JSContext *ctx, const char *code, size_t code_le
     return 0;
 }
 
+/*
+ * quickjs-go local await helper.
+ *
+ * Unlike js_std_await from quickjs-libc, this keeps polling in bounded slices
+ * and injects an explicit interrupt probe so execute-timeout/interrupt handlers
+ * can abort permanently pending promises.
+ */
+JSValue AwaitValue(JSContext *ctx, JSValue obj) {
+    JSRuntime *rt = JS_GetRuntime(ctx);
+
+    for (;;) {
+        if (ThrowUnhandledPromiseRejectionIfAny(ctx)) {
+            JS_FreeValue(ctx, obj);
+            return JS_EXCEPTION;
+        }
+
+        if (isExecuteTimeoutExceeded(rt)) {
+            JS_FreeValue(ctx, obj);
+            JS_ThrowInternalError(ctx, "interrupted");
+            return JS_EXCEPTION;
+        }
+
+        int state = JS_PromiseState(ctx, obj);
+        if (state == JS_PROMISE_FULFILLED) {
+            JSValue ret = JS_PromiseResult(ctx, obj);
+            JS_FreeValue(ctx, obj);
+            return ret;
+        }
+
+        if (state == JS_PROMISE_REJECTED) {
+            JSValue ret = JS_Throw(ctx, JS_PromiseResult(ctx, obj));
+            JS_FreeValue(ctx, obj);
+            return ret;
+        }
+
+        if (state != JS_PROMISE_PENDING) {
+            return obj;
+        }
+
+        JSContext *ctx1 = NULL;
+        int err = JS_ExecutePendingJob(rt, &ctx1);
+        if (err < 0) {
+            if (ctx1 != NULL && ctx1 != ctx) {
+                JSValue ex = JS_GetException(ctx1);
+                JS_Throw(ctx, ex);
+            }
+            JS_FreeValue(ctx, obj);
+            return JS_EXCEPTION;
+        }
+
+        /* Bound host IO polling to avoid an uninterruptible blocking wait. */
+        if (err == 0) {
+            int poll_ret = js_std_poll_io(ctx, 10);
+            if (poll_ret < 0) {
+                JS_FreeValue(ctx, obj);
+                return JS_EXCEPTION;
+            }
+        }
+
+        /* Force a VM step so QuickJS interrupt handler can run reliably. */
+        JSValue interrupt_probe = JS_Eval(ctx, "", 0, "<await-interrupt>", JS_EVAL_TYPE_GLOBAL);
+        if (JS_IsException(interrupt_probe)) {
+            JS_FreeValue(ctx, obj);
+            return JS_EXCEPTION;
+        }
+        JS_FreeValue(ctx, interrupt_probe);
+    }
+}
+
 JSValue EvalAndAwait(JSContext *ctx, const char *input, size_t input_len, const char *filename, int eval_flags) {
     JSValue eval_result = JS_Eval(ctx, input, input_len, filename, eval_flags);
-    return js_std_await(ctx, eval_result);
+    return AwaitValue(ctx, eval_result);
 }
 
 // Efficient proxy function for regular functions
@@ -550,6 +818,30 @@ typedef struct TimeoutStateEntry {
 static TimeoutStateEntry *g_timeout_states = NULL;
 static pthread_mutex_t g_timeout_states_mu = PTHREAD_MUTEX_INITIALIZER;
 
+static int isExecuteTimeoutExceeded(JSRuntime *rt) {
+    time_t start = 0;
+    time_t timeout = 0;
+    int found = 0;
+
+    pthread_mutex_lock(&g_timeout_states_mu);
+    TimeoutStateEntry *current = g_timeout_states;
+    while (current) {
+        if (current->rt == rt && current->state != NULL) {
+            start = current->state->start;
+            timeout = current->state->timeout;
+            found = 1;
+            break;
+        }
+        current = current->next;
+    }
+    pthread_mutex_unlock(&g_timeout_states_mu);
+
+    if (!found || timeout <= 0) {
+        return 0;
+    }
+
+    return (time(NULL) - start) > timeout;
+}
 static TimeoutStruct *takeTimeoutState(JSRuntime *rt) {
     pthread_mutex_lock(&g_timeout_states_mu);
 
@@ -695,7 +987,7 @@ JSValue LoadModuleBytecode(JSContext *ctx, const uint8_t *buf, size_t buf_len, i
             }
             js_module_set_import_meta(ctx, obj, false, false);
             val = JS_EvalFunction(ctx, obj);
-            val = js_std_await(ctx, val);
+            val = AwaitValue(ctx, val);
         } else {
             val = JS_EvalFunction(ctx, obj);
         }
