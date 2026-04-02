@@ -351,6 +351,24 @@ func TestContextModules(t *testing.T) {
 				require.True(t, tt.test())
 			})
 		}
+
+		t.Run("ForcedCompileErrorBranch", func(t *testing.T) {
+			oldHook := loadModuleCompileHook
+			loadModuleCompileHook = func(_ *Context, _ string, _ string) ([]byte, error) {
+				return nil, errors.New("forced compile error")
+			}
+			t.Cleanup(func() {
+				loadModuleCompileHook = oldHook
+			})
+
+			result := ctx.LoadModule(`export const x = 1;`, "forced_compile")
+			defer result.Free()
+			require.True(t, result.IsException())
+
+			err := ctx.Exception()
+			require.Error(t, err)
+			require.Contains(t, err.Error(), "forced compile error")
+		})
 	})
 
 }

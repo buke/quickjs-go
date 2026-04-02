@@ -41,6 +41,9 @@ var (
 	awaitPromiseStateHook      func(ctx *Context, promise *Value, current int) (int, bool)
 	awaitExecutePendingJobHook func(ctx *Context, promise *Value, current int) (int, bool)
 	awaitHasPendingGoJobsHook  func(ctx *Context, promise *Value, current bool) (bool, bool)
+	// loadModuleCompileHook is used only in tests to force LoadModule compile failures.
+	// It must remain nil in production.
+	loadModuleCompileHook func(ctx *Context, code string, moduleName string) ([]byte, error)
 )
 
 func mayContainModuleSyntax(code string) bool {
@@ -868,7 +871,15 @@ func (ctx *Context) LoadModule(code string, moduleName string, opts ...EvalOptio
 		return ctx.ThrowSyntaxError("not a module: %s", moduleName)
 	}
 
-	codeByte, err := ctx.Compile(code, EvalFlagModule(true), EvalFlagCompileOnly(true), EvalFileName(moduleName))
+	var (
+		codeByte []byte
+		err      error
+	)
+	if loadModuleCompileHook != nil {
+		codeByte, err = loadModuleCompileHook(ctx, code, moduleName)
+	} else {
+		codeByte, err = ctx.Compile(code, EvalFlagModule(true), EvalFlagCompileOnly(true), EvalFileName(moduleName))
+	}
 	if err != nil {
 		return ctx.ThrowError(err)
 	}
