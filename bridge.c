@@ -623,7 +623,7 @@ JSValue LoadModuleBytecode(JSContext *ctx, const uint8_t *buf, size_t buf_len, i
     
     if (load_only) {
         if (JS_VALUE_GET_TAG(obj) == JS_TAG_MODULE) {
-            js_module_set_import_meta(ctx, obj, FALSE, FALSE);
+            js_module_set_import_meta(ctx, obj, false, false);
         }
         return obj;
     } else {
@@ -632,7 +632,7 @@ JSValue LoadModuleBytecode(JSContext *ctx, const uint8_t *buf, size_t buf_len, i
                 JS_FreeValue(ctx, obj);
                 return JS_EXCEPTION;
             }
-            js_module_set_import_meta(ctx, obj, FALSE, FALSE);
+            js_module_set_import_meta(ctx, obj, false, false);
             val = JS_EvalFunction(ctx, obj);
             val = js_std_await(ctx, val);
         } else {
