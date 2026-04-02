@@ -183,26 +183,39 @@ func (ctx *Context) enqueueJobDuringClose(job func(*Context)) bool {
 	return ctx.enqueueJobDuringCloseWithSource(job, closeEnqueueSourceOther)
 }
 
+func (ctx *Context) observeCloseEnqueueDrop(source closeEnqueueSource, job func(*Context)) {
+	ctx.closeEnqueueDroppedCount.Add(1)
+	switch source {
+	case closeEnqueueSourceValueFree:
+		ctx.closeEnqueueValueFreeDropped.Add(1)
+	case closeEnqueueSourcePromiseCallback:
+		ctx.closeEnqueuePromiseDropped.Add(1)
+	default:
+		ctx.closeEnqueueOtherDropped.Add(1)
+	}
+	// Preserve critical release jobs even when the bounded close queue is full
+	// or the scheduler has already been closed.
+	ctx.pushCloseOverflowJob(job)
+}
+
 func (ctx *Context) enqueueJobDuringCloseWithSource(job func(*Context), source closeEnqueueSource) bool {
 	if ctx == nil || ctx.jobQueue == nil || job == nil {
 		return false
+	}
+	if ctx.jobClosed != nil {
+		select {
+		case <-ctx.jobClosed:
+			ctx.observeCloseEnqueueDrop(source, job)
+			return false
+		default:
+		}
 	}
 	select {
 	case ctx.jobQueue <- job:
 		ctx.closeEnqueueSuccessCount.Add(1)
 		return true
 	default:
-		ctx.closeEnqueueDroppedCount.Add(1)
-		switch source {
-		case closeEnqueueSourceValueFree:
-			ctx.closeEnqueueValueFreeDropped.Add(1)
-		case closeEnqueueSourcePromiseCallback:
-			ctx.closeEnqueuePromiseDropped.Add(1)
-		default:
-			ctx.closeEnqueueOtherDropped.Add(1)
-		}
-		// Preserve critical release jobs even when the bounded close queue is full.
-		ctx.pushCloseOverflowJob(job)
+		ctx.observeCloseEnqueueDrop(source, job)
 		return false
 	}
 }
@@ -503,7 +516,9 @@ func (ctx *Context) Close() {
 		}
 	}
 	// Best effort: execute jobs that raced with close signal.
-	drainUntilStable(4*time.Millisecond, 3)
+	// Keep this window wide enough for slow CI runners where goroutines
+	// may not reach fallback enqueue points immediately.
+	drainUntilStable(20*time.Millisecond, 3)
 
 	if ctx.globals != nil {
 		ctx.globals.Free()

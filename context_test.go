@@ -1234,6 +1234,26 @@ func TestCloseQueueOverflowJobsDrainedDuringClose(t *testing.T) {
 	rt.Close()
 }
 
+func TestCloseQueueFallbackAfterSchedulerClosedDrainedByClose(t *testing.T) {
+	rt := NewRuntime()
+	ctx := rt.NewContext()
+	require.NotNil(t, ctx)
+
+	select {
+	case <-ctx.jobClosed:
+	default:
+		close(ctx.jobClosed)
+	}
+
+	ran := 0
+	require.False(t, ctx.enqueueJobDuringCloseWithSource(func(*Context) { ran++ }, closeEnqueueSourceValueFree))
+
+	ctx.Close()
+	require.Equal(t, 1, ran)
+
+	rt.Close()
+}
+
 func TestCloseQueueSustainedPressureCloseRecreateExtremeGate(t *testing.T) {
 	const rounds = 2000
 	const warmupQueueFill = defaultJobQueueSize
