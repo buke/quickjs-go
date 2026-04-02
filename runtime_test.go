@@ -662,6 +662,16 @@ func TestRuntimeNewContextInitFailureHook(t *testing.T) {
 	ctx.Close()
 }
 
+func TestForceRuntimeEvalFailureHookDisable(t *testing.T) {
+	restore := forceRuntimeEvalFailureForTest(true)
+	defer restore()
+
+	restoreDisable := forceRuntimeEvalFailureForTest(false)
+	defer restoreDisable()
+
+	require.Nil(t, runtimeEvalFunctionHook)
+}
+
 func TestInitializeContextGlobalsFailurePaths(t *testing.T) {
 	rt := NewRuntime()
 	defer rt.Close()

@@ -314,6 +314,11 @@ func TestContextModules(t *testing.T) {
 				defer result.Free()
 				return result.IsException()
 			}},
+			{"DuplicateExportCompileError", func() bool {
+				result := ctx.LoadModule(`export const a = 1; export const a = 2;`, "duplicate_export")
+				defer result.Free()
+				return result.IsException()
+			}},
 			{"EmptyBytecode", func() bool {
 				result := ctx.LoadModuleBytecode([]byte{})
 				defer result.Free()
