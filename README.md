@@ -56,7 +56,7 @@ The runtime sources under deps/quickjs are no longer updated via git submodule. 
 - Use `runtime.SetFinalizer()` cautiously as it may interfere with QuickJS's GC.
 
 ### Performance Tips
-- QuickJS is not thread-safe. For concurrency or isolation, use a thread pool pattern with pre-initialized runtimes, or manage separate Runtime/Context instances for different tasks or users (such as : [https://github.com/buke/js-executor](https://github.com/buke/js-executor)).
+- QuickJS is not thread-safe. For concurrency or isolation, use a thread pool pattern with pre-initialized runtimes, or manage separate Runtime/Context instances for different tasks or users.
 - Thread affinity is the caller's responsibility. This library no longer calls `runtime.LockOSThread()` / `runtime.UnlockOSThread()` internally.
 - For a given Runtime and its Contexts, create, use, and close them from one serialized owner goroutine. If you need strict OS-thread affinity, call `runtime.LockOSThread()` in that owner goroutine yourself before creating the Runtime.
 - Reuse Runtime and Context objects when possible.

@@ -56,7 +56,7 @@ deps/quickjs 中的运行时源码不再通过 git submodule 更新，而是按 
 - 谨慎使用 `runtime.SetFinalizer()`，因为它可能会干扰 QuickJS 的 GC。
 
 ### 性能建议
-- QuickJS 不是线程安全的。如需并发或隔离，建议使用线程池模式预初始化运行时，或为不同任务/用户管理独立的 Runtime/Context 实例（推荐使用：[https://github.com/buke/js-executor](https://github.com/buke/js-executor)）。
+- QuickJS 不是线程安全的。如需并发或隔离，建议使用线程池模式预初始化运行时，或为不同任务/用户管理独立的 Runtime/Context 实例。
 - 线程归属由调用方自己负责。当前库不再在内部偷偷调用 `runtime.LockOSThread()` / `runtime.UnlockOSThread()`。
 - 对同一个 Runtime 及其 Context，创建、使用和关闭都应由同一个串行 owner goroutine 负责。如果你需要严格的 OS 线程绑定，请在这个 owner goroutine 里先自行调用 `runtime.LockOSThread()`，再创建 Runtime。
 - 尽可能复用 Runtime 和 Context 对象
