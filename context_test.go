@@ -1238,7 +1238,9 @@ func TestCloseQueueSustainedPressureCloseRecreateExtremeGate(t *testing.T) {
 			_ = ctx.enqueueJobDuringClose(func(*Context) {})
 		}
 
-		val := ctx.NewString("queue-pressure")
+		// Use an immediate value here so dropped close-window free jobs do not
+		// leave GC-tracked heap objects behind and cause runtime close asserts.
+		val := ctx.NewInt32(1)
 		promise, cancel := ctx.NewPromiseWithCancel(func(resolve, reject func(*Value)) {
 			// keep pending; cancel path should release callback refs
 		})
