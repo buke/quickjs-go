@@ -351,9 +351,11 @@ func (ctx *Context) Float64(v float64) *Value {
 
 // NewString returns a string value with given string.
 func (ctx *Context) NewString(v string) *Value {
-	ptr := C.CString(v)
-	defer C.free(unsafe.Pointer(ptr))
-	return &Value{ctx: ctx, ref: C.JS_NewString(ctx.ref, ptr)}
+	var ptr *C.char
+	if len(v) > 0 {
+		ptr = (*C.char)(unsafe.Pointer(unsafe.StringData(v)))
+	}
+	return &Value{ctx: ctx, ref: C.JS_NewStringLen(ctx.ref, ptr, C.size_t(len(v)))}
 }
 
 // String returns a string value with given string.
@@ -687,9 +689,11 @@ func (ctx *Context) SetInterruptHandler(handler InterruptHandler) {
 
 // NewAtom returns a new Atom value with given string.
 func (ctx *Context) NewAtom(v string) *Atom {
-	ptr := C.CString(v)
-	defer C.free(unsafe.Pointer(ptr))
-	return &Atom{ctx: ctx, ref: C.JS_NewAtom(ctx.ref, ptr)}
+	var ptr *C.char
+	if len(v) > 0 {
+		ptr = (*C.char)(unsafe.Pointer(unsafe.StringData(v)))
+	}
+	return &Atom{ctx: ctx, ref: C.JS_NewAtomLen(ctx.ref, ptr, C.size_t(len(v)))}
 }
 
 // Atom returns a new Atom value with given string.
@@ -902,9 +906,8 @@ func (ctx *Context) LoadModuleBytecode(buf []byte, opts ...EvalOption) *Value {
 // EvalBytecode returns a js value with given bytecode.
 // Need call Free() `quickjs.Value`'s returned by `Eval()` and `EvalFile()` and `EvalBytecode()`.
 func (ctx *Context) EvalBytecode(buf []byte) *Value {
-	cbuf := C.CBytes(buf)
-	obj := &Value{ctx: ctx, ref: C.JS_ReadObject(ctx.ref, (*C.uint8_t)(cbuf), C.size_t(len(buf)), C.int(C.JS_READ_OBJ_BYTECODE))}
-	defer C.free(cbuf)
+	cbuf := (*C.uint8_t)(unsafe.Pointer(unsafe.SliceData(buf)))
+	obj := &Value{ctx: ctx, ref: C.JS_ReadObject(ctx.ref, cbuf, C.size_t(len(buf)), C.int(C.JS_READ_OBJ_BYTECODE))}
 	if obj.IsException() {
 		return obj
 	}
