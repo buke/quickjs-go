@@ -1,6 +1,7 @@
 package quickjs
 
 import (
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -97,7 +98,11 @@ func TestRuntimeLimitsAndErrors(t *testing.T) {
 
 		// Use Context.Exception() instead of result.ToError()
 		err := ctx.Exception()
-		require.Contains(t, err.Error(), "stack overflow")
+		errMsg := strings.ToLower(err.Error())
+		require.True(t,
+			strings.Contains(errMsg, "stack overflow") || strings.Contains(errMsg, "maximum call stack size exceeded"),
+			"unexpected stack overflow error: %s", err.Error(),
+		)
 	})
 }
 
@@ -655,6 +660,16 @@ func TestRuntimeNewContextInitFailureHook(t *testing.T) {
 	ctx = rt.NewContext()
 	require.NotNil(t, ctx)
 	ctx.Close()
+}
+
+func TestForceRuntimeEvalFailureHookDisable(t *testing.T) {
+	restore := forceRuntimeEvalFailureForTest(true)
+	defer restore()
+
+	restoreDisable := forceRuntimeEvalFailureForTest(false)
+	defer restoreDisable()
+
+	require.Nil(t, runtimeEvalFunctionHook)
 }
 
 func TestInitializeContextGlobalsFailurePaths(t *testing.T) {

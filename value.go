@@ -22,7 +22,7 @@ type Value struct {
 
 // Free the value.
 func (v *Value) Free() {
-	if v.ctx == nil || C.JS_IsUndefined_Wrapper(v.ref) == 1 {
+	if v.ctx == nil || bool(C.JS_IsUndefined(v.ref)) {
 		return // No context or undefined value, nothing to free
 	}
 	C.JS_FreeValue(v.ctx.ref, v.ref)
@@ -305,7 +305,7 @@ func (v *Value) propertyEnum() ([]*propertyEnum, error) {
 	names := make([]*propertyEnum, len(entries))
 	for i := 0; i < len(names); i++ {
 		names[i] = &propertyEnum{
-			IsEnumerable: entries[i].is_enumerable == 1,
+			IsEnumerable: bool(entries[i].is_enumerable),
 			atom:         &Atom{ctx: v.ctx, ref: entries[i].atom},
 		}
 		names[i].atom.Free()
@@ -606,23 +606,23 @@ func (v *Value) ToBigUint64Array() ([]uint64, error) {
 }
 
 // =============================================================================
-// BASIC TYPE CHECKING METHODS (replaced macros with wrapper functions)
+// BASIC TYPE CHECKING METHODS
 // =============================================================================
 
-func (v *Value) IsNumber() bool        { return v != nil && C.JS_IsNumber_Wrapper(v.ref) == 1 }
-func (v *Value) IsBigInt() bool        { return v != nil && C.JS_IsBigInt_Wrapper(v.ctx.ref, v.ref) == 1 }
-func (v *Value) IsBool() bool          { return v != nil && C.JS_IsBool_Wrapper(v.ref) == 1 }
-func (v *Value) IsNull() bool          { return v != nil && C.JS_IsNull_Wrapper(v.ref) == 1 }
-func (v *Value) IsUndefined() bool     { return v != nil && C.JS_IsUndefined_Wrapper(v.ref) == 1 }
-func (v *Value) IsException() bool     { return v != nil && C.JS_IsException_Wrapper(v.ref) == 1 }
-func (v *Value) IsUninitialized() bool { return v != nil && C.JS_IsUninitialized_Wrapper(v.ref) == 1 }
-func (v *Value) IsString() bool        { return v != nil && C.JS_IsString_Wrapper(v.ref) == 1 }
-func (v *Value) IsSymbol() bool        { return v != nil && C.JS_IsSymbol_Wrapper(v.ref) == 1 }
-func (v *Value) IsObject() bool        { return v != nil && C.JS_IsObject_Wrapper(v.ref) == 1 }
-func (v *Value) IsArray() bool         { return v != nil && C.JS_IsArray(v.ctx.ref, v.ref) == 1 }
-func (v *Value) IsError() bool         { return v != nil && C.JS_IsError(v.ctx.ref, v.ref) == 1 }
-func (v *Value) IsFunction() bool      { return v != nil && C.JS_IsFunction(v.ctx.ref, v.ref) == 1 }
-func (v *Value) IsConstructor() bool   { return v != nil && C.JS_IsConstructor(v.ctx.ref, v.ref) == 1 }
+func (v *Value) IsNumber() bool        { return v != nil && bool(C.JS_IsNumber(v.ref)) }
+func (v *Value) IsBigInt() bool        { return v != nil && bool(C.JS_IsBigInt(v.ref)) }
+func (v *Value) IsBool() bool          { return v != nil && bool(C.JS_IsBool(v.ref)) }
+func (v *Value) IsNull() bool          { return v != nil && bool(C.JS_IsNull(v.ref)) }
+func (v *Value) IsUndefined() bool     { return v != nil && bool(C.JS_IsUndefined(v.ref)) }
+func (v *Value) IsException() bool     { return v != nil && bool(C.JS_IsException(v.ref)) }
+func (v *Value) IsUninitialized() bool { return v != nil && bool(C.JS_IsUninitialized(v.ref)) }
+func (v *Value) IsString() bool        { return v != nil && bool(C.JS_IsString(v.ref)) }
+func (v *Value) IsSymbol() bool        { return v != nil && bool(C.JS_IsSymbol(v.ref)) }
+func (v *Value) IsObject() bool        { return v != nil && bool(C.JS_IsObject(v.ref)) }
+func (v *Value) IsArray() bool         { return v != nil && bool(C.JS_IsArray(v.ref)) }
+func (v *Value) IsError() bool         { return v != nil && bool(C.JS_IsError(v.ref)) }
+func (v *Value) IsFunction() bool      { return v != nil && bool(C.JS_IsFunction(v.ctx.ref, v.ref)) }
+func (v *Value) IsConstructor() bool   { return v != nil && bool(C.JS_IsConstructor(v.ctx.ref, v.ref)) }
 
 // =============================================================================
 // PROMISE SUPPORT METHODS (replaced constants with getter functions)
@@ -633,9 +633,9 @@ func (v *Value) IsPromise() bool {
 		return false
 	}
 	state := C.JS_PromiseState(v.ctx.ref, v.ref)
-	pending := C.GetPromisePending()
-	fulfilled := C.GetPromiseFulfilled()
-	rejected := C.GetPromiseRejected()
+	pending := C.int(C.JS_PROMISE_PENDING)
+	fulfilled := C.int(C.JS_PROMISE_FULFILLED)
+	rejected := C.int(C.JS_PROMISE_REJECTED)
 
 	return C.int(state) == pending || C.int(state) == fulfilled || C.int(state) == rejected
 }
@@ -657,9 +657,9 @@ func (v *Value) PromiseState() PromiseState {
 
 	state := C.JS_PromiseState(v.ctx.ref, v.ref)
 	switch state {
-	case C.JSPromiseStateEnum(C.GetPromisePending()):
+	case C.JSPromiseStateEnum(C.JS_PROMISE_PENDING):
 		return PromisePending
-	case C.JSPromiseStateEnum(C.GetPromiseFulfilled()):
+	case C.JSPromiseStateEnum(C.JS_PROMISE_FULFILLED):
 		return PromiseFulfilled
 	default:
 		return PromiseRejected

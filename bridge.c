@@ -17,7 +17,6 @@ JSValue JS_NewUninitialized() { return JS_UNINITIALIZED; }
 JSValue JS_NewException() { return JS_EXCEPTION; }
 JSValue JS_NewTrue() { return JS_TRUE; }
 JSValue JS_NewFalse() { return JS_FALSE; }
-JSValue JS_DupValue_Go(JSContext *ctx, JSValue v) { return JS_DupValue(ctx, v); }
 
 // Error throwing macros -> functions
 JSValue ThrowSyntaxError(JSContext *ctx, const char *fmt) { return JS_ThrowSyntaxError(ctx, "%s", fmt); }
@@ -25,18 +24,6 @@ JSValue ThrowTypeError(JSContext *ctx, const char *fmt) { return JS_ThrowTypeErr
 JSValue ThrowReferenceError(JSContext *ctx, const char *fmt) { return JS_ThrowReferenceError(ctx, "%s", fmt); }
 JSValue ThrowRangeError(JSContext *ctx, const char *fmt) { return JS_ThrowRangeError(ctx, "%s", fmt); }
 JSValue ThrowInternalError(JSContext *ctx, const char *fmt) { return JS_ThrowInternalError(ctx, "%s", fmt); }
-
-// Type checking macros -> functions (these are heavily used in Go code)
-int JS_IsNumber_Wrapper(JSValue val) { return JS_IsNumber(val); }
-int JS_IsBigInt_Wrapper(JSContext *ctx, JSValue val) { return JS_IsBigInt(ctx, val); }
-int JS_IsBool_Wrapper(JSValue val) { return JS_IsBool(val); }
-int JS_IsNull_Wrapper(JSValue val) { return JS_IsNull(val); }
-int JS_IsUndefined_Wrapper(JSValue val) { return JS_IsUndefined(val); }
-int JS_IsException_Wrapper(JSValue val) { return JS_IsException(val); }
-int JS_IsUninitialized_Wrapper(JSValue val) { return JS_IsUninitialized(val); }
-int JS_IsString_Wrapper(JSValue val) { return JS_IsString(val); }
-int JS_IsSymbol_Wrapper(JSValue val) { return JS_IsSymbol(val); }
-int JS_IsObject_Wrapper(JSValue val) { return JS_IsObject(val); }
 
 // Value tag access macro -> function
 int ValueGetTag(JSValueConst v) {
@@ -47,52 +34,6 @@ int ValueGetTag(JSValueConst v) {
 void* JS_VALUE_GET_PTR_Wrapper(JSValue val) {
     return JS_VALUE_GET_PTR(val);
 }
-
-// Property flags (For class.go)
-int GetPropertyWritableConfigurable() { return JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE; }
-int GetPropertyConfigurable() { return JS_PROP_CONFIGURABLE; }
-int GetPropertyWritable() { return JS_PROP_WRITABLE; }
-int GetPropertyEnumerable() { return JS_PROP_ENUMERABLE; }
-int GetPropertyDefault() { return JS_PROP_WRITABLE | JS_PROP_ENUMERABLE | JS_PROP_CONFIGURABLE; }
-
-// TypedArray enum values (For context.go)
-int GetTypedArrayInt8() { return JS_TYPED_ARRAY_INT8; }
-int GetTypedArrayUint8() { return JS_TYPED_ARRAY_UINT8; }
-int GetTypedArrayUint8C() { return JS_TYPED_ARRAY_UINT8C; }
-int GetTypedArrayInt16() { return JS_TYPED_ARRAY_INT16; }
-int GetTypedArrayUint16() { return JS_TYPED_ARRAY_UINT16; }
-int GetTypedArrayInt32() { return JS_TYPED_ARRAY_INT32; }
-int GetTypedArrayUint32() { return JS_TYPED_ARRAY_UINT32; }
-int GetTypedArrayFloat32() { return JS_TYPED_ARRAY_FLOAT32; }
-int GetTypedArrayFloat64() { return JS_TYPED_ARRAY_FLOAT64; }
-int GetTypedArrayBigInt64() { return JS_TYPED_ARRAY_BIG_INT64; }
-int GetTypedArrayBigUint64() { return JS_TYPED_ARRAY_BIG_UINT64; }
-
-// Evaluation flags (For context.go)
-int GetEvalTypeGlobal() { return JS_EVAL_TYPE_GLOBAL; }
-int GetEvalTypeModule() { return JS_EVAL_TYPE_MODULE; }
-int GetEvalFlagStrict() { return JS_EVAL_FLAG_STRICT; }
-int GetEvalFlagCompileOnly() { return JS_EVAL_FLAG_COMPILE_ONLY; }
-
-// Read/Write object flags
-int GetReadObjBytecode() { return JS_READ_OBJ_BYTECODE; }
-int GetWriteObjBytecode() { return JS_WRITE_OBJ_BYTECODE; }
-
-// Function type enums (For class.go)
-int GetCFuncGeneric() { return JS_CFUNC_generic; }
-int GetCFuncGenericMagic() { return JS_CFUNC_generic_magic; }
-int GetCFuncConstructor() { return JS_CFUNC_constructor; }
-int GetCFuncConstructorMagic() { return JS_CFUNC_constructor_magic; }
-int GetCFuncGetterMagic() { return JS_CFUNC_getter_magic; }
-int GetCFuncSetterMagic() { return JS_CFUNC_setter_magic; }
-
-// Promise states (For value.go)
-int GetPromisePending() { return JS_PROMISE_PENDING; }
-int GetPromiseFulfilled() { return JS_PROMISE_FULFILLED; }
-int GetPromiseRejected() { return JS_PROMISE_REJECTED; }
-
-// Class ID
-int GetInvalidClassID() { return JS_INVALID_CLASS_ID; }
 
 // ============================================================================
 // HELPER FUNCTIONS 
@@ -165,10 +106,10 @@ void GoClassFinalizerProxy(JSRuntime *rt, JSValue val) {
 JSValue CreateCFunction(JSContext *ctx, const char *name, 
                        int length, int func_type, int32_t handler_id) {
     // Get magic enum values for comparison
-    int constructor_magic = GetCFuncConstructorMagic();
-    int generic_magic = GetCFuncGenericMagic();
-    int getter_magic = GetCFuncGetterMagic();
-    int setter_magic = GetCFuncSetterMagic();
+    int constructor_magic = JS_CFUNC_constructor_magic;
+    int generic_magic = JS_CFUNC_generic_magic;
+    int getter_magic = JS_CFUNC_getter_magic;
+    int setter_magic = JS_CFUNC_setter_magic;
     
     // Create the C function based on type - each type needs proper casting
     JSValue jsFunc;
@@ -252,8 +193,8 @@ JSValue CreateClass(JSContext *ctx,
         return JS_ThrowInternalError(ctx, "class_name cannot be empty");
     }
     
-    // Step 2: Allocate class_id internally (corresponds to point.c: JS_NewClassID(&js_point_class_id))
-    JS_NewClassID(class_id);
+    // Step 2: Allocate class_id internally (corresponds to point.c: JS_NewClassID(rt, &js_point_class_id))
+    JS_NewClassID(rt, class_id);
     
     // Check QuickJS limits
     if (*class_id >= (1 << 16)) {
@@ -284,7 +225,7 @@ JSValue CreateClass(JSContext *ctx,
     
     // Step 6: Create constructor function (corresponds to point.c: JS_NewCFunction2)
     constructor = CreateCFunction(ctx, class_def->class_name, 2,
-                                 GetCFuncConstructorMagic(), constructor_id);
+                                 JS_CFUNC_constructor_magic, constructor_id);
     if (JS_IsException(constructor)) {
         JS_FreeValue(ctx, proto);
         return constructor;
@@ -356,14 +297,14 @@ JSValue BindMembersToObject(JSContext *ctx, JSValue obj,
 JSValue BindMethodToObject(JSContext *ctx, JSValue obj, const MethodEntry *method) {
     // Create method function
     JSValue method_func = CreateCFunction(ctx, method->name, method->length,
-                                         GetCFuncGenericMagic(), method->handler_id);
+                                         JS_CFUNC_generic_magic, method->handler_id);
     if (JS_IsException(method_func)) {
         return method_func;
     }
     
     // Define property
     int result = JS_DefinePropertyValueStr(ctx, obj, method->name, method_func,
-                                          GetPropertyWritableConfigurable());
+                                          JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);
     if (result < 0) {
         JS_FreeValue(ctx, method_func);
         return JS_ThrowInternalError(ctx, "failed to bind method: %s", method->name);
@@ -381,7 +322,7 @@ JSValue BindAccessorToObject(JSContext *ctx, JSValue obj, const AccessorEntry *a
     // Create getter
     if (accessor->getter_id != 0) {
         getter = CreateCFunction(ctx, accessor->name, 0,
-                                GetCFuncGetterMagic(), accessor->getter_id);
+                                JS_CFUNC_getter_magic, accessor->getter_id);
         if (JS_IsException(getter)) {
             JS_FreeAtom(ctx, accessor_atom);
             return getter;
@@ -391,7 +332,7 @@ JSValue BindAccessorToObject(JSContext *ctx, JSValue obj, const AccessorEntry *a
     // Create setter
     if (accessor->setter_id != 0) {
         setter = CreateCFunction(ctx, accessor->name, 1,
-                                GetCFuncSetterMagic(), accessor->setter_id);
+                                JS_CFUNC_setter_magic, accessor->setter_id);
         if (JS_IsException(setter)) {
             JS_FreeAtom(ctx, accessor_atom);
             if (!JS_IsUndefined(getter)) {
@@ -403,7 +344,7 @@ JSValue BindAccessorToObject(JSContext *ctx, JSValue obj, const AccessorEntry *a
     
     // Define accessor
     int result = JS_DefinePropertyGetSet(ctx, obj, accessor_atom, getter, setter,
-                                        GetPropertyConfigurable());
+                                        JS_PROP_CONFIGURABLE);
     
     JS_FreeAtom(ctx, accessor_atom);
     
@@ -682,7 +623,7 @@ JSValue LoadModuleBytecode(JSContext *ctx, const uint8_t *buf, size_t buf_len, i
     
     if (load_only) {
         if (JS_VALUE_GET_TAG(obj) == JS_TAG_MODULE) {
-            js_module_set_import_meta(ctx, obj, FALSE, FALSE);
+            js_module_set_import_meta(ctx, obj, false, false);
         }
         return obj;
     } else {
@@ -691,7 +632,7 @@ JSValue LoadModuleBytecode(JSContext *ctx, const uint8_t *buf, size_t buf_len, i
                 JS_FreeValue(ctx, obj);
                 return JS_EXCEPTION;
             }
-            js_module_set_import_meta(ctx, obj, FALSE, FALSE);
+            js_module_set_import_meta(ctx, obj, false, false);
             val = JS_EvalFunction(ctx, obj);
             val = js_std_await(ctx, val);
         } else {

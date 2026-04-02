@@ -2,7 +2,7 @@
 
 [English](README.md) | 简体中文
 
-[![Test](https://github.com/buke/quickjs-go/workflows/Test/badge.svg)](https://github.com/buke/quickjs-go/actions?query=workflow%3ATest)
+[![Test](https://github.com/buke/quickjs-go/workflows/Test/badge.svg)](https://github.com/buke/quickjs-go/actions/workflows/test.yml?query=workflow%3ATest)
 [![codecov](https://codecov.io/gh/buke/quickjs-go/graph/badge.svg?token=8z6vgOaIIS)](https://codecov.io/gh/buke/quickjs-go)
 [![Go Report Card](https://goreportcard.com/badge/github.com/buke/quickjs-go)](https://goreportcard.com/report/github.com/buke/quickjs-go)
 [![GoDoc](https://pkg.go.dev/badge/github.com/buke/quickjs-go?status.svg)](https://pkg.go.dev/github.com/buke/quickjs-go?tab=doc)
@@ -24,8 +24,23 @@ Go 语言的 QuickJS 绑定库：快速、小型、可嵌入的 ES2020 JavaScrip
 - **完整的 TypedArray 支持 (Int8Array, Uint8Array, Float32Array 等)**
 - **使用 ClassBuilder 从 Go 创建 JavaScript 类**
 - **使用 ModuleBuilder 从 Go 创建 JavaScript 模块**
-- **跨平台支持：** 提供预编译的 QuickJS 静态库，支持 Linux (x64/arm64)、Windows (x64/x86)、MacOS (x64/arm64)。  
-  *(详见 [deps/libs](deps/libs)。Windows 构建请参考：https://github.com/buke/quickjs-go/issues/151#issuecomment-2134307728)*
+- **跨平台支持：** 通过 cgo 直接编译仓库内 vendored 的 quickjs-ng 源码；ubuntu-latest、windows-latest、macos-latest 已在 [Test CI](https://github.com/buke/quickjs-go/actions/workflows/test.yml?query=workflow%3ATest) 中覆盖并当前通过测试。
+ Windows 环境通常需要先安装并配置 MSYS2 等工具链（如 gcc、make、pkg-config），可参考 [Issue #151](https://github.com/buke/quickjs-go/issues/151#issuecomment-2134307728)。
+
+## 上游同步
+
+本项目已将上游运行时源码从 [bellard/quickjs](https://github.com/bellard/quickjs) 迁移到 [quickjs-ng/quickjs](https://github.com/quickjs-ng/quickjs)。
+
+这次迁移的主要原因是长期可维护性，而不是对 quickjs-go 的 Go API 做出调整。quickjs-ng 在社区协作、发布节奏、跨平台支持，以及测试和 CI 覆盖方面更适合作为绑定库项目的长期上游。对于一个需要将引擎源码 vendored 到仓库中、并通过 cgo 在 Linux、macOS 和 Windows 上持续构建与测试的 Go 绑定库来说，这些工程能力会直接影响日常维护成本和版本升级效率。
+
+此次迁移仅涉及底层 vendored JavaScript 引擎实现的上游切换；quickjs-go 对外提供的 Go API 设计与使用方式保持不变，现有 Go 侧集成代码无需因本次迁移而调整。
+
+deps/quickjs 中的运行时源码不再通过 git submodule 更新，而是按 [quickjs-ng GitHub release](https://github.com/quickjs-ng/quickjs/releases) 进行同步。
+
+- 当前同步元数据记录在 [deps/quickjs-release.env](deps/quickjs-release.env)。
+- 手动更新可使用 [scripts/sync_quickjs_ng_release.sh](scripts/sync_quickjs_ng_release.sh)。
+- GitHub Actions 会通过 [.github/workflows/sync_quickjs_ng_release.yml](.github/workflows/sync_quickjs_ng_release.yml) 每日检查新 release，并自动发起 PR。
+- 自动同步在发起 PR 前会执行 go test ./... 验证当前仓库。
 
 ## 使用指南
 
@@ -257,6 +272,7 @@ func main() {
     // 输出:
     // Hello Javascript!
     // Hello Golang!
+    // Hello from sync Promise
     // Hello Async Function!
 }
 
@@ -994,6 +1010,7 @@ package main
 
 import (
     "fmt"
+    "strings"
     "github.com/buke/quickjs-go"
 )
 

@@ -2,7 +2,7 @@
 
 English | [简体中文](README_zh-cn.md)
 
-[![Test](https://github.com/buke/quickjs-go/workflows/Test/badge.svg)](https://github.com/buke/quickjs-go/actions?query=workflow%3ATest)
+[![Test](https://github.com/buke/quickjs-go/workflows/Test/badge.svg)](https://github.com/buke/quickjs-go/actions/workflows/test.yml?query=workflow%3ATest)
 [![codecov](https://codecov.io/gh/buke/quickjs-go/graph/badge.svg?token=8z6vgOaIIS)](https://codecov.io/gh/buke/quickjs-go)
 [![Go Report Card](https://goreportcard.com/badge/github.com/buke/quickjs-go)](https://goreportcard.com/report/github.com/buke/quickjs-go)
 [![GoDoc](https://pkg.go.dev/badge/github.com/buke/quickjs-go?status.svg)](https://pkg.go.dev/github.com/buke/quickjs-go?tab=doc)
@@ -22,9 +22,24 @@ Go bindings to QuickJS: a fast, small, and embeddable ES2020 JavaScript interpre
 - **Marshal/Unmarshal Go values to/from JavaScript values**
 - **Full TypedArray support (Int8Array, Uint8Array, Float32Array, etc.)**
 - **Create JavaScript Classes from Go with ClassBuilder**
-- **Create JavaScript Modules from Go with ModuleBuilder*o
-- **Cross-platform:** Prebuilt QuickJS static libraries for Linux (x64/arm64), Windows (x64/x86), MacOS (x64/arm64).  
-  *(See [deps/libs](deps/libs) for details. For Windows build tips, see: https://github.com/buke/quickjs-go/issues/151#issuecomment-2134307728)*
+- **Create JavaScript Modules from Go with ModuleBuilder**
+- **Cross-platform:** Compile vendored quickjs-ng sources directly via cgo. ubuntu-latest, windows-latest, and macos-latest are covered and currently passing in [Test CI](https://github.com/buke/quickjs-go/actions/workflows/test.yml?query=workflow%3ATest).
+ On Windows, you typically need to install and configure an MSYS2-based toolchain (such as gcc, make, and pkg-config). See [Issue #151](https://github.com/buke/quickjs-go/issues/151#issuecomment-2134307728).
+
+## Upstream Sync
+
+This project has migrated its upstream runtime source from [bellard/quickjs](https://github.com/bellard/quickjs) to [quickjs-ng/quickjs](https://github.com/quickjs-ng/quickjs).
+
+The primary reason for this migration is long-term maintainability, not changes to the quickjs-go Go API. Compared with the previous upstream, quickjs-ng is a better long-term fit for a binding project in terms of community collaboration, release cadence, cross-platform support, and test/CI coverage. For a Go binding that vendors engine sources and continuously builds/tests via cgo across Linux, macOS, and Windows, these engineering capabilities directly reduce maintenance overhead and improve upgrade efficiency.
+
+This migration only switches the upstream implementation of the vendored JavaScript engine. The public quickjs-go Go API design and usage remain unchanged, and existing Go-side integration code does not need adjustment.
+
+The runtime sources under deps/quickjs are no longer updated via git submodule. They are synchronized from [quickjs-ng GitHub releases](https://github.com/quickjs-ng/quickjs/releases).
+
+- Current sync metadata is recorded in [deps/quickjs-release.env](deps/quickjs-release.env).
+- Manual update: [scripts/sync_quickjs_ng_release.sh](scripts/sync_quickjs_ng_release.sh).
+- GitHub Actions checks for new releases daily via [.github/workflows/sync_quickjs_ng_release.yml](.github/workflows/sync_quickjs_ng_release.yml) and automatically opens a PR.
+- Before opening a PR, the automation runs go test ./... to validate the current repository state.
 
 
 ## Guidelines
@@ -137,7 +152,7 @@ func main() {
 
 ```
 
-### Bind Go Funtion to Javascript async/sync function
+### Bind Go Function to Javascript async/sync function
 
 ```go
 package main
@@ -258,6 +273,7 @@ func main() {
     // Output:
     // Hello Javascript!
     // Hello Golang!
+    // Hello from sync Promise
     // Hello Async Function!
 }
 

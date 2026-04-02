@@ -1,0 +1,86 @@
+name: Sync quickjs-ng Release
+
+on:
+  schedule:
+    - cron: '17 2 * * *'
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Specific quickjs-ng release tag to sync, for example v0.13.0
+        required: false
+        type: string
+      force:
+        description: Re-sync even if the requested tag matches the vendored tag
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Sync vendored quickjs-ng release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          INPUT_RELEASE_TAG: ${{ inputs.release_tag }}
+          INPUT_FORCE: ${{ inputs.force }}
+        run: |
+          args=()
+          if [ -n "$INPUT_RELEASE_TAG" ]; then
+            args+=(--tag "$INPUT_RELEASE_TAG")
+          fi
+          if [ "$INPUT_FORCE" = "true" ]; then
+            args+=(--force)
+          fi
+          bash ./scripts/sync_quickjs_ng_release.sh "${args[@]}"
+
+      - name: Detect vendored changes
+        id: changes
+        run: |
+          if git diff --quiet -- deps/quickjs deps/quickjs-release.env; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+          release_tag=$(sed -n 's/^QUICKJS_NG_TAG="\(.*\)"$/\1/p' deps/quickjs-release.env)
+          release_url=$(sed -n 's/^QUICKJS_NG_RELEASE_URL="\(.*\)"$/\1/p' deps/quickjs-release.env)
+          echo "release_tag=$release_tag" >> "$GITHUB_OUTPUT"
+          echo "release_url=$release_url" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Go
+        if: steps.changes.outputs.changed == 'true'
+        uses: actions/setup-go@v6
+        with:
+          go-version: stable
+
+      - name: Validate vendored runtime
+        if: steps.changes.outputs.changed == 'true'
+        run: go test ./...
+
+      - name: Create pull request
+        if: steps.changes.outputs.changed == 'true'
+        uses: peter-evans/create-pull-request@v8
+        with:
+          branch: automation/quickjs-ng-${{ steps.changes.outputs.release_tag }}
+          delete-branch: true
+          commit-message: "chore: sync quickjs-ng release ${{ steps.changes.outputs.release_tag }}"
+          title: "chore: sync quickjs-ng release ${{ steps.changes.outputs.release_tag }}"
+          body: |
+            Sync vendored quickjs-ng sources to ${{ steps.changes.outputs.release_tag }}.
+
+            Release: ${{ steps.changes.outputs.release_url }}
+
+            This PR was generated automatically by the scheduled quickjs-ng release sync workflow.
+          labels: |
+            dependencies
+            automation
