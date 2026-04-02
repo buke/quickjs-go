@@ -51,6 +51,7 @@ int32_t OpaqueToInt(void* opaque) {
 int SetPropertyByNameLen(JSContext *ctx, JSValueConst obj, const char *name, size_t name_len, JSValue val) {
     JSAtom atom = JS_NewAtomLen(ctx, name, name_len);
     if (atom == JS_ATOM_NULL) {
+        JS_FreeValue(ctx, val);
         return -1;
     }
     int rc = JS_SetProperty(ctx, obj, atom, val);
