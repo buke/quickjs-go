@@ -3,6 +3,7 @@ package quickjs
 import (
 	"fmt"
 	"os"
+	"sync"
 	"sync/atomic"
 	"time"
 	"unsafe"
@@ -22,6 +23,7 @@ type Context struct {
 	handleStore *handleStore //  function handle storage
 	jobQueue    chan func(*Context)
 	jobClosed   chan struct{}
+	closeOnce   sync.Once
 }
 
 const defaultJobQueueSize = 1024
@@ -156,28 +158,41 @@ func (ctx *Context) Runtime() *Runtime {
 
 // Free will free context and all associated objects.
 func (ctx *Context) Close() {
-	if ctx.jobClosed != nil {
-		select {
-		case <-ctx.jobClosed:
-		default:
-			close(ctx.jobClosed)
+	if ctx == nil {
+		return
+	}
+
+	ctx.closeOnce.Do(func() {
+		if ctx.jobClosed != nil {
+			select {
+			case <-ctx.jobClosed:
+			default:
+				close(ctx.jobClosed)
+			}
 		}
-	}
-	ctx.drainJobs()
+		ctx.drainJobs()
 
-	if ctx.globals != nil {
-		ctx.globals.Free()
-	}
+		if ctx.globals != nil {
+			ctx.globals.Free()
+		}
 
-	// Clean up all registered function handles (critical for memory management)
-	if ctx.handleStore != nil {
-		ctx.handleStore.Clear()
-	}
+		// Clean up all registered function handles (critical for memory management)
+		if ctx.handleStore != nil {
+			ctx.handleStore.Clear()
+		}
 
-	// Remove from global mapping
-	unregisterContext(ctx.ref)
+		if ctx.runtime != nil {
+			ctx.runtime.unregisterOwnedContext(ctx.ref)
+		}
 
-	C.JS_FreeContext(ctx.ref)
+		// Remove from global mapping and release C context once.
+		if ctx.ref != nil {
+			unregisterContext(ctx.ref)
+			C.JS_FreeContext(ctx.ref)
+		}
+
+		ctx.runtime = nil
+	})
 }
 
 // NewNull returns a null value.

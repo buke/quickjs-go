@@ -78,10 +78,11 @@ func TestRuntimeLimitsAndErrors(t *testing.T) {
 	})
 
 	t.Run("StackOverflow", func(t *testing.T) {
-		rt := NewRuntime(WithMaxStackSize(8192))
+		rt := NewRuntime(WithMaxStackSize(65534))
 		defer rt.Close()
 
 		ctx := rt.NewContext()
+		require.NotNil(t, ctx)
 		defer ctx.Close()
 
 		result := ctx.Eval(`
@@ -382,4 +383,318 @@ func TestRuntimeAdvancedOptions(t *testing.T) {
 	defer result4.Free()
 	require.False(t, result4.IsException()) // Check for exceptions instead of error
 	require.Equal(t, "GC test", result4.ToString())
+}
+
+func TestRuntimeTimeoutOpaqueLifecycle(t *testing.T) {
+	base := timeoutOpaqueCount()
+
+	rt := NewRuntime()
+	defer rt.Close()
+
+	require.Equal(t, base, timeoutOpaqueCount())
+
+	rt.SetExecuteTimeout(5)
+	require.Equal(t, base+1, timeoutOpaqueCount())
+
+	// Replacing timeout should not accumulate opaque states.
+	rt.SetExecuteTimeout(10)
+	require.Equal(t, base+1, timeoutOpaqueCount())
+
+	rt.SetInterruptHandler(func() int { return 0 })
+	require.Equal(t, base, timeoutOpaqueCount())
+
+	rt.SetExecuteTimeout(5)
+	require.Equal(t, base+1, timeoutOpaqueCount())
+
+	rt.ClearInterruptHandler()
+	require.Equal(t, base, timeoutOpaqueCount())
+
+	rt.SetExecuteTimeout(5)
+	require.Equal(t, base+1, timeoutOpaqueCount())
+
+	rt.SetExecuteTimeout(0)
+	require.Equal(t, base, timeoutOpaqueCount())
+}
+
+func TestRuntimeTimeoutOpaqueNotFreedInHandler(t *testing.T) {
+	base := timeoutOpaqueCount()
+
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	rt.SetExecuteTimeout(1)
+	require.Equal(t, base+1, timeoutOpaqueCount())
+
+	result := ctx.Eval(`while(true){}`)
+	defer result.Free()
+	require.True(t, result.IsException())
+
+	err := ctx.Exception()
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "interrupted")
+
+	// timeoutHandler should not free opaque state; cleanup happens on clear/replace.
+	require.Equal(t, base+1, timeoutOpaqueCount())
+
+	rt.ClearInterruptHandler()
+	require.Equal(t, base, timeoutOpaqueCount())
+}
+
+func TestRuntimeTimeoutOpaqueConcurrentLifecycle(t *testing.T) {
+	base := timeoutOpaqueCount()
+
+	const workers = 4
+	const loops = 50
+
+	var wg sync.WaitGroup
+	errCh := make(chan string, workers)
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+
+			rt := NewRuntime()
+			ctx := rt.NewContext()
+			if ctx == nil {
+				errCh <- "NewContext returned nil"
+				rt.Close()
+				return
+			}
+
+			for j := 0; j < loops; j++ {
+				rt.SetExecuteTimeout(1)
+				rt.SetExecuteTimeout(2)
+				rt.ClearInterruptHandler()
+			}
+
+			ctx.Close()
+			rt.Close()
+		}()
+	}
+	wg.Wait()
+	close(errCh)
+	for errMsg := range errCh {
+		t.Error(errMsg)
+	}
+
+	require.Equal(t, base, timeoutOpaqueCount())
+}
+
+func TestRuntimeCrossGoroutineLifecycleWithoutInternalThreadBinding(t *testing.T) {
+	created := make(chan *Runtime, 1)
+
+	go func() {
+		rt := NewRuntime()
+		created <- rt
+	}()
+
+	rt := <-created
+	require.NotNil(t, rt)
+
+	ctx := rt.NewContext()
+	require.NotNil(t, ctx)
+
+	result := ctx.Eval(`1 + 2`)
+	require.NotNil(t, result)
+	require.False(t, result.IsException())
+	require.EqualValues(t, 3, result.ToInt32())
+	result.Free()
+
+	closed := make(chan struct{})
+	go func() {
+		ctx.Close()
+		rt.Close()
+		close(closed)
+	}()
+
+	select {
+	case <-closed:
+	case <-time.After(2 * time.Second):
+		t.Fatal("cross-goroutine close blocked")
+	}
+}
+
+func TestRuntimeStdHandlersLifecycle(t *testing.T) {
+	rt := NewRuntime()
+	require.False(t, rt.stdHandlersInitialized)
+
+	ctx1 := rt.NewContext()
+	require.NotNil(t, ctx1)
+	require.True(t, rt.stdHandlersInitialized)
+
+	ctx2 := rt.NewContext()
+	require.NotNil(t, ctx2)
+	require.True(t, rt.stdHandlersInitialized)
+
+	ctx1.Close()
+	ctx2.Close()
+	rt.Close()
+
+	require.False(t, rt.stdHandlersInitialized)
+	require.Equal(t, 0, timeoutOpaqueCount())
+}
+
+func TestRuntimeCloseIdempotentAndCloseOrder(t *testing.T) {
+	rt := NewRuntime()
+	ctx := rt.NewContext()
+	require.NotNil(t, ctx)
+
+	result := ctx.Eval(`1 + 1`)
+	require.False(t, result.IsException())
+	result.Free()
+
+	require.NotPanics(t, func() {
+		rt.Close()
+	})
+	require.NotPanics(t, func() {
+		rt.Close()
+	})
+	require.NotPanics(t, func() {
+		ctx.Close()
+	})
+
+	require.Nil(t, rt.NewContext())
+
+	require.NotPanics(t, func() {
+		rt.SetExecuteTimeout(1)
+		rt.SetInterruptHandler(func() int { return 1 })
+		rt.ClearInterruptHandler()
+		rt.SetMemoryLimit(1024)
+		rt.SetGCThreshold(2048)
+		rt.SetMaxStackSize(4096)
+		rt.SetCanBlock(true)
+		rt.SetStripInfo(1)
+		rt.SetModuleImport(true)
+		rt.RunGC()
+	})
+}
+
+func TestRuntimeNilAndZeroValueGuards(t *testing.T) {
+	var nilRT *Runtime
+	dummyRef := (Value{}).ref
+
+	require.NotPanics(t, func() {
+		nilRT.RunGC()
+		nilRT.Close()
+		nilRT.SetCanBlock(true)
+		nilRT.SetMemoryLimit(1)
+		nilRT.SetGCThreshold(1)
+		nilRT.SetMaxStackSize(1)
+		nilRT.SetExecuteTimeout(1)
+		nilRT.SetStripInfo(1)
+		nilRT.SetModuleImport(true)
+		nilRT.SetInterruptHandler(func() int { return 0 })
+		nilRT.ClearInterruptHandler()
+		require.Nil(t, nilRT.NewContext())
+		require.Equal(t, 0, nilRT.callInterruptHandler())
+		nilRT.registerOwnedContext(nil)
+		nilRT.unregisterOwnedContext(nil)
+		nilRT.registerConstructorClassID(dummyRef, 1)
+		_, _ = nilRT.getConstructorClassID(dummyRef)
+	})
+
+	zeroRT := &Runtime{}
+	require.NotPanics(t, func() {
+		zeroRT.RunGC()
+		zeroRT.SetCanBlock(true)
+		zeroRT.SetMemoryLimit(1)
+		zeroRT.SetGCThreshold(1)
+		zeroRT.SetMaxStackSize(1)
+		zeroRT.SetExecuteTimeout(1)
+		zeroRT.SetStripInfo(1)
+		zeroRT.SetModuleImport(true)
+		zeroRT.SetInterruptHandler(func() int { return 1 })
+		zeroRT.ClearInterruptHandler()
+		zeroRT.registerOwnedContext(nil)
+		zeroRT.unregisterOwnedContext(nil)
+		require.Nil(t, zeroRT.NewContext())
+		zeroRT.Close()
+		zeroRT.Close()
+	})
+}
+
+func TestRuntimeNewContextFailureHook(t *testing.T) {
+	restore := forceRuntimeNewContextFailureForTest(true)
+	defer restore()
+
+	rt := NewRuntime()
+	defer rt.Close()
+
+	ctx := rt.NewContext()
+	require.Nil(t, ctx)
+}
+
+func TestRuntimeNewContextFailureHookDisable(t *testing.T) {
+	restore := forceRuntimeNewContextFailureForTest(false)
+	defer restore()
+
+	rt := NewRuntime()
+	defer rt.Close()
+
+	ctx := rt.NewContext()
+	require.NotNil(t, ctx)
+	ctx.Close()
+}
+
+func TestRuntimeNewContextInitFailureHook(t *testing.T) {
+	restore := forceRuntimeInitFailureForTest(true)
+	defer restore()
+
+	rt := NewRuntime()
+	defer rt.Close()
+
+	ctx := rt.NewContext()
+	require.Nil(t, ctx)
+
+	// A failed initialization should not poison the runtime for future contexts.
+	restoreInit := forceRuntimeInitFailureForTest(false)
+	defer restoreInit()
+
+	ctx = rt.NewContext()
+	require.NotNil(t, ctx)
+	ctx.Close()
+}
+
+func TestInitializeContextGlobalsFailurePaths(t *testing.T) {
+	rt := NewRuntime()
+	defer rt.Close()
+
+	ctx := rt.NewContext()
+	require.NotNil(t, ctx)
+	defer ctx.Close()
+
+	t.Run("CompileException", func(t *testing.T) {
+		require.False(t, initializeContextGlobals(ctx.ref, "function {", "compile-fail.js"))
+	})
+
+	t.Run("EvalException", func(t *testing.T) {
+		restore := forceRuntimeEvalFailureForTest(true)
+		defer restore()
+
+		require.False(t, initializeContextGlobals(ctx.ref, "globalThis.__evalProbe = 1", "eval-fail.js"))
+	})
+
+	t.Run("AwaitException", func(t *testing.T) {
+		require.False(t, initializeContextGlobals(ctx.ref, "await Promise.reject(new Error('await fail'))", "await-fail.js"))
+	})
+
+	t.Run("Success", func(t *testing.T) {
+		require.True(t, initializeContextGlobals(ctx.ref, "globalThis.__initProbe = 1", "success.js"))
+	})
+
+	t.Run("HookSuccess", func(t *testing.T) {
+		restore := forceRuntimeInitSuccessForTest(true)
+		defer restore()
+
+		require.True(t, initializeContextGlobals(ctx.ref, "", "hook-success.js"))
+	})
+
+	t.Run("HookSuccessDisable", func(t *testing.T) {
+		restore := forceRuntimeInitSuccessForTest(false)
+		defer restore()
+
+		require.True(t, initializeContextGlobals(ctx.ref, "globalThis.__initProbeDisabled = 1", "hook-success-disable.js"))
+	})
 }

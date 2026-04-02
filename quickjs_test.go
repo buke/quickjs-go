@@ -2,6 +2,7 @@ package quickjs_test
 
 import (
 	"fmt"
+	"runtime"
 	"time"
 
 	"github.com/buke/quickjs-go"
@@ -35,6 +36,9 @@ func (u *User) GetAverageScore() float64 {
 }
 
 func Example() {
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+
 	// Create a new runtime
 	rt := quickjs.NewRuntime()
 	defer rt.Close()

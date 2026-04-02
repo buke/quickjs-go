@@ -2,6 +2,7 @@
 #include "quickjs.h"
 #include "quickjs-libc.h"
 #include "cutils.h" 
+#include <pthread.h>
 #include <time.h>
 
 // ============================================================================
@@ -513,6 +514,8 @@ JSValue CreateClassInstance(JSContext *ctx, JSValue constructor,
 // INTERRUPT HANDLERS
 // ============================================================================
 
+static void clearTimeoutState(JSRuntime *rt);
+
 // Simplified interrupt handler (no handlerArgs complexity)
 int interruptHandler(JSRuntime *rt, void *opaque) {
     JSRuntime *runtimePtr = (JSRuntime*)opaque;
@@ -522,10 +525,12 @@ int interruptHandler(JSRuntime *rt, void *opaque) {
 void SetInterruptHandler(JSRuntime *rt) {
     // Use rt itself as opaque parameter for Go lookup
     JS_SetInterruptHandler(rt, interruptHandler, (void*)rt);
+    clearTimeoutState(rt);
 }
 
 void ClearInterruptHandler(JSRuntime *rt) {
     JS_SetInterruptHandler(rt, NULL, NULL);
+    clearTimeoutState(rt);
 }
 
 // Timeout handler implementation (unchanged but improved cleanup)
@@ -534,18 +539,103 @@ typedef struct {
     time_t timeout;
 } TimeoutStruct;
 
+typedef struct TimeoutStateEntry {
+    JSRuntime *rt;
+    TimeoutStruct *state;
+    struct TimeoutStateEntry *next;
+} TimeoutStateEntry;
+
+static TimeoutStateEntry *g_timeout_states = NULL;
+static pthread_mutex_t g_timeout_states_mu = PTHREAD_MUTEX_INITIALIZER;
+
+static TimeoutStruct *takeTimeoutState(JSRuntime *rt) {
+    pthread_mutex_lock(&g_timeout_states_mu);
+
+    TimeoutStateEntry *prev = NULL;
+    TimeoutStateEntry *current = g_timeout_states;
+    while (current) {
+        if (current->rt == rt) {
+            TimeoutStruct *state = current->state;
+            if (prev) {
+                prev->next = current->next;
+            } else {
+                g_timeout_states = current->next;
+            }
+            free(current);
+            pthread_mutex_unlock(&g_timeout_states_mu);
+            return state;
+        }
+        prev = current;
+        current = current->next;
+    }
+
+    pthread_mutex_unlock(&g_timeout_states_mu);
+    return NULL;
+}
+
+static int setTimeoutState(JSRuntime *rt, TimeoutStruct *state) {
+    pthread_mutex_lock(&g_timeout_states_mu);
+
+    TimeoutStateEntry *current = g_timeout_states;
+    while (current) {
+        if (current->rt == rt) {
+            if (current->state != NULL && current->state != state) {
+                free(current->state);
+            }
+            current->state = state;
+            pthread_mutex_unlock(&g_timeout_states_mu);
+            return 0;
+        }
+        current = current->next;
+    }
+
+    TimeoutStateEntry *entry = malloc(sizeof(TimeoutStateEntry));
+    if (!entry) {
+        pthread_mutex_unlock(&g_timeout_states_mu);
+        return -1;
+    }
+    entry->rt = rt;
+    entry->state = state;
+    entry->next = g_timeout_states;
+    g_timeout_states = entry;
+
+    pthread_mutex_unlock(&g_timeout_states_mu);
+    return 0;
+}
+
+static void clearTimeoutState(JSRuntime *rt) {
+    TimeoutStruct *state = takeTimeoutState(rt);
+    if (state) {
+        free(state);
+    }
+}
+
+int GetTimeoutOpaqueCount(void) {
+    int count = 0;
+
+    pthread_mutex_lock(&g_timeout_states_mu);
+    TimeoutStateEntry *current = g_timeout_states;
+    while (current) {
+        if (current->state != NULL) {
+            count++;
+        }
+        current = current->next;
+    }
+    pthread_mutex_unlock(&g_timeout_states_mu);
+
+    return count;
+}
+
 int timeoutHandler(JSRuntime *rt, void *opaque) {
     TimeoutStruct* ts = (TimeoutStruct*)opaque;
     time_t timeout = ts->timeout;
     time_t start = ts->start;
     if (timeout <= 0) {
-        free(ts); // Free memory if timeout is disabled
         return 0;
     }
 
     time_t now = time(NULL);
     if (now - start > timeout) {
-        free(ts); // Free memory on timeout
         return 1;
     }
 
@@ -553,10 +643,28 @@ int timeoutHandler(JSRuntime *rt, void *opaque) {
 }
 
 void SetExecuteTimeout(JSRuntime *rt, time_t timeout) {
+    if (timeout <= 0) {
+        JS_SetInterruptHandler(rt, NULL, NULL);
+        clearTimeoutState(rt);
+        return;
+    }
+
     TimeoutStruct* ts = malloc(sizeof(TimeoutStruct));
+    if (!ts) {
+        JS_SetInterruptHandler(rt, NULL, NULL);
+        clearTimeoutState(rt);
+        return;
+    }
+
     ts->start = time(NULL);
     ts->timeout = timeout;
     JS_SetInterruptHandler(rt, timeoutHandler, ts);
+
+    if (setTimeoutState(rt, ts) != 0) {
+        JS_SetInterruptHandler(rt, NULL, NULL);
+        free(ts);
+        clearTimeoutState(rt);
+    }
 }
 
 // ============================================================================

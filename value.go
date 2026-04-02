@@ -846,7 +846,7 @@ func (v *Value) resolveClassIDFromInheritance() (uint32, bool) {
 		parent := parents.GetIdx(int64(i))
 		defer parent.Free()
 
-		if classID, exists := getConstructorClassID(parent.ref); exists {
+		if classID, exists := getConstructorClassID(v.ctx, parent.ref); exists {
 			return classID, true
 		}
 	}

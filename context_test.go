@@ -69,6 +69,13 @@ func TestContextBasics(t *testing.T) {
 
 }
 
+func TestContextCloseNilReceiver(t *testing.T) {
+	var ctx *Context
+	require.NotPanics(t, func() {
+		ctx.Close()
+	})
+}
+
 func TestContextEvaluation(t *testing.T) {
 	rt := NewRuntime()
 	defer rt.Close()

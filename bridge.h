@@ -162,6 +162,7 @@ extern JSValue LoadModuleBytecode(JSContext *ctx, const uint8_t *buf, size_t buf
 extern void SetInterruptHandler(JSRuntime *rt);
 extern void ClearInterruptHandler(JSRuntime *rt);
 extern void SetExecuteTimeout(JSRuntime *rt, time_t timeout);
+extern int GetTimeoutOpaqueCount(void);
 
 // =============================================================================
 // MODULE-RELATED DECLARATIONS - NEW FOR MODULE BUILDER
