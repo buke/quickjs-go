@@ -23,6 +23,14 @@ type interruptHandlerHolder struct {
 // It must remain nil in production.
 var runtimeNewContextHook func(rt *C.JSRuntime) *C.JSContext
 
+// runtimeInitContextHook is used in tests to force context initialization failure paths.
+// It must remain nil in production.
+var runtimeInitContextHook func(ctx *C.JSContext) C.JSValue
+
+// runtimeEvalFunctionHook is used in tests to force JS_EvalFunction failure paths.
+// It must remain nil in production.
+var runtimeEvalFunctionHook func(ctx *C.JSContext, compiled C.JSValue) C.JSValue
+
 // Runtime represents a Javascript runtime with simplified interrupt handling
 type Runtime struct {
 	mu                     sync.RWMutex
@@ -398,16 +406,10 @@ func (r *Runtime) NewContext() *Context {
     globalThis.setTimeout = setTimeout;
     globalThis.clearTimeout = clearTimeout;
     `
-	codePtr := C.CString(code)
-	defer C.free(unsafe.Pointer(codePtr))
-	filenamePtr := C.CString("init.js")
-	defer C.free(unsafe.Pointer(filenamePtr))
-
-	// Replace evaluation flags with function calls
-	evalFlags := C.int(C.GetEvalTypeModule()) | C.int(C.GetEvalFlagCompileOnly())
-	init_compile := C.JS_Eval(ctx_ref, codePtr, C.size_t(len(code)), filenamePtr, evalFlags)
-	init_run := C.js_std_await(ctx_ref, C.JS_EvalFunction(ctx_ref, init_compile))
-	C.JS_FreeValue(ctx_ref, init_run)
+	if !initializeContextGlobals(ctx_ref, code, "init.js") {
+		C.JS_FreeContext(ctx_ref)
+		return nil
+	}
 
 	// Create Context with HandleStore for function management
 	ctx := &Context{
@@ -466,6 +468,50 @@ func timeoutOpaqueCount() int {
 	return int(C.GetTimeoutOpaqueCount())
 }
 
+func initializeContextGlobals(ctx *C.JSContext, code string, filename string) bool {
+	if runtimeInitContextHook != nil {
+		initRun := runtimeInitContextHook(ctx)
+		if C.JS_IsException_Wrapper(initRun) == 1 {
+			C.JS_FreeValue(ctx, initRun)
+			return false
+		}
+		C.JS_FreeValue(ctx, initRun)
+		return true
+	}
+
+	codePtr := C.CString(code)
+	defer C.free(unsafe.Pointer(codePtr))
+	filenamePtr := C.CString(filename)
+	defer C.free(unsafe.Pointer(filenamePtr))
+
+	evalFlags := C.int(C.GetEvalTypeModule()) | C.int(C.GetEvalFlagCompileOnly())
+	initCompile := C.JS_Eval(ctx, codePtr, C.size_t(len(code)), filenamePtr, evalFlags)
+	if C.JS_IsException_Wrapper(initCompile) == 1 {
+		C.JS_FreeValue(ctx, initCompile)
+		return false
+	}
+
+	initEval := initCompile
+	if runtimeEvalFunctionHook != nil {
+		initEval = runtimeEvalFunctionHook(ctx, initCompile)
+	} else {
+		initEval = C.JS_EvalFunction(ctx, initCompile)
+	}
+	if C.JS_IsException_Wrapper(initEval) == 1 {
+		C.JS_FreeValue(ctx, initEval)
+		return false
+	}
+
+	initRun := C.js_std_await(ctx, initEval)
+	if C.JS_IsException_Wrapper(initRun) == 1 {
+		C.JS_FreeValue(ctx, initRun)
+		return false
+	}
+
+	C.JS_FreeValue(ctx, initRun)
+	return true
+}
+
 func forceRuntimeNewContextFailureForTest(enable bool) func() {
 	oldHook := runtimeNewContextHook
 	if enable {
@@ -477,5 +523,52 @@ func forceRuntimeNewContextFailureForTest(enable bool) func() {
 	}
 	return func() {
 		runtimeNewContextHook = oldHook
+	}
+}
+
+func forceRuntimeInitFailureForTest(enable bool) func() {
+	oldHook := runtimeInitContextHook
+	if enable {
+		runtimeInitContextHook = func(ctx *C.JSContext) C.JSValue {
+			msg := C.CString("forced init failure")
+			defer C.free(unsafe.Pointer(msg))
+			return C.ThrowInternalError(ctx, msg)
+		}
+	} else {
+		runtimeInitContextHook = nil
+	}
+	return func() {
+		runtimeInitContextHook = oldHook
+	}
+}
+
+func forceRuntimeInitSuccessForTest(enable bool) func() {
+	oldHook := runtimeInitContextHook
+	if enable {
+		runtimeInitContextHook = func(ctx *C.JSContext) C.JSValue {
+			return C.JS_NewUndefined()
+		}
+	} else {
+		runtimeInitContextHook = nil
+	}
+	return func() {
+		runtimeInitContextHook = oldHook
+	}
+}
+
+func forceRuntimeEvalFailureForTest(enable bool) func() {
+	oldHook := runtimeEvalFunctionHook
+	if enable {
+		runtimeEvalFunctionHook = func(ctx *C.JSContext, compiled C.JSValue) C.JSValue {
+			C.JS_FreeValue(ctx, compiled)
+			msg := C.CString("forced eval failure")
+			defer C.free(unsafe.Pointer(msg))
+			return C.ThrowInternalError(ctx, msg)
+		}
+	} else {
+		runtimeEvalFunctionHook = nil
+	}
+	return func() {
+		runtimeEvalFunctionHook = oldHook
 	}
 }

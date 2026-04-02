@@ -78,10 +78,11 @@ func TestRuntimeLimitsAndErrors(t *testing.T) {
 	})
 
 	t.Run("StackOverflow", func(t *testing.T) {
-		rt := NewRuntime(WithMaxStackSize(8192))
+		rt := NewRuntime(WithMaxStackSize(65534))
 		defer rt.Close()
 
 		ctx := rt.NewContext()
+		require.NotNil(t, ctx)
 		defer ctx.Close()
 
 		result := ctx.Eval(`
@@ -635,4 +636,65 @@ func TestRuntimeNewContextFailureHookDisable(t *testing.T) {
 	ctx := rt.NewContext()
 	require.NotNil(t, ctx)
 	ctx.Close()
+}
+
+func TestRuntimeNewContextInitFailureHook(t *testing.T) {
+	restore := forceRuntimeInitFailureForTest(true)
+	defer restore()
+
+	rt := NewRuntime()
+	defer rt.Close()
+
+	ctx := rt.NewContext()
+	require.Nil(t, ctx)
+
+	// A failed initialization should not poison the runtime for future contexts.
+	restoreInit := forceRuntimeInitFailureForTest(false)
+	defer restoreInit()
+
+	ctx = rt.NewContext()
+	require.NotNil(t, ctx)
+	ctx.Close()
+}
+
+func TestInitializeContextGlobalsFailurePaths(t *testing.T) {
+	rt := NewRuntime()
+	defer rt.Close()
+
+	ctx := rt.NewContext()
+	require.NotNil(t, ctx)
+	defer ctx.Close()
+
+	t.Run("CompileException", func(t *testing.T) {
+		require.False(t, initializeContextGlobals(ctx.ref, "function {", "compile-fail.js"))
+	})
+
+	t.Run("EvalException", func(t *testing.T) {
+		restore := forceRuntimeEvalFailureForTest(true)
+		defer restore()
+
+		require.False(t, initializeContextGlobals(ctx.ref, "globalThis.__evalProbe = 1", "eval-fail.js"))
+	})
+
+	t.Run("AwaitException", func(t *testing.T) {
+		require.False(t, initializeContextGlobals(ctx.ref, "await Promise.reject(new Error('await fail'))", "await-fail.js"))
+	})
+
+	t.Run("Success", func(t *testing.T) {
+		require.True(t, initializeContextGlobals(ctx.ref, "globalThis.__initProbe = 1", "success.js"))
+	})
+
+	t.Run("HookSuccess", func(t *testing.T) {
+		restore := forceRuntimeInitSuccessForTest(true)
+		defer restore()
+
+		require.True(t, initializeContextGlobals(ctx.ref, "", "hook-success.js"))
+	})
+
+	t.Run("HookSuccessDisable", func(t *testing.T) {
+		restore := forceRuntimeInitSuccessForTest(false)
+		defer restore()
+
+		require.True(t, initializeContextGlobals(ctx.ref, "globalThis.__initProbeDisabled = 1", "hook-success-disable.js"))
+	})
 }

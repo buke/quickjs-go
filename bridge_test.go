@@ -57,6 +57,8 @@ func TestBridgeGetRuntimeFromJSReturnNil(t *testing.T) {
 	// Test getRuntimeFromJS return nil in goInterruptHandler
 	t.Run("GetRuntimeFromJSReturnNil", func(t *testing.T) {
 		rt := NewRuntime()
+		ctx := rt.NewContext()
+		require.NotNil(t, ctx)
 
 		// Set interrupt handler
 		interruptCalled := false
@@ -64,8 +66,6 @@ func TestBridgeGetRuntimeFromJSReturnNil(t *testing.T) {
 			interruptCalled = true
 			return 1 // Request interrupt
 		})
-
-		ctx := rt.NewContext()
 
 		// Unregister runtime from mapping before executing long-running code
 		unregisterRuntime(rt.ref)
