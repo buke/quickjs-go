@@ -328,7 +328,7 @@ int DetectModuleSourceWithProbe(JSContext *ctx, const char *code, size_t code_le
  * quickjs-go local await helper.
  *
  * Unlike js_std_await from quickjs-libc, this keeps polling in bounded slices
- * and explicitly polls interrupt state with a lightweight VM step so
+ * and explicitly polls interrupt state directly so
  * execute-timeout/interrupt handlers can abort permanently pending promises.
  */
 JSValue AwaitValue(JSContext *ctx, JSValue obj) {
