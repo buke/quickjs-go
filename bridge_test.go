@@ -429,9 +429,8 @@ func TestBridgeClassConstructorErrors(t *testing.T) {
 
 		ctx.Globals().Set("TestClass", constructor)
 
-		// Manually remove constructor from global registry to simulate class ID not found
-		constructorKey := jsValueToKey(constructor.ref)
-		globalConstructorRegistry.Delete(constructorKey)
+		// Manually remove constructor mapping to simulate class ID not found
+		deleteConstructorClassID(ctx, constructor.ref)
 
 		// Call constructor - triggers "Class ID not found for constructor" branch
 		result := ctx.Eval(`
@@ -1241,14 +1240,14 @@ func TestBridgeCreateClassInstanceFailures(t *testing.T) {
 
 		// Replace with invalid class ID to trigger JS_NewObjectProtoClass failure
 		constructorKey := jsValueToKey(constructor.ref)
-		globalConstructorRegistry.Store(constructorKey, uint32(999999))
+		ctx.runtime.constructorRegistry.Store(constructorKey, uint32(999999))
 
 		// This should trigger CreateClassInstance to return JS_EXCEPTION
 		result := ctx.Eval(`new TestClass()`)
 		defer result.Free()
 
 		// Restore for cleanup
-		globalConstructorRegistry.Store(constructorKey, originalClassID)
+		ctx.runtime.constructorRegistry.Store(constructorKey, originalClassID)
 
 		// Should get an error
 		if result.IsException() {

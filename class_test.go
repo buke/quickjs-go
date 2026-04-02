@@ -1209,7 +1209,7 @@ func TestUnifiedConstructorMapping(t *testing.T) {
 	}
 
 	// Verify both constructors are registered in the unified mapping
-	manualRetrievedID, exists := getConstructorClassID(manualConstructor.ref)
+	manualRetrievedID, exists := getConstructorClassID(ctx, manualConstructor.ref)
 	if !exists {
 		t.Errorf("Manual constructor not found in unified mapping")
 	}
@@ -1217,7 +1217,7 @@ func TestUnifiedConstructorMapping(t *testing.T) {
 		t.Errorf("Manual constructor classID mismatch: expected %d, got %d", manualClassID, manualRetrievedID)
 	}
 
-	reflectRetrievedID, exists := getConstructorClassID(reflectConstructor.ref)
+	reflectRetrievedID, exists := getConstructorClassID(ctx, reflectConstructor.ref)
 	if !exists {
 		t.Errorf("Reflection constructor not found in unified mapping")
 	}
@@ -1250,6 +1250,90 @@ func TestUnifiedConstructorMapping(t *testing.T) {
 		t.Errorf("Reflection constructor instance incorrect: got (%f, %f)",
 			result.GetIdx(2).ToFloat64(), result.GetIdx(3).ToFloat64())
 	}
+}
+
+func TestConstructorRegistryRuntimeScopedIsolation(t *testing.T) {
+	rt1 := NewRuntime()
+	ctx1 := rt1.NewContext()
+	require.NotNil(t, ctx1)
+
+	ctor1, _ := NewClassBuilder("ScopedA").
+		Constructor(func(ctx *Context, instance *Value, args []*Value) (interface{}, error) {
+			return &Point{X: 1, Y: 2}, nil
+		}).
+		Build(ctx1)
+	require.False(t, ctor1.IsException())
+	ctx1.Globals().Set("ScopedA", ctor1)
+
+	rt2 := NewRuntime()
+	defer rt2.Close()
+	ctx2 := rt2.NewContext()
+	defer ctx2.Close()
+	require.NotNil(t, ctx2)
+
+	ctor2, _ := NewClassBuilder("ScopedB").
+		Constructor(func(ctx *Context, instance *Value, args []*Value) (interface{}, error) {
+			return &Point{X: 3, Y: 4}, nil
+		}).
+		Build(ctx2)
+	require.False(t, ctor2.IsException())
+	ctx2.Globals().Set("ScopedB", ctor2)
+
+	rt1.Close()
+	require.NotPanics(t, func() {
+		ctx1.Close()
+	})
+
+	result := ctx2.Eval(`new ScopedB()`)
+	defer result.Free()
+	require.False(t, result.IsException())
+}
+
+func TestConstructorRegistryCorruptedEntryFailClosed(t *testing.T) {
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	ctor, _ := NewClassBuilder("CorruptedRegistryClass").
+		Constructor(func(ctx *Context, instance *Value, args []*Value) (interface{}, error) {
+			return &Point{X: 5, Y: 6}, nil
+		}).
+		Build(ctx)
+	require.False(t, ctor.IsException())
+	defer ctor.Free()
+
+	key := jsValueToKey(ctor.ref)
+	ctx.runtime.constructorRegistry.Store(key, "bad-entry")
+
+	_, exists := getConstructorClassID(ctx, ctor.ref)
+	require.False(t, exists)
+
+	_, stillExists := ctx.runtime.constructorRegistry.Load(key)
+	require.False(t, stillExists)
+}
+
+func TestConstructorRegistryNilContextGuards(t *testing.T) {
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	ctor, _ := NewClassBuilder("NilContextRegistryClass").
+		Constructor(func(ctx *Context, instance *Value, args []*Value) (interface{}, error) {
+			return &Point{X: 7, Y: 8}, nil
+		}).
+		Build(ctx)
+	require.False(t, ctor.IsException())
+	defer ctor.Free()
+
+	require.NotPanics(t, func() {
+		registerConstructorClassID(nil, ctor.ref, 123)
+		deleteConstructorClassID(nil, ctor.ref)
+	})
+
+	_, exists := getConstructorClassID(nil, ctor.ref)
+	require.False(t, exists)
 }
 
 // TestReadOnlyAndWriteOnlyAccessors tests readonly and writeonly accessor functionality

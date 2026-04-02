@@ -7,16 +7,12 @@ import "C"
 import (
 	"errors"
 	"fmt"
-	"sync"
 	"unsafe"
 )
 
 // =============================================================================
-// GLOBAL CONSTRUCTOR REGISTRY FOR UNIFIED MAPPING
+// RUNTIME-SCOPED CONSTRUCTOR REGISTRY FOR UNIFIED MAPPING
 // =============================================================================
-
-// Global constructor to class ID mapping table for unified management
-var globalConstructorRegistry = sync.Map{} // constructor hash -> classID
 
 // Helper function to create a stable key from JSValue
 // For constructor functions, we use the object pointer as a unique identifier
@@ -28,18 +24,26 @@ func jsValueToKey(jsVal C.JSValue) uint64 {
 }
 
 // registerConstructorClassID stores the constructor -> classID mapping
-func registerConstructorClassID(constructor C.JSValue, classID uint32) {
-	constructorKey := jsValueToKey(constructor)
-	globalConstructorRegistry.Store(constructorKey, classID)
+func registerConstructorClassID(ctx *Context, constructor C.JSValue, classID uint32) {
+	if ctx == nil || ctx.runtime == nil {
+		return
+	}
+	ctx.runtime.registerConstructorClassID(constructor, classID)
 }
 
 // getConstructorClassID retrieves the classID for a given constructor
-func getConstructorClassID(constructor C.JSValue) (uint32, bool) {
-	constructorKey := jsValueToKey(constructor)
-	if classIDInterface, ok := globalConstructorRegistry.Load(constructorKey); ok {
-		return classIDInterface.(uint32), true
+func getConstructorClassID(ctx *Context, constructor C.JSValue) (uint32, bool) {
+	if ctx == nil || ctx.runtime == nil {
+		return 0, false
 	}
-	return 0, false
+	return ctx.runtime.getConstructorClassID(constructor)
+}
+
+func deleteConstructorClassID(ctx *Context, constructor C.JSValue) {
+	if ctx == nil || ctx.runtime == nil {
+		return
+	}
+	ctx.runtime.constructorRegistry.Delete(jsValueToKey(constructor))
 }
 
 // =============================================================================
@@ -439,7 +443,7 @@ func createClass(ctx *Context, builder *ClassBuilder) (*Value, uint32) {
 
 	// SCHEME C STEP 11: Register constructor -> classID mapping for constructor proxy access
 	// This enables constructor proxy to extract classID from newTarget
-	registerConstructorClassID(constructor, uint32(classID))
+	registerConstructorClassID(ctx, constructor, uint32(classID))
 
 	// Success: className, classDef, and classID are all managed properly
 	// - className and classDef: Go GC manages lifetime (QuickJS holds references)

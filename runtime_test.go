@@ -383,3 +383,152 @@ func TestRuntimeAdvancedOptions(t *testing.T) {
 	require.False(t, result4.IsException()) // Check for exceptions instead of error
 	require.Equal(t, "GC test", result4.ToString())
 }
+
+func TestRuntimeTimeoutOpaqueLifecycle(t *testing.T) {
+	base := timeoutOpaqueCount()
+
+	rt := NewRuntime()
+	defer rt.Close()
+
+	require.Equal(t, base, timeoutOpaqueCount())
+
+	rt.SetExecuteTimeout(5)
+	require.Equal(t, base+1, timeoutOpaqueCount())
+
+	rt.SetInterruptHandler(func() int { return 0 })
+	require.Equal(t, base, timeoutOpaqueCount())
+
+	rt.SetExecuteTimeout(5)
+	require.Equal(t, base+1, timeoutOpaqueCount())
+
+	rt.ClearInterruptHandler()
+	require.Equal(t, base, timeoutOpaqueCount())
+
+	rt.SetExecuteTimeout(5)
+	require.Equal(t, base+1, timeoutOpaqueCount())
+
+	rt.SetExecuteTimeout(0)
+	require.Equal(t, base, timeoutOpaqueCount())
+}
+
+func TestRuntimeStdHandlersLifecycle(t *testing.T) {
+	rt := NewRuntime()
+	require.False(t, rt.stdHandlersInitialized)
+
+	ctx1 := rt.NewContext()
+	require.NotNil(t, ctx1)
+	require.True(t, rt.stdHandlersInitialized)
+
+	ctx2 := rt.NewContext()
+	require.NotNil(t, ctx2)
+	require.True(t, rt.stdHandlersInitialized)
+
+	ctx1.Close()
+	ctx2.Close()
+	rt.Close()
+
+	require.False(t, rt.stdHandlersInitialized)
+	require.Equal(t, 0, timeoutOpaqueCount())
+}
+
+func TestRuntimeCloseIdempotentAndCloseOrder(t *testing.T) {
+	rt := NewRuntime()
+	ctx := rt.NewContext()
+	require.NotNil(t, ctx)
+
+	result := ctx.Eval(`1 + 1`)
+	require.False(t, result.IsException())
+	result.Free()
+
+	require.NotPanics(t, func() {
+		rt.Close()
+	})
+	require.NotPanics(t, func() {
+		rt.Close()
+	})
+	require.NotPanics(t, func() {
+		ctx.Close()
+	})
+
+	require.Nil(t, rt.NewContext())
+
+	require.NotPanics(t, func() {
+		rt.SetExecuteTimeout(1)
+		rt.SetInterruptHandler(func() int { return 1 })
+		rt.ClearInterruptHandler()
+		rt.SetMemoryLimit(1024)
+		rt.SetGCThreshold(2048)
+		rt.SetMaxStackSize(4096)
+		rt.SetCanBlock(true)
+		rt.SetStripInfo(1)
+		rt.SetModuleImport(true)
+		rt.RunGC()
+	})
+}
+
+func TestRuntimeNilAndZeroValueGuards(t *testing.T) {
+	var nilRT *Runtime
+	dummyRef := (Value{}).ref
+
+	require.NotPanics(t, func() {
+		nilRT.RunGC()
+		nilRT.Close()
+		nilRT.SetCanBlock(true)
+		nilRT.SetMemoryLimit(1)
+		nilRT.SetGCThreshold(1)
+		nilRT.SetMaxStackSize(1)
+		nilRT.SetExecuteTimeout(1)
+		nilRT.SetStripInfo(1)
+		nilRT.SetModuleImport(true)
+		nilRT.SetInterruptHandler(func() int { return 0 })
+		nilRT.ClearInterruptHandler()
+		require.Nil(t, nilRT.NewContext())
+		require.Equal(t, 0, nilRT.callInterruptHandler())
+		nilRT.registerOwnedContext(nil)
+		nilRT.unregisterOwnedContext(nil)
+		nilRT.registerConstructorClassID(dummyRef, 1)
+		_, _ = nilRT.getConstructorClassID(dummyRef)
+	})
+
+	zeroRT := &Runtime{}
+	require.NotPanics(t, func() {
+		zeroRT.RunGC()
+		zeroRT.SetCanBlock(true)
+		zeroRT.SetMemoryLimit(1)
+		zeroRT.SetGCThreshold(1)
+		zeroRT.SetMaxStackSize(1)
+		zeroRT.SetExecuteTimeout(1)
+		zeroRT.SetStripInfo(1)
+		zeroRT.SetModuleImport(true)
+		zeroRT.SetInterruptHandler(func() int { return 1 })
+		zeroRT.ClearInterruptHandler()
+		zeroRT.registerOwnedContext(nil)
+		zeroRT.unregisterOwnedContext(nil)
+		require.Nil(t, zeroRT.NewContext())
+		zeroRT.Close()
+		zeroRT.Close()
+	})
+}
+
+func TestRuntimeNewContextFailureHook(t *testing.T) {
+	restore := forceRuntimeNewContextFailureForTest(true)
+	defer restore()
+
+	rt := NewRuntime()
+	defer rt.Close()
+
+	ctx := rt.NewContext()
+	require.Nil(t, ctx)
+}
+
+func TestRuntimeNewContextFailureHookDisable(t *testing.T) {
+	restore := forceRuntimeNewContextFailureForTest(false)
+	defer restore()
+
+	rt := NewRuntime()
+	defer rt.Close()
+
+	ctx := rt.NewContext()
+	require.NotNil(t, ctx)
+	ctx.Close()
+}

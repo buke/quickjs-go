@@ -250,7 +250,7 @@ func goClassConstructorProxy(ctx *C.JSContext, newTarget C.JSValue,
 	}
 
 	// Extract class ID from newTarget for instance creation
-	classID, exists := getConstructorClassID(newTarget)
+	classID, exists := getConstructorClassID(goCtx, newTarget)
 	if !exists {
 		// This should not happen in normal cases since we register constructors
 		// But provide fallback for defensive programming
