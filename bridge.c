@@ -328,8 +328,8 @@ int DetectModuleSourceWithProbe(JSContext *ctx, const char *code, size_t code_le
  * quickjs-go local await helper.
  *
  * Unlike js_std_await from quickjs-libc, this keeps polling in bounded slices
- * and injects an explicit interrupt probe so execute-timeout/interrupt handlers
- * can abort permanently pending promises.
+ * and explicitly polls interrupt state directly so
+ * execute-timeout/interrupt handlers can abort permanently pending promises.
  */
 JSValue AwaitValue(JSContext *ctx, JSValue obj) {
     JSRuntime *rt = JS_GetRuntime(ctx);
@@ -400,13 +400,10 @@ JSValue AwaitValue(JSContext *ctx, JSValue obj) {
                 return JS_EXCEPTION;
             }
 
-            /* Force a VM step after idle polling for interrupt visibility. */
-            JSValue interrupt_probe = JS_Eval(ctx, "", 0, "<await-interrupt>", JS_EVAL_TYPE_GLOBAL);
-            if (JS_IsException(interrupt_probe)) {
+            if (QuickjsGoPollInterrupt(ctx) < 0) {
                 JS_FreeValue(ctx, obj);
                 return JS_EXCEPTION;
             }
-            JS_FreeValue(ctx, interrupt_probe);
         }
     }
 }
