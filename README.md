@@ -42,6 +42,8 @@ Go bindings to QuickJS: a fast, small, and embeddable ES2020 JavaScript interpre
 
 ### Performance Tips
 - QuickJS is not thread-safe. For concurrency or isolation, use a thread pool pattern with pre-initialized runtimes, or manage separate Runtime/Context instances for different tasks or users (such as : [https://github.com/buke/js-executor](https://github.com/buke/js-executor)).
+- Thread affinity is the caller's responsibility. This library no longer calls `runtime.LockOSThread()` / `runtime.UnlockOSThread()` internally.
+- For a given Runtime and its Contexts, create, use, and close them from one serialized owner goroutine. If you need strict OS-thread affinity, call `runtime.LockOSThread()` in that owner goroutine yourself before creating the Runtime.
 - Reuse Runtime and Context objects when possible.
 - Avoid frequent conversion between Go and JS values.
 - Consider using bytecode compilation for frequently executed scripts.
@@ -65,11 +67,15 @@ package main
 
 import (
     "fmt"
+    "runtime"
 
     "github.com/buke/quickjs-go"
 )
 
 func main() {
+    runtime.LockOSThread()
+    defer runtime.UnlockOSThread()
+
     // Create a new runtime
     rt := quickjs.NewRuntime()
     defer rt.Close()
@@ -256,6 +262,8 @@ func main() {
 }
 
 // NOTE:
+// - The caller owns thread affinity. Bind the owner goroutine with runtime.LockOSThread()
+//   yourself if the Runtime must stay on one OS thread.
 // - Goroutines must NOT call QuickJS/Context APIs directly.
 // - Always schedule back to the Context thread via ctx.Schedule
 //   before creating values or resolving/rejecting Promises.

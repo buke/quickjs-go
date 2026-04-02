@@ -395,6 +395,10 @@ func TestRuntimeTimeoutOpaqueLifecycle(t *testing.T) {
 	rt.SetExecuteTimeout(5)
 	require.Equal(t, base+1, timeoutOpaqueCount())
 
+	// Replacing timeout should not accumulate opaque states.
+	rt.SetExecuteTimeout(10)
+	require.Equal(t, base+1, timeoutOpaqueCount())
+
 	rt.SetInterruptHandler(func() int { return 0 })
 	require.Equal(t, base, timeoutOpaqueCount())
 
@@ -409,6 +413,106 @@ func TestRuntimeTimeoutOpaqueLifecycle(t *testing.T) {
 
 	rt.SetExecuteTimeout(0)
 	require.Equal(t, base, timeoutOpaqueCount())
+}
+
+func TestRuntimeTimeoutOpaqueNotFreedInHandler(t *testing.T) {
+	base := timeoutOpaqueCount()
+
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	rt.SetExecuteTimeout(1)
+	require.Equal(t, base+1, timeoutOpaqueCount())
+
+	result := ctx.Eval(`while(true){}`)
+	defer result.Free()
+	require.True(t, result.IsException())
+
+	err := ctx.Exception()
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "interrupted")
+
+	// timeoutHandler should not free opaque state; cleanup happens on clear/replace.
+	require.Equal(t, base+1, timeoutOpaqueCount())
+
+	rt.ClearInterruptHandler()
+	require.Equal(t, base, timeoutOpaqueCount())
+}
+
+func TestRuntimeTimeoutOpaqueConcurrentLifecycle(t *testing.T) {
+	base := timeoutOpaqueCount()
+
+	const workers = 4
+	const loops = 50
+
+	var wg sync.WaitGroup
+	errCh := make(chan string, workers)
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+
+			rt := NewRuntime()
+			ctx := rt.NewContext()
+			if ctx == nil {
+				errCh <- "NewContext returned nil"
+				rt.Close()
+				return
+			}
+
+			for j := 0; j < loops; j++ {
+				rt.SetExecuteTimeout(1)
+				rt.SetExecuteTimeout(2)
+				rt.ClearInterruptHandler()
+			}
+
+			ctx.Close()
+			rt.Close()
+		}()
+	}
+	wg.Wait()
+	close(errCh)
+	for errMsg := range errCh {
+		t.Error(errMsg)
+	}
+
+	require.Equal(t, base, timeoutOpaqueCount())
+}
+
+func TestRuntimeCrossGoroutineLifecycleWithoutInternalThreadBinding(t *testing.T) {
+	created := make(chan *Runtime, 1)
+
+	go func() {
+		rt := NewRuntime()
+		created <- rt
+	}()
+
+	rt := <-created
+	require.NotNil(t, rt)
+
+	ctx := rt.NewContext()
+	require.NotNil(t, ctx)
+
+	result := ctx.Eval(`1 + 2`)
+	require.NotNil(t, result)
+	require.False(t, result.IsException())
+	require.EqualValues(t, 3, result.ToInt32())
+	result.Free()
+
+	closed := make(chan struct{})
+	go func() {
+		ctx.Close()
+		rt.Close()
+		close(closed)
+	}()
+
+	select {
+	case <-closed:
+	case <-time.After(2 * time.Second):
+		t.Fatal("cross-goroutine close blocked")
+	}
 }
 
 func TestRuntimeStdHandlersLifecycle(t *testing.T) {

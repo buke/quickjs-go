@@ -42,6 +42,8 @@ Go 语言的 QuickJS 绑定库：快速、小型、可嵌入的 ES2020 JavaScrip
 
 ### 性能建议
 - QuickJS 不是线程安全的。如需并发或隔离，建议使用线程池模式预初始化运行时，或为不同任务/用户管理独立的 Runtime/Context 实例（推荐使用：[https://github.com/buke/js-executor](https://github.com/buke/js-executor)）。
+- 线程归属由调用方自己负责。当前库不再在内部偷偷调用 `runtime.LockOSThread()` / `runtime.UnlockOSThread()`。
+- 对同一个 Runtime 及其 Context，创建、使用和关闭都应由同一个串行 owner goroutine 负责。如果你需要严格的 OS 线程绑定，请在这个 owner goroutine 里先自行调用 `runtime.LockOSThread()`，再创建 Runtime。
 - 尽可能复用 Runtime 和 Context 对象
 - 避免频繁在 Go 和 JS 值之间转换
 - 对于频繁执行的脚本建议使用字节码编译
@@ -64,11 +66,15 @@ package main
 
 import (
     "fmt"
+    "runtime"
 
     "github.com/buke/quickjs-go"
 )
 
 func main() {
+    runtime.LockOSThread()
+    defer runtime.UnlockOSThread()
+
     // 创建新的运行时
     rt := quickjs.NewRuntime()
     defer rt.Close()
@@ -255,6 +261,7 @@ func main() {
 }
 
 // 注意：
+// - 线程归属由调用方负责；如果一个 Runtime 必须固定在同一个 OS 线程，请由调用方自行在 owner goroutine 中调用 runtime.LockOSThread()。
 // - 不要在 goroutine 中直接调用 Context 或任何 QuickJS API。
 // - 所有 QuickJS 相关操作都应该通过 ctx.Schedule 调度回 Context 线程后再执行。
 // - ctx.Await 会在内部驱动 pending jobs 和调度器，直至 Promise 解决。

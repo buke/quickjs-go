@@ -6,7 +6,6 @@ package quickjs
 */
 import "C"
 import (
-	"runtime"
 	"sync"
 	"sync/atomic"
 	"unsafe"
@@ -98,8 +97,6 @@ func WithStripInfo(strip int) Option {
 
 // NewRuntime creates a new quickjs runtime with simplified interrupt handling.
 func NewRuntime(opts ...Option) *Runtime {
-	runtime.LockOSThread() // prevent multiple quickjs runtime from being created
-
 	options := &Options{
 		timeout:      0,
 		memoryLimit:  0,
@@ -186,7 +183,6 @@ func (r *Runtime) Close() {
 		r.mu.Lock()
 		defer r.mu.Unlock()
 		if r.ref == nil {
-			runtime.UnlockOSThread()
 			return
 		}
 
@@ -207,7 +203,6 @@ func (r *Runtime) Close() {
 
 		C.JS_FreeRuntime(ref)
 		r.ref = nil
-		runtime.UnlockOSThread()
 	})
 }
 
