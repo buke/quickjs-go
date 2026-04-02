@@ -22,9 +22,8 @@ Go bindings to QuickJS: a fast, small, and embeddable ES2020 JavaScript interpre
 - **Marshal/Unmarshal Go values to/from JavaScript values**
 - **Full TypedArray support (Int8Array, Uint8Array, Float32Array, etc.)**
 - **Create JavaScript Classes from Go with ClassBuilder**
-- **Create JavaScript Modules from Go with ModuleBuilder*o
-- **Cross-platform:** Prebuilt QuickJS static libraries for Linux (x64/arm64), Windows (x64/x86), MacOS (x64/arm64).  
-  *(See [deps/libs](deps/libs) for details. For Windows build tips, see: https://github.com/buke/quickjs-go/issues/151#issuecomment-2134307728)*
+- **Create JavaScript Modules from Go with ModuleBuilder**
+- **Cross-platform:** Compile vendored quickjs-ng sources directly via cgo for Linux (x64/arm64), Windows (x64/x86), and macOS (x64/arm64).
 
 
 ## Guidelines

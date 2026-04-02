@@ -12,7 +12,6 @@ extern JSValue JS_NewUninitialized();
 extern JSValue JS_NewException();
 extern JSValue JS_NewTrue();
 extern JSValue JS_NewFalse();
-extern JSValue JS_DupValue_Go(JSContext *ctx, JSValue v);
 
 // Error throwing functions
 extern JSValue ThrowSyntaxError(JSContext *ctx, const char *fmt);
@@ -20,52 +19,6 @@ extern JSValue ThrowTypeError(JSContext *ctx, const char *fmt);
 extern JSValue ThrowReferenceError(JSContext *ctx, const char *fmt);
 extern JSValue ThrowRangeError(JSContext *ctx, const char *fmt);
 extern JSValue ThrowInternalError(JSContext *ctx, const char *fmt);
-
-// Type checking functions
-extern int JS_IsNumber_Wrapper(JSValue val);
-extern int JS_IsBigInt_Wrapper(JSContext *ctx, JSValue val);
-extern int JS_IsBool_Wrapper(JSValue val);
-extern int JS_IsNull_Wrapper(JSValue val);
-extern int JS_IsUndefined_Wrapper(JSValue val);
-extern int JS_IsException_Wrapper(JSValue val);
-extern int JS_IsUninitialized_Wrapper(JSValue val);
-extern int JS_IsString_Wrapper(JSValue val);
-extern int JS_IsSymbol_Wrapper(JSValue val);
-extern int JS_IsObject_Wrapper(JSValue val);
-
-// Constant getters
-extern int GetPropertyWritableConfigurable();
-extern int GetPropertyConfigurable();
-extern int GetPropertyWritable();
-extern int GetPropertyEnumerable();
-extern int GetPropertyDefault();
-extern int GetTypedArrayInt8();
-extern int GetTypedArrayUint8();
-extern int GetTypedArrayUint8C();
-extern int GetTypedArrayInt16();
-extern int GetTypedArrayUint16();
-extern int GetTypedArrayInt32();
-extern int GetTypedArrayUint32();
-extern int GetTypedArrayFloat32();
-extern int GetTypedArrayFloat64();
-extern int GetTypedArrayBigInt64();
-extern int GetTypedArrayBigUint64();
-extern int GetEvalTypeGlobal();
-extern int GetEvalTypeModule();
-extern int GetEvalFlagStrict();
-extern int GetEvalFlagCompileOnly();
-extern int GetReadObjBytecode();
-extern int GetWriteObjBytecode();
-extern int GetCFuncGeneric();
-extern int GetCFuncGenericMagic();
-extern int GetCFuncConstructor();
-extern int GetCFuncConstructorMagic();
-extern int GetCFuncGetterMagic();
-extern int GetCFuncSetterMagic();
-extern int GetPromisePending();
-extern int GetPromiseFulfilled();
-extern int GetPromiseRejected();
-extern int GetInvalidClassID();
 
 // Helper functions
 extern void* IntToOpaque(int32_t id);

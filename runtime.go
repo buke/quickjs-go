@@ -136,7 +136,7 @@ func NewRuntime(opts ...Option) *Runtime {
 	rt.SetMaxStackSize(rt.options.maxStackSize)
 
 	if rt.options.canBlock {
-		C.JS_SetCanBlock(rt.ref, C.int(1))
+		C.JS_SetCanBlock(rt.ref, C.bool(true))
 	}
 
 	if rt.options.strip > 0 {
@@ -225,11 +225,7 @@ func (r *Runtime) SetCanBlock(canBlock bool) {
 		return
 	}
 
-	if canBlock {
-		C.JS_SetCanBlock(r.ref, C.int(1))
-	} else {
-		C.JS_SetCanBlock(r.ref, C.int(0))
-	}
+	C.JS_SetCanBlock(r.ref, C.bool(canBlock))
 }
 
 // SetMemoryLimit the runtime memory limit; if not set, it will be unlimit.
@@ -297,7 +293,8 @@ func (r *Runtime) SetStripInfo(strip int) {
 	if r.closed.Load() || r.ref == nil {
 		return
 	}
-	C.JS_SetStripInfo(r.ref, C.int(strip))
+	// quickjs-ng does not expose a runtime-level JS_SetStripInfo API.
+	_ = strip
 }
 
 // SetModuleImport sets whether the runtime supports module import.
@@ -471,7 +468,7 @@ func timeoutOpaqueCount() int {
 func initializeContextGlobals(ctx *C.JSContext, code string, filename string) bool {
 	if runtimeInitContextHook != nil {
 		initRun := runtimeInitContextHook(ctx)
-		if C.JS_IsException_Wrapper(initRun) == 1 {
+		if bool(C.JS_IsException(initRun)) {
 			C.JS_FreeValue(ctx, initRun)
 			return false
 		}
@@ -484,9 +481,9 @@ func initializeContextGlobals(ctx *C.JSContext, code string, filename string) bo
 	filenamePtr := C.CString(filename)
 	defer C.free(unsafe.Pointer(filenamePtr))
 
-	evalFlags := C.int(C.GetEvalTypeModule()) | C.int(C.GetEvalFlagCompileOnly())
+	evalFlags := C.int(C.JS_EVAL_TYPE_MODULE) | C.int(C.JS_EVAL_FLAG_COMPILE_ONLY)
 	initCompile := C.JS_Eval(ctx, codePtr, C.size_t(len(code)), filenamePtr, evalFlags)
-	if C.JS_IsException_Wrapper(initCompile) == 1 {
+	if bool(C.JS_IsException(initCompile)) {
 		C.JS_FreeValue(ctx, initCompile)
 		return false
 	}
@@ -497,13 +494,13 @@ func initializeContextGlobals(ctx *C.JSContext, code string, filename string) bo
 	} else {
 		initEval = C.JS_EvalFunction(ctx, initCompile)
 	}
-	if C.JS_IsException_Wrapper(initEval) == 1 {
+	if bool(C.JS_IsException(initEval)) {
 		C.JS_FreeValue(ctx, initEval)
 		return false
 	}
 
 	initRun := C.js_std_await(ctx, initEval)
-	if C.JS_IsException_Wrapper(initRun) == 1 {
+	if bool(C.JS_IsException(initRun)) {
 		C.JS_FreeValue(ctx, initRun)
 		return false
 	}

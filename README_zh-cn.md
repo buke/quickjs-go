@@ -24,8 +24,7 @@ Go 语言的 QuickJS 绑定库：快速、小型、可嵌入的 ES2020 JavaScrip
 - **完整的 TypedArray 支持 (Int8Array, Uint8Array, Float32Array 等)**
 - **使用 ClassBuilder 从 Go 创建 JavaScript 类**
 - **使用 ModuleBuilder 从 Go 创建 JavaScript 模块**
-- **跨平台支持：** 提供预编译的 QuickJS 静态库，支持 Linux (x64/arm64)、Windows (x64/x86)、MacOS (x64/arm64)。  
-  *(详见 [deps/libs](deps/libs)。Windows 构建请参考：https://github.com/buke/quickjs-go/issues/151#issuecomment-2134307728)*
+- **跨平台支持：** 通过 cgo 直接编译仓库内 vendored 的 quickjs-ng 源码，支持 Linux (x64/arm64)、Windows (x64/x86)、macOS (x64/arm64)。
 
 ## 使用指南
 

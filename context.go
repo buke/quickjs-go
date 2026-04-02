@@ -3,6 +3,7 @@ package quickjs
 import (
 	"fmt"
 	"os"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -40,6 +41,36 @@ var (
 	awaitExecutePendingJobHook func(ctx *Context, promise *Value, current int) (int, bool)
 	awaitHasPendingGoJobsHook  func(ctx *Context, promise *Value, current bool) (bool, bool)
 )
+
+func mayContainModuleSyntax(code string) bool {
+	return strings.Contains(code, "import") ||
+		strings.Contains(code, "export") ||
+		strings.Contains(code, "await")
+}
+
+func (ctx *Context) detectModuleSource(code string, codePtr *C.char) bool {
+	if ctx == nil || ctx.ref == nil || !mayContainModuleSyntax(code) {
+		return false
+	}
+
+	if !bool(C.JS_DetectModule(codePtr, C.size_t(len(code)))) {
+		return false
+	}
+
+	probeFilename := C.CString("<module-detect>")
+	defer C.free(unsafe.Pointer(probeFilename))
+
+	probeFlags := C.int(C.JS_EVAL_TYPE_GLOBAL) | C.int(C.JS_EVAL_FLAG_COMPILE_ONLY)
+	probe := C.JS_Eval(ctx.ref, codePtr, C.size_t(len(code)), probeFilename, probeFlags)
+	if bool(C.JS_IsException(probe)) {
+		exception := C.JS_GetException(ctx.ref)
+		C.JS_FreeValue(ctx.ref, exception)
+		return true
+	}
+
+	C.JS_FreeValue(ctx.ref, probe)
+	return false
+}
 
 func (ctx *Context) initScheduler() {
 	ctx.jobQueue = make(chan func(*Context), defaultJobQueueSize)
@@ -101,7 +132,7 @@ func (ctx *Context) duplicateValue(val *Value) *Value {
 	if val == nil || val.ctx == nil {
 		return nil
 	}
-	return &Value{ctx: ctx, ref: C.JS_DupValue_Go(ctx.ref, val.ref)}
+	return &Value{ctx: ctx, ref: C.JS_DupValue(ctx.ref, val.ref)}
 }
 
 func (ctx *Context) wrapPromiseCallback(fn *Value) (func(*Value), func()) {
@@ -243,11 +274,7 @@ func (ctx *Context) Error(err error) *Value {
 
 // NewBool returns a bool value with given bool.
 func (ctx *Context) NewBool(b bool) *Value {
-	bv := 0
-	if b {
-		bv = 1
-	}
-	return &Value{ctx: ctx, ref: C.JS_NewBool(ctx.ref, C.int(bv))}
+	return &Value{ctx: ctx, ref: C.JS_NewBool(ctx.ref, C.bool(b))}
 }
 
 // Bool returns a bool value with given bool.
@@ -380,9 +407,9 @@ func (ctx *Context) createTypedArray(data unsafe.Pointer, elementCount int, elem
 // NewInt8Array returns a Int8Array value with given int8 slice.
 func (ctx *Context) NewInt8Array(data []int8) *Value {
 	if len(data) == 0 {
-		return ctx.createTypedArray(nil, 0, 1, C.JSTypedArrayEnum(C.GetTypedArrayInt8()))
+		return ctx.createTypedArray(nil, 0, 1, C.JSTypedArrayEnum(C.JS_TYPED_ARRAY_INT8))
 	}
-	return ctx.createTypedArray(unsafe.Pointer(&data[0]), len(data), 1, C.JSTypedArrayEnum(C.GetTypedArrayInt8()))
+	return ctx.createTypedArray(unsafe.Pointer(&data[0]), len(data), 1, C.JSTypedArrayEnum(C.JS_TYPED_ARRAY_INT8))
 }
 
 // Int8Array returns a Int8Array value with given int8 slice.
@@ -394,9 +421,9 @@ func (ctx *Context) Int8Array(data []int8) *Value {
 // NewUint8Array returns a Uint8Array value with given uint8 slice.
 func (ctx *Context) NewUint8Array(data []uint8) *Value {
 	if len(data) == 0 {
-		return ctx.createTypedArray(nil, 0, 1, C.JSTypedArrayEnum(C.GetTypedArrayUint8()))
+		return ctx.createTypedArray(nil, 0, 1, C.JSTypedArrayEnum(C.JS_TYPED_ARRAY_UINT8))
 	}
-	return ctx.createTypedArray(unsafe.Pointer(&data[0]), len(data), 1, C.JSTypedArrayEnum(C.GetTypedArrayUint8()))
+	return ctx.createTypedArray(unsafe.Pointer(&data[0]), len(data), 1, C.JSTypedArrayEnum(C.JS_TYPED_ARRAY_UINT8))
 }
 
 // Uint8Array returns a Uint8Array value with given uint8 slice.
@@ -408,9 +435,9 @@ func (ctx *Context) Uint8Array(data []uint8) *Value {
 // NewUint8ClampedArray returns a Uint8ClampedArray value with given uint8 slice.
 func (ctx *Context) NewUint8ClampedArray(data []uint8) *Value {
 	if len(data) == 0 {
-		return ctx.createTypedArray(nil, 0, 1, C.JSTypedArrayEnum(C.GetTypedArrayUint8C()))
+		return ctx.createTypedArray(nil, 0, 1, C.JSTypedArrayEnum(C.JS_TYPED_ARRAY_UINT8C))
 	}
-	return ctx.createTypedArray(unsafe.Pointer(&data[0]), len(data), 1, C.JSTypedArrayEnum(C.GetTypedArrayUint8C()))
+	return ctx.createTypedArray(unsafe.Pointer(&data[0]), len(data), 1, C.JSTypedArrayEnum(C.JS_TYPED_ARRAY_UINT8C))
 }
 
 // Uint8ClampedArray returns a Uint8ClampedArray value with given uint8 slice.
@@ -422,9 +449,9 @@ func (ctx *Context) Uint8ClampedArray(data []uint8) *Value {
 // NewInt16Array returns a Int16Array value with given int16 slice.
 func (ctx *Context) NewInt16Array(data []int16) *Value {
 	if len(data) == 0 {
-		return ctx.createTypedArray(nil, 0, 2, C.JSTypedArrayEnum(C.GetTypedArrayInt16()))
+		return ctx.createTypedArray(nil, 0, 2, C.JSTypedArrayEnum(C.JS_TYPED_ARRAY_INT16))
 	}
-	return ctx.createTypedArray(unsafe.Pointer(&data[0]), len(data), 2, C.JSTypedArrayEnum(C.GetTypedArrayInt16()))
+	return ctx.createTypedArray(unsafe.Pointer(&data[0]), len(data), 2, C.JSTypedArrayEnum(C.JS_TYPED_ARRAY_INT16))
 }
 
 // Int16Array returns a Int16Array value with given int16 slice.
@@ -436,9 +463,9 @@ func (ctx *Context) Int16Array(data []int16) *Value {
 // NewUint16Array returns a Uint16Array value with given uint16 slice.
 func (ctx *Context) NewUint16Array(data []uint16) *Value {
 	if len(data) == 0 {
-		return ctx.createTypedArray(nil, 0, 2, C.JSTypedArrayEnum(C.GetTypedArrayUint16()))
+		return ctx.createTypedArray(nil, 0, 2, C.JSTypedArrayEnum(C.JS_TYPED_ARRAY_UINT16))
 	}
-	return ctx.createTypedArray(unsafe.Pointer(&data[0]), len(data), 2, C.JSTypedArrayEnum(C.GetTypedArrayUint16()))
+	return ctx.createTypedArray(unsafe.Pointer(&data[0]), len(data), 2, C.JSTypedArrayEnum(C.JS_TYPED_ARRAY_UINT16))
 }
 
 // Uint16Array returns a Uint16Array value with given uint16 slice.
@@ -450,9 +477,9 @@ func (ctx *Context) Uint16Array(data []uint16) *Value {
 // NewInt32Array returns a Int32Array value with given int32 slice.
 func (ctx *Context) NewInt32Array(data []int32) *Value {
 	if len(data) == 0 {
-		return ctx.createTypedArray(nil, 0, 4, C.JSTypedArrayEnum(C.GetTypedArrayInt32()))
+		return ctx.createTypedArray(nil, 0, 4, C.JSTypedArrayEnum(C.JS_TYPED_ARRAY_INT32))
 	}
-	return ctx.createTypedArray(unsafe.Pointer(&data[0]), len(data), 4, C.JSTypedArrayEnum(C.GetTypedArrayInt32()))
+	return ctx.createTypedArray(unsafe.Pointer(&data[0]), len(data), 4, C.JSTypedArrayEnum(C.JS_TYPED_ARRAY_INT32))
 }
 
 // Int32Array returns a Int32Array value with given int32 slice.
@@ -464,9 +491,9 @@ func (ctx *Context) Int32Array(data []int32) *Value {
 // NewUint32Array returns a Uint32Array value with given uint32 slice.
 func (ctx *Context) NewUint32Array(data []uint32) *Value {
 	if len(data) == 0 {
-		return ctx.createTypedArray(nil, 0, 4, C.JSTypedArrayEnum(C.GetTypedArrayUint32()))
+		return ctx.createTypedArray(nil, 0, 4, C.JSTypedArrayEnum(C.JS_TYPED_ARRAY_UINT32))
 	}
-	return ctx.createTypedArray(unsafe.Pointer(&data[0]), len(data), 4, C.JSTypedArrayEnum(C.GetTypedArrayUint32()))
+	return ctx.createTypedArray(unsafe.Pointer(&data[0]), len(data), 4, C.JSTypedArrayEnum(C.JS_TYPED_ARRAY_UINT32))
 }
 
 // Uint32Array returns a Uint32Array value with given uint32 slice.
@@ -478,9 +505,9 @@ func (ctx *Context) Uint32Array(data []uint32) *Value {
 // NewFloat32Array returns a Float32Array value with given float32 slice.
 func (ctx *Context) NewFloat32Array(data []float32) *Value {
 	if len(data) == 0 {
-		return ctx.createTypedArray(nil, 0, 4, C.JSTypedArrayEnum(C.GetTypedArrayFloat32()))
+		return ctx.createTypedArray(nil, 0, 4, C.JSTypedArrayEnum(C.JS_TYPED_ARRAY_FLOAT32))
 	}
-	return ctx.createTypedArray(unsafe.Pointer(&data[0]), len(data), 4, C.JSTypedArrayEnum(C.GetTypedArrayFloat32()))
+	return ctx.createTypedArray(unsafe.Pointer(&data[0]), len(data), 4, C.JSTypedArrayEnum(C.JS_TYPED_ARRAY_FLOAT32))
 }
 
 // Float32Array returns a Float32Array value with given float32 slice.
@@ -492,9 +519,9 @@ func (ctx *Context) Float32Array(data []float32) *Value {
 // NewFloat64Array returns a Float64Array value with given float64 slice.
 func (ctx *Context) NewFloat64Array(data []float64) *Value {
 	if len(data) == 0 {
-		return ctx.createTypedArray(nil, 0, 8, C.JSTypedArrayEnum(C.GetTypedArrayFloat64()))
+		return ctx.createTypedArray(nil, 0, 8, C.JSTypedArrayEnum(C.JS_TYPED_ARRAY_FLOAT64))
 	}
-	return ctx.createTypedArray(unsafe.Pointer(&data[0]), len(data), 8, C.JSTypedArrayEnum(C.GetTypedArrayFloat64()))
+	return ctx.createTypedArray(unsafe.Pointer(&data[0]), len(data), 8, C.JSTypedArrayEnum(C.JS_TYPED_ARRAY_FLOAT64))
 }
 
 // Float64Array returns a Float64Array value with given float64 slice.
@@ -506,9 +533,9 @@ func (ctx *Context) Float64Array(data []float64) *Value {
 // NewBigInt64Array returns a BigInt64Array value with given int64 slice.
 func (ctx *Context) NewBigInt64Array(data []int64) *Value {
 	if len(data) == 0 {
-		return ctx.createTypedArray(nil, 0, 8, C.JSTypedArrayEnum(C.GetTypedArrayBigInt64()))
+		return ctx.createTypedArray(nil, 0, 8, C.JSTypedArrayEnum(C.JS_TYPED_ARRAY_BIG_INT64))
 	}
-	return ctx.createTypedArray(unsafe.Pointer(&data[0]), len(data), 8, C.JSTypedArrayEnum(C.GetTypedArrayBigInt64()))
+	return ctx.createTypedArray(unsafe.Pointer(&data[0]), len(data), 8, C.JSTypedArrayEnum(C.JS_TYPED_ARRAY_BIG_INT64))
 }
 
 // BigInt64Array returns a BigInt64Array value with given int64 slice.
@@ -520,9 +547,9 @@ func (ctx *Context) BigInt64Array(data []int64) *Value {
 // NewBigUint64Array returns a BigUint64Array value with given uint64 slice.
 func (ctx *Context) NewBigUint64Array(data []uint64) *Value {
 	if len(data) == 0 {
-		return ctx.createTypedArray(nil, 0, 8, C.JSTypedArrayEnum(C.GetTypedArrayBigUint64()))
+		return ctx.createTypedArray(nil, 0, 8, C.JSTypedArrayEnum(C.JS_TYPED_ARRAY_BIG_UINT64))
 	}
-	return ctx.createTypedArray(unsafe.Pointer(&data[0]), len(data), 8, C.JSTypedArrayEnum(C.GetTypedArrayBigUint64()))
+	return ctx.createTypedArray(unsafe.Pointer(&data[0]), len(data), 8, C.JSTypedArrayEnum(C.JS_TYPED_ARRAY_BIG_UINT64))
 }
 
 // BigUint64Array returns a BigUint64Array value with given uint64 slice.
@@ -767,16 +794,16 @@ func (ctx *Context) Eval(code string, opts ...EvalOption) *Value {
 
 	cFlag := C.int(0)
 	if options.js_eval_type_global {
-		cFlag |= C.int(C.GetEvalTypeGlobal())
+		cFlag |= C.int(C.JS_EVAL_TYPE_GLOBAL)
 	}
 	if options.js_eval_type_module {
-		cFlag |= C.int(C.GetEvalTypeModule())
+		cFlag |= C.int(C.JS_EVAL_TYPE_MODULE)
 	}
 	if options.js_eval_flag_strict {
-		cFlag |= C.int(C.GetEvalFlagStrict())
+		cFlag |= C.int(C.JS_EVAL_FLAG_STRICT)
 	}
 	if options.js_eval_flag_compile_only {
-		cFlag |= C.int(C.GetEvalFlagCompileOnly())
+		cFlag |= C.int(C.JS_EVAL_FLAG_COMPILE_ONLY)
 	}
 
 	codePtr := C.CString(code)
@@ -785,8 +812,8 @@ func (ctx *Context) Eval(code string, opts ...EvalOption) *Value {
 	filenamePtr := C.CString(options.filename)
 	defer C.free(unsafe.Pointer(filenamePtr))
 
-	if C.JS_DetectModule(codePtr, C.size_t(len(code))) != 0 {
-		cFlag |= C.int(C.GetEvalTypeModule())
+	if ctx.detectModuleSource(code, codePtr) {
+		cFlag |= C.int(C.JS_EVAL_TYPE_MODULE)
 	}
 
 	var val *Value
@@ -822,7 +849,7 @@ func (ctx *Context) LoadModule(code string, moduleName string, opts ...EvalOptio
 	codePtr := C.CString(code)
 	defer C.free(unsafe.Pointer(codePtr))
 
-	if C.JS_DetectModule(codePtr, C.size_t(len(code))) == 0 {
+	if !ctx.detectModuleSource(code, codePtr) {
 		return ctx.ThrowSyntaxError("not a module: %s", moduleName)
 	}
 
@@ -876,7 +903,7 @@ func (ctx *Context) LoadModuleBytecode(buf []byte, opts ...EvalOption) *Value {
 // Need call Free() `quickjs.Value`'s returned by `Eval()` and `EvalFile()` and `EvalBytecode()`.
 func (ctx *Context) EvalBytecode(buf []byte) *Value {
 	cbuf := C.CBytes(buf)
-	obj := &Value{ctx: ctx, ref: C.JS_ReadObject(ctx.ref, (*C.uint8_t)(cbuf), C.size_t(len(buf)), C.int(C.GetReadObjBytecode()))}
+	obj := &Value{ctx: ctx, ref: C.JS_ReadObject(ctx.ref, (*C.uint8_t)(cbuf), C.size_t(len(buf)), C.int(C.JS_READ_OBJ_BYTECODE))}
 	defer C.free(cbuf)
 	if obj.IsException() {
 		return obj
@@ -892,7 +919,7 @@ func (ctx *Context) Compile(code string, opts ...EvalOption) ([]byte, error) {
 	defer val.Free()
 
 	var kSize C.size_t = 0
-	ptr := C.JS_WriteObject(ctx.ref, &kSize, val.ref, C.int(C.GetWriteObjBytecode()))
+	ptr := C.JS_WriteObject(ctx.ref, &kSize, val.ref, C.int(C.JS_WRITE_OBJ_BYTECODE))
 
 	if ptr == nil {
 		return nil, ctx.Exception()
@@ -990,7 +1017,7 @@ func (ctx *Context) ThrowInternalError(format string, args ...interface{}) *Valu
 // HasException checks if the context has an exception set.
 func (ctx *Context) HasException() bool {
 	// Check if the context has an exception set
-	return C.JS_HasException(ctx.ref) == 1
+	return bool(C.JS_HasException(ctx.ref))
 }
 
 // Exception returns a context's exception value.
@@ -1024,9 +1051,9 @@ func (ctx *Context) Await(v *Value) *Value {
 	v.ref = C.JS_NewUndefined()
 	defer promise.Free()
 
-	pendingState := C.JSPromiseStateEnum(C.GetPromisePending())
-	fulfilledState := C.JSPromiseStateEnum(C.GetPromiseFulfilled())
-	rejectedState := C.JSPromiseStateEnum(C.GetPromiseRejected())
+	pendingState := C.JSPromiseStateEnum(C.JS_PROMISE_PENDING)
+	fulfilledState := C.JSPromiseStateEnum(C.JS_PROMISE_FULFILLED)
+	rejectedState := C.JSPromiseStateEnum(C.JS_PROMISE_REJECTED)
 	runtimeRef := ctx.runtime.ref
 
 	for {
@@ -1047,7 +1074,8 @@ func (ctx *Context) Await(v *Value) *Value {
 			return &Value{ctx: ctx, ref: C.JS_Throw(ctx.ref, reason)}
 		case pendingState:
 			// Process JS microtasks (Promise.then callbacks, queueMicrotask)
-			executed := C.JS_ExecutePendingJob(runtimeRef, nil)
+			var executedCtx *C.JSContext
+			executed := C.JS_ExecutePendingJob(runtimeRef, &executedCtx)
 			if hook := awaitExecutePendingJobHook; hook != nil {
 				if override, ok := hook(ctx, promise, int(executed)); ok {
 					executed = C.int(override)
