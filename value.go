@@ -160,9 +160,7 @@ func (v *Value) Set(name string, val *Value) {
 	if len(name) > 0 {
 		namePtr = (*C.char)(unsafe.Pointer(unsafe.StringData(name)))
 	}
-	atom := C.JS_NewAtomLen(v.ctx.ref, namePtr, C.size_t(len(name)))
-	defer C.JS_FreeAtom(v.ctx.ref, atom)
-	C.JS_SetProperty(v.ctx.ref, v.ref, atom, val.ref)
+	C.SetPropertyByNameLen(v.ctx.ref, v.ref, namePtr, C.size_t(len(name)), val.ref)
 }
 
 // SetIdx sets the value of the property with the given index.
@@ -176,9 +174,7 @@ func (v *Value) Get(name string) *Value {
 	if len(name) > 0 {
 		namePtr = (*C.char)(unsafe.Pointer(unsafe.StringData(name)))
 	}
-	atom := C.JS_NewAtomLen(v.ctx.ref, namePtr, C.size_t(len(name)))
-	defer C.JS_FreeAtom(v.ctx.ref, atom)
-	return &Value{ctx: v.ctx, ref: C.JS_GetProperty(v.ctx.ref, v.ref, atom)}
+	return &Value{ctx: v.ctx, ref: C.GetPropertyByNameLen(v.ctx.ref, v.ref, namePtr, C.size_t(len(name)))}
 }
 
 // GetIdx returns the value of the property with the given index.
@@ -188,21 +184,22 @@ func (v *Value) GetIdx(idx int64) *Value {
 
 // Call calls the function with the given arguments.
 func (v *Value) Call(fname string, args ...*Value) *Value {
-	fn := v.Get(fname) // get the function by name
-	defer fn.Free()
-
+	var fnamePtr *C.char
+	if len(fname) > 0 {
+		fnamePtr = (*C.char)(unsafe.Pointer(unsafe.StringData(fname)))
+	}
 	cargs := []C.JSValue{}
 	for _, x := range args {
 		cargs = append(cargs, x.ref)
 	}
-	var val *Value
+	var ref C.JSValue
 	if len(cargs) == 0 {
-		val = &Value{ctx: v.ctx, ref: C.JS_Call(v.ctx.ref, fn.ref, v.ref, C.int(0), nil)}
+		ref = C.CallPropertyByNameLen(v.ctx.ref, v.ref, fnamePtr, C.size_t(len(fname)), C.int(0), nil)
 	} else {
-		val = &Value{ctx: v.ctx, ref: C.JS_Call(v.ctx.ref, fn.ref, v.ref, C.int(len(cargs)), &cargs[0])}
+		ref = C.CallPropertyByNameLen(v.ctx.ref, v.ref, fnamePtr, C.size_t(len(fname)), C.int(len(cargs)), &cargs[0])
 	}
 
-	return val
+	return &Value{ctx: v.ctx, ref: ref}
 }
 
 // Execute the function with the given arguments.

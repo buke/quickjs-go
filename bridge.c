@@ -48,6 +48,43 @@ int32_t OpaqueToInt(void* opaque) {
     return (int32_t)(intptr_t)opaque;
 }
 
+int SetPropertyByNameLen(JSContext *ctx, JSValueConst obj, const char *name, size_t name_len, JSValue val) {
+    JSAtom atom = JS_NewAtomLen(ctx, name, name_len);
+    if (atom == JS_ATOM_NULL) {
+        return -1;
+    }
+    int rc = JS_SetProperty(ctx, obj, atom, val);
+    JS_FreeAtom(ctx, atom);
+    return rc;
+}
+
+JSValue GetPropertyByNameLen(JSContext *ctx, JSValueConst obj, const char *name, size_t name_len) {
+    JSAtom atom = JS_NewAtomLen(ctx, name, name_len);
+    if (atom == JS_ATOM_NULL) {
+        return JS_EXCEPTION;
+    }
+    JSValue ret = JS_GetProperty(ctx, obj, atom);
+    JS_FreeAtom(ctx, atom);
+    return ret;
+}
+
+JSValue CallPropertyByNameLen(JSContext *ctx, JSValueConst obj, const char *name, size_t name_len, int argc, JSValue *argv) {
+    JSAtom atom = JS_NewAtomLen(ctx, name, name_len);
+    if (atom == JS_ATOM_NULL) {
+        return JS_EXCEPTION;
+    }
+
+    JSValue fn = JS_GetProperty(ctx, obj, atom);
+    JS_FreeAtom(ctx, atom);
+    if (JS_IsException(fn)) {
+        return fn;
+    }
+
+    JSValue ret = JS_Call(ctx, fn, obj, argc, argv);
+    JS_FreeValue(ctx, fn);
+    return ret;
+}
+
 // Efficient proxy function for regular functions
 JSValue GoFunctionProxy(JSContext *ctx, JSValueConst this_val, 
                        int argc, JSValueConst *argv, int magic) {
