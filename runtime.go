@@ -124,6 +124,7 @@ func NewRuntime(opts ...Option) *Runtime {
 		options: options,
 	}
 	registerRuntime(rt.ref, rt)
+	C.SetPromiseRejectionTracker(rt.ref, 1)
 
 	// Configure runtime options
 	if rt.options.memoryLimit > 0 {
@@ -169,6 +170,20 @@ func (r *Runtime) RunGC() {
 	C.JS_RunGC(r.ref)
 }
 
+// SetAwaitPollSliceMs configures AwaitValue idle poll slice duration in milliseconds.
+// Values <= 0 are ignored.
+func SetAwaitPollSliceMs(timeoutMs int) {
+	if timeoutMs <= 0 {
+		return
+	}
+	C.SetAwaitPollSliceMs(C.int(timeoutMs))
+}
+
+// GetAwaitPollSliceMs returns AwaitValue idle poll slice duration in milliseconds.
+func GetAwaitPollSliceMs() int {
+	return int(C.GetAwaitPollSliceMs())
+}
+
 // Close will free the runtime pointer with proper cleanup.
 func (r *Runtime) Close() {
 	if r == nil {
@@ -198,6 +213,7 @@ func (r *Runtime) Close() {
 		ref := r.ref
 		r.interruptHandlerState.Store(nil)
 		C.ClearInterruptHandler(ref)
+		C.SetPromiseRejectionTracker(ref, 0)
 
 		r.constructorRegistry.Range(func(key, _ interface{}) bool {
 			r.constructorRegistry.Delete(key)
@@ -507,7 +523,7 @@ func initializeContextGlobals(ctx *C.JSContext, code string, filename string) bo
 		return false
 	}
 
-	initRun := C.js_std_await(ctx, initEval)
+	initRun := C.AwaitValue(ctx, initEval)
 	if bool(C.JS_IsException(initRun)) {
 		C.JS_FreeValue(ctx, initRun)
 		return false
