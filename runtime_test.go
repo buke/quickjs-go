@@ -311,6 +311,261 @@ func TestRuntimeMultipleContexts(t *testing.T) {
 	require.Equal(t, "ctx1", result3.ToString())
 }
 
+func TestRuntimeContextIDAndClassObjectIdentityRegistry(t *testing.T) {
+	rt := NewRuntime()
+	defer rt.Close()
+
+	ctx1 := rt.NewContext()
+	defer ctx1.Close()
+	ctx2 := rt.NewContext()
+	defer ctx2.Close()
+
+	require.NotZero(t, ctx1.contextID)
+	require.NotZero(t, ctx2.contextID)
+	require.NotEqual(t, ctx1.contextID, ctx2.contextID)
+	require.Equal(t, ctx1, rt.getOwnedContextByID(ctx1.contextID))
+	require.Equal(t, ctx2, rt.getOwnedContextByID(ctx2.contextID))
+
+	objID := rt.registerClassObjectIdentity(ctx1.contextID, 11)
+	require.NotZero(t, objID)
+
+	identity, ok := rt.getClassObjectIdentity(objID)
+	require.True(t, ok)
+	require.Equal(t, ctx1.contextID, identity.contextID)
+	require.Equal(t, int32(11), identity.handleID)
+
+	taken, ok := rt.takeClassObjectIdentity(objID)
+	require.True(t, ok)
+	require.Equal(t, identity, taken)
+	_, ok = rt.getClassObjectIdentity(objID)
+	require.False(t, ok)
+
+	ctx2Obj1 := rt.registerClassObjectIdentity(ctx2.contextID, 21)
+	ctx2Obj2 := rt.registerClassObjectIdentity(ctx2.contextID, 22)
+	require.NotZero(t, ctx2Obj1)
+	require.NotZero(t, ctx2Obj2)
+	rt.cleanupClassObjectIdentitiesByContext(ctx2.contextID)
+	_, ok = rt.getClassObjectIdentity(ctx2Obj1)
+	require.False(t, ok)
+	_, ok = rt.getClassObjectIdentity(ctx2Obj2)
+	require.False(t, ok)
+}
+
+func TestRuntimeNextClassObjectIDOverflowReturnsZero(t *testing.T) {
+	const maxInt32 = int32(^uint32(0) >> 1)
+
+	rt := &Runtime{}
+	rt.classObjectIDCounter.Store(maxInt32 - 1)
+
+	first := rt.nextClassObjectID()
+	require.Equal(t, -(maxInt32), first)
+	second := rt.nextClassObjectID()
+	require.Zero(t, second)
+}
+
+func TestRuntimeRegisterClassObjectIdentityOverflowReturnsZero(t *testing.T) {
+	const maxInt32 = int32(^uint32(0) >> 1)
+
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	rt.classObjectIDCounter.Store(maxInt32)
+	objectID := rt.registerClassObjectIdentity(ctx.contextID, 1)
+	require.Zero(t, objectID)
+
+	seen := false
+	rt.classObjectRegistry.Range(func(_, _ interface{}) bool {
+		seen = true
+		return false
+	})
+	require.False(t, seen)
+}
+
+func TestRuntimeRegisterClassObjectIdentityCorruptedBucketConcurrent(t *testing.T) {
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	rt.classObjectIDsByCtx.Store(ctx.contextID, "corrupted-bucket")
+
+	const workers = 32
+	ids := make(chan int32, workers)
+	var wg sync.WaitGroup
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			ids <- rt.registerClassObjectIdentity(ctx.contextID, int32(i+1))
+		}(i)
+	}
+	wg.Wait()
+	close(ids)
+
+	seen := make(map[int32]struct{}, workers)
+	for id := range ids {
+		require.Less(t, id, int32(0))
+		_, exists := seen[id]
+		require.False(t, exists)
+		seen[id] = struct{}{}
+
+		identity, ok := rt.getClassObjectIdentity(id)
+		require.True(t, ok)
+		require.Equal(t, ctx.contextID, identity.contextID)
+	}
+	require.Equal(t, workers, len(seen))
+}
+
+func TestRuntimeRegisterClassObjectIdentityCorruptedBucketRepairedBeforeLock(t *testing.T) {
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	rt.classObjectIDsByCtx.Store(ctx.contextID, "corrupted-bucket")
+
+	// Hold the mutex so registerClassObjectIdentity blocks on the corruption path.
+	rt.mu.Lock()
+	resultCh := make(chan int32, 1)
+	go func() {
+		resultCh <- rt.registerClassObjectIdentity(ctx.contextID, 99)
+	}()
+
+	// Wait until the goroutine has stored identity metadata, which happens before
+	// it attempts to take rt.mu in the corruption branch.
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		ready := false
+		rt.classObjectRegistry.Range(func(_, _ interface{}) bool {
+			ready = true
+			return false
+		})
+		if ready {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("timed out waiting for identity registration pre-lock state")
+		}
+	}
+
+	// Repair the bucket before releasing the lock so the double-check path
+	// observes a typed *sync.Map value.
+	repairedBucket := &sync.Map{}
+	rt.classObjectIDsByCtx.Store(ctx.contextID, repairedBucket)
+	rt.mu.Unlock()
+
+	objectID := <-resultCh
+	require.Less(t, objectID, int32(0))
+
+	identity, ok := rt.getClassObjectIdentity(objectID)
+	require.True(t, ok)
+	require.Equal(t, ctx.contextID, identity.contextID)
+	require.Equal(t, int32(99), identity.handleID)
+
+	_, exists := repairedBucket.Load(objectID)
+	require.True(t, exists)
+}
+
+func TestRuntimeIdentityRegistryCorruptionFailClosed(t *testing.T) {
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	rt.contextsByID.Store(uint64(9991), "bad-context-type")
+	require.Nil(t, rt.getOwnedContextByID(9991))
+
+	rt.contextsByID.Store(uint64(9992), &Context{})
+	require.Nil(t, rt.getOwnedContextByID(9992))
+
+	rt.classObjectRegistry.Store(int32(-7001), "bad-identity-type")
+	_, ok := rt.getClassObjectIdentity(-7001)
+	require.False(t, ok)
+
+	rt.classObjectRegistry.Store(int32(-7002), classObjectIdentity{})
+	_, ok = rt.getClassObjectIdentity(-7002)
+	require.False(t, ok)
+
+	rt.classObjectRegistry.Store(int32(-7003), "bad-take-type")
+	_, ok = rt.takeClassObjectIdentity(-7003)
+	require.False(t, ok)
+
+	rt.classObjectRegistry.Store(int32(-7004), classObjectIdentity{})
+	_, ok = rt.takeClassObjectIdentity(-7004)
+	require.False(t, ok)
+
+	rt.classObjectIDsByCtx.Store(ctx.contextID, "bad-bucket")
+	h := ctx.handleStore.Store("bucket-replacement")
+	defer ctx.handleStore.Delete(h)
+	objID := rt.registerClassObjectIdentity(ctx.contextID, h)
+	require.NotZero(t, objID)
+
+	rt.classObjectIDsByCtx.Store(uint64(8101), "bad-cleanup-bucket")
+	rt.cleanupClassObjectIdentitiesByContext(8101)
+
+	bucket := &sync.Map{}
+	bucket.Store("bad-key", struct{}{})
+	bucket.Store(int32(-9002), struct{}{})
+	rt.classObjectRegistry.Store(int32(-9002), classObjectIdentity{contextID: ctx.contextID, handleID: 77})
+	rt.classObjectIDsByCtx.Store(uint64(8102), bucket)
+	rt.cleanupClassObjectIdentitiesByContext(8102)
+	_, ok = rt.getClassObjectIdentity(-9002)
+	require.False(t, ok)
+}
+
+func TestRuntimeCloseCorruptedOwnedContextsMap(t *testing.T) {
+	rt := NewRuntime()
+	ctx := rt.NewContext()
+	require.NotNil(t, ctx)
+
+	rt.contexts.Store("corrupted-key", "corrupted-value")
+	require.NotPanics(t, func() {
+		rt.Close()
+	})
+}
+
+func TestRuntimeCloseClearsInternalRegistries(t *testing.T) {
+	rt := NewRuntime()
+	ctx := rt.NewContext()
+	require.NotNil(t, ctx)
+
+	constructor, _ := NewClassBuilder("CloseCoverageClass").
+		Constructor(func(ctx *Context, instance *Value, args []*Value) (interface{}, error) {
+			return map[string]int{"ok": 1}, nil
+		}).
+		Build(ctx)
+	require.False(t, constructor.IsException())
+	ctx.Globals().Set("CloseCoverageClass", constructor)
+
+	instance := ctx.Eval(`globalThis.__close_cov_obj = new CloseCoverageClass(); __close_cov_obj`)
+	require.False(t, instance.IsException())
+	instance.Free()
+
+	constructorEntries := 0
+	rt.constructorRegistry.Range(func(_, _ interface{}) bool {
+		constructorEntries++
+		return true
+	})
+	require.Greater(t, constructorEntries, 0)
+
+	classObjectEntries := 0
+	rt.classObjectRegistry.Range(func(_, _ interface{}) bool {
+		classObjectEntries++
+		return true
+	})
+	require.Greater(t, classObjectEntries, 0)
+
+	orphanContextID := uint64(1 << 62)
+	rt.classObjectRegistry.Store(int32(-12345), classObjectIdentity{contextID: orphanContextID, handleID: 1})
+	rt.classObjectIDsByCtx.Store(orphanContextID, &sync.Map{})
+
+	require.NotPanics(t, func() {
+		rt.Close()
+	})
+}
+
 // TestRuntimeConcurrency tests concurrent usage of runtime instances
 func TestRuntimeConcurrency(t *testing.T) {
 	const numGoroutines = 4
@@ -611,9 +866,16 @@ func TestRuntimeNilAndZeroValueGuards(t *testing.T) {
 		require.Nil(t, nilRT.NewContext())
 		require.Equal(t, 0, nilRT.callInterruptHandler())
 		nilRT.registerOwnedContext(nil)
-		nilRT.unregisterOwnedContext(nil)
+		nilRT.unregisterOwnedContext(nil, 0)
 		nilRT.registerConstructorClassID(dummyRef, 1)
 		_, _ = nilRT.getConstructorClassID(dummyRef)
+		require.Zero(t, nilRT.nextContextID())
+		require.Zero(t, nilRT.nextClassObjectID())
+		require.Zero(t, nilRT.registerClassObjectIdentity(1, 1))
+		_, _ = nilRT.getClassObjectIdentity(1)
+		_, _ = nilRT.takeClassObjectIdentity(1)
+		require.Nil(t, nilRT.getOwnedContextByID(1))
+		nilRT.cleanupClassObjectIdentitiesByContext(1)
 	})
 
 	zeroRT := &Runtime{}
@@ -629,7 +891,10 @@ func TestRuntimeNilAndZeroValueGuards(t *testing.T) {
 		zeroRT.SetInterruptHandler(func() int { return 1 })
 		zeroRT.ClearInterruptHandler()
 		zeroRT.registerOwnedContext(nil)
-		zeroRT.unregisterOwnedContext(nil)
+		zeroRT.unregisterOwnedContext(nil, 0)
+		zeroRT.cleanupClassObjectIdentitiesByContext(0)
+		require.Zero(t, zeroRT.registerClassObjectIdentity(0, 1))
+		require.Zero(t, zeroRT.registerClassObjectIdentity(1, 0))
 		require.Nil(t, zeroRT.NewContext())
 		zeroRT.Close()
 		zeroRT.Close()

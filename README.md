@@ -59,6 +59,7 @@ The runtime sources under deps/quickjs are no longer updated via git submodule. 
 - After `Context.Close()`, boundary queries are fail-closed: `Runtime()` returns `nil`, `HasException()` returns `false`, `Exception()` returns `nil`, `Loop()` becomes a no-op, and `Schedule()` returns `false`.
 - `Value.Free()` is fail-closed when its context pointer is no longer valid, avoiding unsafe cgo calls after close.
 - Bridge mapping and handle-store reads are fail-closed under corrupted entries (wrong types), preventing panic-based crashes.
+- Class instance opaque data is resolved via runtime-scoped object identity (`contextID` + `handleID`), so finalizer and `Value.GetGoObject()` use deterministic ownership lookup instead of scanning all contexts.
 - Go callbacks returning `nil` from function/method/getter/setter proxies are normalized to JavaScript `undefined`.
 - Module exports are validated during module initialization: export values must be non-`nil`, context-live, and belong to the initializing context.
 

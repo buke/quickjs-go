@@ -921,6 +921,106 @@ func TestValueGetGoObjectUnavailableContext(t *testing.T) {
 	require.Contains(t, err.Error(), "value context is not available")
 }
 
+func TestValueGetGoObjectUnavailableHandleStore(t *testing.T) {
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	v := ctx.NewObject()
+	defer v.Free()
+
+	backupStore := ctx.handleStore
+	ctx.handleStore = nil
+	_, err := v.GetGoObject()
+	ctx.handleStore = backupStore
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "value context is not available")
+}
+
+func TestValueGetGoObjectIdentityRegistryResolution(t *testing.T) {
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	constructor, _ := NewClassBuilder("IdentityRegistryClass").
+		Constructor(func(ctx *Context, instance *Value, args []*Value) (interface{}, error) {
+			return map[string]int{"value": 42}, nil
+		}).
+		Build(ctx)
+	require.False(t, constructor.IsException())
+	ctx.Globals().Set("IdentityRegistryClass", constructor)
+
+	instance := ctx.Eval(`new IdentityRegistryClass()`)
+	defer instance.Free()
+	require.False(t, instance.IsException())
+
+	obj, err := instance.GetGoObject()
+	require.NoError(t, err)
+	require.NotNil(t, obj)
+
+	var objectID int32
+	rt.classObjectRegistry.Range(func(key, value interface{}) bool {
+		id, ok := key.(int32)
+		if !ok {
+			return true
+		}
+		identity, ok := value.(classObjectIdentity)
+		if !ok {
+			return true
+		}
+		if identity.contextID == ctx.contextID {
+			objectID = id
+			return false
+		}
+		return true
+	})
+	require.NotZero(t, objectID)
+
+	identity, ok := rt.getClassObjectIdentity(objectID)
+	require.True(t, ok)
+	ctx.handleStore.Delete(identity.handleID)
+	_, err = instance.GetGoObject()
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "instance data not found in handle store")
+
+	rt.classObjectRegistry.Delete(objectID)
+	require.False(t, instance.HasInstanceData())
+	_, err = instance.GetGoObject()
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "instance data not found in handle store")
+}
+
+func TestValueHasInstanceDataFailClosedOnMissingOwnerContext(t *testing.T) {
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	constructor, _ := NewClassBuilder("MissingOwnerCtxClass").
+		Constructor(func(ctx *Context, instance *Value, args []*Value) (interface{}, error) {
+			return map[string]int{"value": 1}, nil
+		}).
+		Build(ctx)
+	require.False(t, constructor.IsException())
+	ctx.Globals().Set("MissingOwnerCtxClass", constructor)
+
+	instance := ctx.Eval(`new MissingOwnerCtxClass()`)
+	defer instance.Free()
+	require.False(t, instance.IsException())
+	require.True(t, instance.HasInstanceData())
+
+	rt.contextsByID.Delete(ctx.contextID)
+	require.False(t, instance.HasInstanceData())
+	_, err := instance.GetGoObject()
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "instance data not found in handle store")
+
+	rt.contextsByID.Store(ctx.contextID, ctx)
+}
+
 // TestValueCallConstructorEdgeCases tests edge cases and error conditions in CallConstructor
 // MODIFIED FOR SCHEME C: Removed all NewInstance tests, enhanced CallConstructor coverage
 func TestValueCallConstructorEdgeCases(t *testing.T) {

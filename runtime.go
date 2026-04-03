@@ -32,6 +32,11 @@ var runtimeInitContextHook func(ctx *C.JSContext) C.JSValue
 // It must remain nil in production.
 var runtimeEvalFunctionHook func(ctx *C.JSContext, compiled C.JSValue) C.JSValue
 
+type classObjectIdentity struct {
+	contextID uint64
+	handleID  int32
+}
+
 // Runtime represents a Javascript runtime with simplified interrupt handling
 type Runtime struct {
 	mu                     sync.RWMutex
@@ -39,7 +44,12 @@ type Runtime struct {
 	options                *Options
 	interruptHandlerState  atomic.Pointer[interruptHandlerHolder]
 	contexts               sync.Map
+	contextsByID           sync.Map
+	contextIDCounter       atomic.Uint64
 	constructorRegistry    sync.Map
+	classObjectRegistry    sync.Map
+	classObjectIDsByCtx    sync.Map
+	classObjectIDCounter   atomic.Int32
 	closeOnce              sync.Once
 	closed                 atomic.Bool
 	stdHandlersInitialized bool
@@ -223,6 +233,19 @@ func (r *Runtime) Close() {
 
 		r.constructorRegistry.Range(func(key, _ interface{}) bool {
 			r.constructorRegistry.Delete(key)
+			return true
+		})
+
+		r.classObjectRegistry.Range(func(key, _ interface{}) bool {
+			r.classObjectRegistry.Delete(key)
+			return true
+		})
+		r.classObjectIDsByCtx.Range(func(key, _ interface{}) bool {
+			r.classObjectIDsByCtx.Delete(key)
+			return true
+		})
+		r.contextsByID.Range(func(key, _ interface{}) bool {
+			r.contextsByID.Delete(key)
 			return true
 		})
 
@@ -433,6 +456,7 @@ func (r *Runtime) NewContext() *Context {
 
 	// Create Context with HandleStore for function management
 	ctx := &Context{
+		contextID:   r.nextContextID(),
 		ref:         ctx_ref,
 		runtime:     r,
 		handleStore: newHandleStore(), // Initialize HandleStore for function management
@@ -451,13 +475,167 @@ func (r *Runtime) registerOwnedContext(ctx *Context) {
 		return
 	}
 	r.contexts.Store(ctx.ref, ctx)
+	if ctx.contextID != 0 {
+		r.contextsByID.Store(ctx.contextID, ctx)
+	}
 }
 
-func (r *Runtime) unregisterOwnedContext(ctxRef *C.JSContext) {
-	if r == nil || ctxRef == nil {
+func (r *Runtime) unregisterOwnedContext(ctxRef *C.JSContext, contextID uint64) {
+	if r == nil {
 		return
 	}
-	r.contexts.Delete(ctxRef)
+	if ctxRef != nil {
+		r.contexts.Delete(ctxRef)
+	}
+	if contextID != 0 {
+		r.contextsByID.Delete(contextID)
+		r.cleanupClassObjectIdentitiesByContext(contextID)
+	}
+}
+
+func (r *Runtime) nextContextID() uint64 {
+	if r == nil {
+		return 0
+	}
+	for {
+		id := r.contextIDCounter.Add(1)
+		if id != 0 {
+			return id
+		}
+	}
+}
+
+func (r *Runtime) nextClassObjectID() int32 {
+	if r == nil {
+		return 0
+	}
+	id := r.classObjectIDCounter.Add(1)
+	if id <= 0 {
+		return 0
+	}
+	return -id
+}
+
+func (r *Runtime) getOwnedContextByID(contextID uint64) *Context {
+	if r == nil || contextID == 0 {
+		return nil
+	}
+	v, ok := r.contextsByID.Load(contextID)
+	if !ok {
+		return nil
+	}
+	ctx, ok := v.(*Context)
+	if !ok {
+		r.contextsByID.Delete(contextID)
+		return nil
+	}
+	if !ctx.hasValidRef() {
+		return nil
+	}
+	return ctx
+}
+
+func (r *Runtime) registerClassObjectIdentity(contextID uint64, handleID int32) int32 {
+	if r == nil || contextID == 0 || handleID <= 0 {
+		return 0
+	}
+
+	objectID := r.nextClassObjectID()
+	if objectID == 0 {
+		return 0
+	}
+	identity := classObjectIdentity{contextID: contextID, handleID: handleID}
+	r.classObjectRegistry.Store(objectID, identity)
+
+	bucketValue, _ := r.classObjectIDsByCtx.LoadOrStore(contextID, &sync.Map{})
+	bucket, ok := bucketValue.(*sync.Map)
+	if !ok {
+		// Corruption path: serialize replacement to avoid concurrent overwrite.
+		r.mu.Lock()
+		currentBucket, loaded := r.classObjectIDsByCtx.Load(contextID)
+		if loaded {
+			if existing, typed := currentBucket.(*sync.Map); typed {
+				bucket = existing
+				ok = true
+			}
+		}
+		if !ok {
+			replacement := &sync.Map{}
+			r.classObjectIDsByCtx.Store(contextID, replacement)
+			bucket = replacement
+		}
+		r.mu.Unlock()
+	}
+	bucket.Store(objectID, struct{}{})
+
+	return objectID
+}
+
+func (r *Runtime) getClassObjectIdentity(objectID int32) (classObjectIdentity, bool) {
+	if r == nil || objectID == 0 {
+		return classObjectIdentity{}, false
+	}
+	v, ok := r.classObjectRegistry.Load(objectID)
+	if !ok {
+		return classObjectIdentity{}, false
+	}
+	identity, ok := v.(classObjectIdentity)
+	if !ok {
+		r.classObjectRegistry.Delete(objectID)
+		return classObjectIdentity{}, false
+	}
+	if identity.contextID == 0 || identity.handleID <= 0 {
+		r.classObjectRegistry.Delete(objectID)
+		return classObjectIdentity{}, false
+	}
+	return identity, true
+}
+
+func (r *Runtime) takeClassObjectIdentity(objectID int32) (classObjectIdentity, bool) {
+	if r == nil || objectID == 0 {
+		return classObjectIdentity{}, false
+	}
+	v, ok := r.classObjectRegistry.LoadAndDelete(objectID)
+	if !ok {
+		return classObjectIdentity{}, false
+	}
+	identity, ok := v.(classObjectIdentity)
+	if !ok {
+		return classObjectIdentity{}, false
+	}
+	if identity.contextID == 0 || identity.handleID <= 0 {
+		return classObjectIdentity{}, false
+	}
+
+	if bucketValue, ok := r.classObjectIDsByCtx.Load(identity.contextID); ok {
+		if bucket, ok := bucketValue.(*sync.Map); ok {
+			bucket.Delete(objectID)
+		}
+	}
+
+	return identity, true
+}
+
+func (r *Runtime) cleanupClassObjectIdentitiesByContext(contextID uint64) {
+	if r == nil || contextID == 0 {
+		return
+	}
+	bucketValue, ok := r.classObjectIDsByCtx.LoadAndDelete(contextID)
+	if !ok {
+		return
+	}
+	bucket, ok := bucketValue.(*sync.Map)
+	if !ok {
+		return
+	}
+	bucket.Range(func(key, _ interface{}) bool {
+		objectID, ok := key.(int32)
+		if !ok {
+			return true
+		}
+		r.classObjectRegistry.Delete(objectID)
+		return true
+	})
 }
 
 func (r *Runtime) registerConstructorClassID(constructor C.JSValue, classID uint32) {

@@ -714,9 +714,11 @@ func (v *Value) HasInstanceData() bool {
 		return false
 	}
 
-	// Validate that the handle ID exists in our HandleStore
-	handleID := int32(C.OpaqueToInt(opaque))
-	_, exists := v.ctx.handleStore.Load(handleID)
+	ownerCtx, handleID, ok := resolveClassObjectFromOpaque(v.ctx, opaque)
+	if !ok || ownerCtx == nil || ownerCtx.handleStore == nil {
+		return false
+	}
+	_, exists := ownerCtx.handleStore.Load(handleID)
 	return exists
 }
 
@@ -760,11 +762,13 @@ func (v *Value) GetGoObject() (interface{}, error) {
 		return nil, errors.New("no instance data found")
 	}
 
-	// Use C helper function to safely convert opaque pointer back to int32
-	handleID := int32(C.OpaqueToInt(opaque))
+	ownerCtx, handleID, ok := resolveClassObjectFromOpaque(v.ctx, opaque)
+	if !ok || ownerCtx == nil || ownerCtx.handleStore == nil {
+		return nil, errors.New("instance data not found in handle store")
+	}
 
-	// Retrieve Go object from HandleStore
-	if obj, exists := v.ctx.handleStore.Load(handleID); exists {
+	// Retrieve Go object from resolved HandleStore
+	if obj, exists := ownerCtx.handleStore.Load(handleID); exists {
 		return obj, nil
 	}
 

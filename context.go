@@ -19,6 +19,7 @@ import "C"
 
 // Context represents a Javascript context (or Realm). Each JSContext has its own global objects and system objects. There can be several JSContexts per JSRuntime and they can share objects, similar to frames of the same origin sharing Javascript objects in a web browser.
 type Context struct {
+	contextID   uint64
 	runtime     *Runtime
 	ref         *C.JSContext
 	globals     *Value
@@ -225,7 +226,7 @@ func (ctx *Context) Close() {
 		}
 
 		if ctx.runtime != nil {
-			ctx.runtime.unregisterOwnedContext(ctx.ref)
+			ctx.runtime.unregisterOwnedContext(ctx.ref, ctx.contextID)
 		}
 
 		// Remove from global mapping and release C context once.
@@ -239,6 +240,7 @@ func (ctx *Context) Close() {
 		ctx.handleStore = nil
 		ctx.jobQueue = nil
 		ctx.jobClosed = nil
+		ctx.contextID = 0
 		ctx.runtime = nil
 	})
 }
