@@ -2,7 +2,6 @@ package quickjs
 
 import (
 	"fmt"
-	"runtime"
 	"runtime/cgo"
 	"sync/atomic"
 	"testing"
@@ -151,6 +150,68 @@ func TestBridgeMappingCorruptionFailClosed(t *testing.T) {
 	defer result.Free()
 	require.False(t, result.IsException())
 	require.Equal(t, "ok", result.ToString())
+}
+
+func TestResolveClassObjectFromOpaqueContracts(t *testing.T) {
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	_, _, ok := resolveClassObjectFromOpaque(nil, legacyHandleOpaque(1))
+	require.False(t, ok)
+
+	orphanCtx := &Context{handleStore: ctx.handleStore}
+	_, _, ok = resolveClassObjectFromOpaque(orphanCtx, legacyHandleOpaque(1))
+	require.False(t, ok)
+
+	_, _, ok = resolveClassObjectFromOpaque(ctx, nil)
+	require.False(t, ok)
+
+	legacyHandle := ctx.handleStore.Store("legacy-handle")
+	defer ctx.handleStore.Delete(legacyHandle)
+
+	ownerCtx, handleID, ok := resolveClassObjectFromOpaque(ctx, legacyHandleOpaque(legacyHandle))
+	require.True(t, ok)
+	require.Equal(t, ctx, ownerCtx)
+	require.Equal(t, legacyHandle, handleID)
+
+	ctx.handleStore.Delete(legacyHandle)
+	_, _, ok = resolveClassObjectFromOpaque(ctx, legacyHandleOpaque(legacyHandle))
+	require.False(t, ok)
+
+	idHandle := ctx.handleStore.Store("identity-handle")
+	defer ctx.handleStore.Delete(idHandle)
+	objectID := rt.registerClassObjectIdentity(ctx.contextID, idHandle)
+	require.NotZero(t, objectID)
+
+	ownerCtx, handleID, ok = resolveClassObjectFromOpaque(ctx, classObjectOpaque(objectID))
+	require.True(t, ok)
+	require.Equal(t, ctx, ownerCtx)
+	require.Equal(t, idHandle, handleID)
+
+	rt.contextsByID.Delete(ctx.contextID)
+	_, _, ok = resolveClassObjectFromOpaque(ctx, classObjectOpaque(objectID))
+	require.False(t, ok)
+	rt.contextsByID.Store(ctx.contextID, ctx)
+
+	rt.classObjectRegistry.Delete(objectID)
+	_, _, ok = resolveClassObjectFromOpaque(ctx, classObjectOpaque(objectID))
+	require.False(t, ok)
+
+	ctxNoStore := &Context{runtime: rt}
+	_, _, ok = resolveClassObjectFromOpaque(ctxNoStore, classObjectOpaque(-777))
+	require.False(t, ok)
+
+	_, _, ok = resolveClassObjectFromOpaque(ctx, classObjectOpaque(-1234567))
+	require.False(t, ok)
+}
+
+func TestClassOpaqueWrapperGuards(t *testing.T) {
+	require.Nil(t, legacyHandleOpaque(0))
+	require.Nil(t, legacyHandleOpaque(-1))
+	require.Nil(t, classObjectOpaque(0))
+	require.NotNil(t, classObjectOpaque(-1))
 }
 
 func TestBridgeMappingClosedTargetsFailClosed(t *testing.T) {
@@ -305,6 +366,62 @@ func TestBridgeClassConstructorHandleStoreUnavailable(t *testing.T) {
 	require.Contains(t, err.Error(), "Handle store not available")
 }
 
+func TestBridgeClassConstructorRuntimeUnavailable(t *testing.T) {
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	backupRuntime := ctx.runtime
+
+	constructor, _ := NewClassBuilder("RuntimeUnavailableClass").
+		Constructor(func(ctx *Context, instance *Value, args []*Value) (interface{}, error) {
+			ctx.runtime = nil
+			return map[string]int{"x": 1}, nil
+		}).
+		Build(ctx)
+	require.False(t, constructor.IsException())
+
+	ctx.Globals().Set("RuntimeUnavailableClass", constructor)
+
+	result := ctx.Eval(`new RuntimeUnavailableClass()`)
+	ctx.runtime = backupRuntime
+
+	defer result.Free()
+	require.True(t, result.IsException())
+	err := ctx.Exception()
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "Context runtime not available")
+}
+
+func TestBridgeClassConstructorIdentityRegistrationFailure(t *testing.T) {
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	backupContextID := ctx.contextID
+
+	constructor, _ := NewClassBuilder("IdentityRegistrationFailureClass").
+		Constructor(func(ctx *Context, instance *Value, args []*Value) (interface{}, error) {
+			ctx.contextID = 0
+			return map[string]int{"x": 1}, nil
+		}).
+		Build(ctx)
+	require.False(t, constructor.IsException())
+
+	ctx.Globals().Set("IdentityRegistrationFailureClass", constructor)
+
+	result := ctx.Eval(`new IdentityRegistrationFailureClass()`)
+	ctx.contextID = backupContextID
+
+	defer result.Free()
+	require.True(t, result.IsException())
+	err := ctx.Exception()
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "Failed to register class object identity")
+}
+
 func TestBridgeClassFinalizerProxyContracts(t *testing.T) {
 	rt := NewRuntime()
 	defer rt.Close()
@@ -325,25 +442,76 @@ func TestBridgeClassFinalizerProxyContracts(t *testing.T) {
 	defer instance.Free()
 	require.False(t, instance.IsException())
 
+	require.NotPanics(t, func() {
+		goClassFinalizerProxy(nil, instance.ref)
+	})
+
 	ctxRef := ctx.ref
 	unregisterContext(ctxRef)
 	contextMapping.Store(ctxRef, "corrupted-finalizer-mapping")
-	require.NotPanics(t, func() {
-		goClassFinalizerProxy(rt.ref, instance.ref)
-	})
-	registerContext(ctxRef, ctx)
 
 	rt2 := NewRuntime()
 	defer rt2.Close()
-	goClassFinalizerProxy(rt2.ref, instance.ref)
+	require.NotPanics(t, func() {
+		goClassFinalizerProxy(rt2.ref, instance.ref)
+	})
 	require.False(t, finalized.Load())
 
 	goClassFinalizerProxy(rt.ref, instance.ref)
 	require.True(t, finalized.Load())
 
+	registerContext(ctxRef, ctx)
+
 	// Second finalizer call should be safely ignored after handle cleanup.
 	require.NotPanics(t, func() {
 		goClassFinalizerProxy(rt.ref, instance.ref)
+	})
+}
+
+func TestBridgeClassFinalizerOwnershipInSameRuntime(t *testing.T) {
+	rt := NewRuntime()
+	defer rt.Close()
+	ctxA := rt.NewContext()
+	defer ctxA.Close()
+	ctxB := rt.NewContext()
+	defer ctxB.Close()
+
+	var finalizedA atomic.Bool
+	var finalizedB atomic.Bool
+
+	constructorA, _ := NewClassBuilder("SameRuntimeClassA").
+		Constructor(func(ctx *Context, instance *Value, args []*Value) (interface{}, error) {
+			return &bridgeFinalizerProbe{mark: &finalizedA}, nil
+		}).
+		Build(ctxA)
+	require.False(t, constructorA.IsException())
+	ctxA.Globals().Set("SameRuntimeClassA", constructorA)
+
+	constructorB, _ := NewClassBuilder("SameRuntimeClassB").
+		Constructor(func(ctx *Context, instance *Value, args []*Value) (interface{}, error) {
+			return &bridgeFinalizerProbe{mark: &finalizedB}, nil
+		}).
+		Build(ctxB)
+	require.False(t, constructorB.IsException())
+	ctxB.Globals().Set("SameRuntimeClassB", constructorB)
+
+	instanceA := ctxA.Eval(`new SameRuntimeClassA()`)
+	defer instanceA.Free()
+	require.False(t, instanceA.IsException())
+
+	instanceB := ctxB.Eval(`new SameRuntimeClassB()`)
+	defer instanceB.Free()
+	require.False(t, instanceB.IsException())
+
+	goClassFinalizerProxy(rt.ref, instanceA.ref)
+	require.True(t, finalizedA.Load())
+	require.False(t, finalizedB.Load())
+
+	goClassFinalizerProxy(rt.ref, instanceB.ref)
+	require.True(t, finalizedB.Load())
+
+	require.NotPanics(t, func() {
+		goClassFinalizerProxy(rt.ref, instanceA.ref)
 	})
 }
 
@@ -1346,54 +1514,67 @@ func TestBridgeClassSetterErrors(t *testing.T) {
 	})
 }
 
-// Test for class finalizer context iteration - unchanged except constructor signature
-func TestBridgeClassFinalizerContextIteration(t *testing.T) {
-	t.Run("MultipleContextsIteration", func(t *testing.T) {
-		// Create multiple runtimes and contexts to test iteration
-		rt1 := NewRuntime()
-		defer rt1.Close()
-		ctx1 := rt1.NewContext()
-		defer ctx1.Close()
+func TestBridgeClassFinalizerNoGlobalContextScan(t *testing.T) {
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
 
-		rt2 := NewRuntime()
-		defer rt2.Close()
-		ctx2 := rt2.NewContext()
-		defer ctx2.Close()
+	var finalized atomic.Bool
+	constructor, _ := NewClassBuilder("NoScanClass").
+		Constructor(func(ctx *Context, instance *Value, args []*Value) (interface{}, error) {
+			return &bridgeFinalizerProbe{mark: &finalized}, nil
+		}).
+		Build(ctx)
+	require.False(t, constructor.IsException())
+	ctx.Globals().Set("NoScanClass", constructor)
 
-		rt3 := NewRuntime()
-		defer rt3.Close()
-		ctx3 := rt3.NewContext()
-		defer ctx3.Close()
+	instance := ctx.Eval(`new NoScanClass()`)
+	defer instance.Free()
+	require.False(t, instance.IsException())
 
-		// Create classes in all contexts
-		for i, ctx := range []*Context{ctx1, ctx2, ctx3} {
-			constructor, _ := NewClassBuilder(fmt.Sprintf("TestClass%d", i)).
-				Constructor(func(ctx *Context, instance *Value, args []*Value) (interface{}, error) {
-					// MODIFIED FOR SCHEME C: Return Go object for automatic association
-					// Create a simple object that implements finalizer
-					obj := &Point{X: float64(i), Y: float64(i)}
-					return obj, nil
-				}).
-				Build(ctx)
-			require.False(t, constructor.IsException())
+	ctxRef := ctx.ref
+	unregisterContext(ctxRef)
+	contextMapping.Store(ctxRef, "corrupted")
+	defer registerContext(ctxRef, ctx)
 
-			ctx.Globals().Set(fmt.Sprintf("TestClass%d", i), constructor)
-		}
+	goClassFinalizerProxy(rt.ref, instance.ref)
+	require.True(t, finalized.Load())
+}
 
-		// Create instances in all contexts
-		for i, ctx := range []*Context{ctx1, ctx2, ctx3} {
-			result := ctx.Eval(fmt.Sprintf(`new TestClass%d()`, i))
-			require.False(t, result.IsException())
-			result.Free()
-		}
+func TestBridgeClassFinalizerOwnerContextUnavailable(t *testing.T) {
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
 
-		// When finalizer runs, it will iterate through multiple contexts
-		// Some contexts will have matching runtime.ref, others won't
-		// This tests both "return true" (continue) and "return false" (stop) branches
-		runtime.GC()
+	var finalized atomic.Bool
+	constructor, _ := NewClassBuilder("FinalizerOwnerMissingClass").
+		Constructor(func(ctx *Context, instance *Value, args []*Value) (interface{}, error) {
+			return &bridgeFinalizerProbe{mark: &finalized}, nil
+		}).
+		Build(ctx)
+	require.False(t, constructor.IsException())
+	ctx.Globals().Set("FinalizerOwnerMissingClass", constructor)
 
-		t.Log("Successfully tested goClassFinalizerProxy context iteration branches")
-	})
+	instance1 := ctx.Eval(`new FinalizerOwnerMissingClass()`)
+	defer instance1.Free()
+	require.False(t, instance1.IsException())
+
+	instance2 := ctx.Eval(`new FinalizerOwnerMissingClass()`)
+	defer instance2.Free()
+	require.False(t, instance2.IsException())
+
+	rt.contextsByID.Delete(ctx.contextID)
+	goClassFinalizerProxy(rt.ref, instance1.ref)
+	require.False(t, finalized.Load())
+	rt.contextsByID.Store(ctx.contextID, ctx)
+
+	backupStore := ctx.handleStore
+	ctx.handleStore = nil
+	goClassFinalizerProxy(rt.ref, instance2.ref)
+	ctx.handleStore = backupStore
+	require.False(t, finalized.Load())
 }
 
 // NEW TEST FOR SCHEME C: Test CreateClassInstance C function behavior

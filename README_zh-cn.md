@@ -59,6 +59,7 @@ deps/quickjs 中的运行时源码不再通过 git submodule 更新，而是按 
 - 在 `Context.Close()` 之后，边界查询采用 fail-closed 语义：`Runtime()` 返回 `nil`，`HasException()` 返回 `false`，`Exception()` 返回 `nil`，`Loop()` 变为 no-op，`Schedule()` 返回 `false`。
 - 当 `Value` 的上下文引用已失效时，`Value.Free()` 会 fail-closed，避免关闭后的不安全 cgo 调用。
 - bridge 映射和 handleStore 在遇到损坏条目（错误类型）时采用 fail-closed，避免 panic 级崩溃。
+- 类实例 opaque 数据通过 runtime 级对象身份（`contextID` + `handleID`）解析，finalizer 与 `Value.GetGoObject()` 使用确定性归属定位，不再通过遍历所有 context 猜测归属。
 - Go 回调在 function/method/getter/setter 代理里返回 `nil` 时，会统一映射为 JavaScript `undefined`。
 - 模块初始化阶段会校验导出值：导出值必须非 `nil`、上下文可用且属于当前初始化上下文。
 

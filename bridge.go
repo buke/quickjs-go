@@ -20,6 +20,50 @@ var (
 	runtimeMapping sync.Map // map[*C.JSRuntime]*Runtime
 )
 
+func legacyHandleOpaque(handleID int32) unsafe.Pointer {
+	if handleID <= 0 {
+		return nil
+	}
+	return C.IntToOpaque(C.int32_t(handleID))
+}
+
+func classObjectOpaque(objectID int32) unsafe.Pointer {
+	if objectID >= 0 {
+		return nil
+	}
+	return C.IntToOpaque(C.int32_t(objectID))
+}
+
+func resolveClassObjectFromOpaque(ctx *Context, opaque unsafe.Pointer) (*Context, int32, bool) {
+	if ctx == nil || ctx.runtime == nil || opaque == nil {
+		return nil, 0, false
+	}
+
+	objectID := int32(C.OpaqueToInt(opaque))
+	if objectID < 0 {
+		identity, ok := ctx.runtime.getClassObjectIdentity(objectID)
+		if ok {
+			ownerCtx := ctx.runtime.getOwnedContextByID(identity.contextID)
+			if ownerCtx == nil || ownerCtx.handleStore == nil {
+				return nil, 0, false
+			}
+			return ownerCtx, identity.handleID, true
+		}
+	}
+
+	if ctx.handleStore == nil {
+		return nil, 0, false
+	}
+	legacyHandleID := int32(C.OpaqueToInt(opaque))
+	if legacyHandleID <= 0 {
+		return nil, 0, false
+	}
+	if _, exists := ctx.handleStore.Load(legacyHandleID); !exists {
+		return nil, 0, false
+	}
+	return ctx, legacyHandleID, true
+}
+
 // =============================================================================
 // CONTEXT AND RUNTIME MAPPING FUNCTIONS
 // =============================================================================
@@ -344,13 +388,24 @@ func goClassConstructorProxy(ctx *C.JSContext, newTarget C.JSValue,
 	}
 
 	// SCHEME C STEP 4: Associate Go object with instance if constructor returned non-nil object
+	// using a runtime-scoped identity that captures context ownership.
 	if goObj != nil {
 		if goCtx.handleStore == nil {
 			C.JS_FreeValue(ctx, instance)
 			return throwProxyError(ctx, proxyError{"InternalError", "Handle store not available"})
 		}
+		if goCtx.runtime == nil {
+			C.JS_FreeValue(ctx, instance)
+			return throwProxyError(ctx, proxyError{"InternalError", "Context runtime not available"})
+		}
 		handleID := goCtx.handleStore.Store(goObj)
-		C.JS_SetOpaque(instance, C.IntToOpaque(C.int32_t(handleID)))
+		objectID := goCtx.runtime.registerClassObjectIdentity(goCtx.contextID, handleID)
+		if objectID == 0 {
+			goCtx.handleStore.Delete(handleID)
+			C.JS_FreeValue(ctx, instance)
+			return throwProxyError(ctx, proxyError{"InternalError", "Failed to register class object identity"})
+		}
+		C.JS_SetOpaque(instance, classObjectOpaque(objectID))
 	}
 
 	return instance
@@ -450,6 +505,11 @@ func goClassSetterProxy(ctx *C.JSContext, thisVal C.JSValue,
 //
 //export goClassFinalizerProxy
 func goClassFinalizerProxy(rt *C.JSRuntime, val C.JSValue) {
+	goRt := getRuntimeFromJS(rt)
+	if goRt == nil {
+		return
+	}
+
 	// Get class ID for the object being finalized
 	classID := C.JS_GetClassID(val)
 
@@ -461,34 +521,19 @@ func goClassFinalizerProxy(rt *C.JSRuntime, val C.JSValue) {
 		return // Corresponds to point.c: 's' can be NULL
 	}
 
-	// Use C helper function to safely convert opaque pointer back to int32
-	handleID := int32(C.OpaqueToInt(opaque))
+	objectID := int32(C.OpaqueToInt(opaque))
+	identity, ok := goRt.takeClassObjectIdentity(objectID)
+	if !ok {
+		return
+	}
 
-	// Get Context from runtime mapping
-	// Note: We need to find the Context that owns this object
-	// Since finalizer is called at runtime level, we iterate through contexts
-	var targetCtx *Context
-	contextMapping.Range(func(key, value interface{}) bool {
-		ctx, ok := value.(*Context)
-		if !ok || ctx == nil || ctx.runtime == nil || ctx.handleStore == nil || !ctx.hasValidRef() {
-			return true
-		}
-		if ctx.runtime.ref == rt {
-			// Check if this context has the handle
-			if _, exists := ctx.handleStore.Load(handleID); exists {
-				targetCtx = ctx
-				return false // Stop iteration
-			}
-		}
-		return true // Continue iteration
-	})
-
-	if targetCtx == nil {
-		return // Context not found or handle already cleaned
+	targetCtx := goRt.getOwnedContextByID(identity.contextID)
+	if targetCtx == nil || targetCtx.handleStore == nil {
+		return
 	}
 
 	// Get Go object from HandleStore
-	if goObj, exists := targetCtx.handleStore.Load(handleID); exists {
+	if goObj, exists := targetCtx.handleStore.Load(identity.handleID); exists {
 		// Check if object implements optional ClassFinalizer interface
 		if finalizer, ok := goObj.(ClassFinalizer); ok {
 			// Call user-defined cleanup method
@@ -502,7 +547,7 @@ func goClassFinalizerProxy(rt *C.JSRuntime, val C.JSValue) {
 		}
 
 		// Always clean up HandleStore reference (corresponds to point.c: js_free_rt)
-		targetCtx.handleStore.Delete(handleID)
+		targetCtx.handleStore.Delete(identity.handleID)
 	}
 }
 
