@@ -54,7 +54,7 @@ func resolveClassObjectFromOpaque(ctx *Context, opaque unsafe.Pointer) (*Context
 	if ctx.handleStore == nil {
 		return nil, 0, false
 	}
-	legacyHandleID := int32(C.OpaqueToInt(opaque))
+	legacyHandleID := objectID
 	if legacyHandleID <= 0 {
 		return nil, 0, false
 	}
