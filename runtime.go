@@ -511,7 +511,7 @@ func (r *Runtime) nextClassObjectID() int32 {
 	}
 	id := r.classObjectIDCounter.Add(1)
 	if id <= 0 {
-		panic("quickjs: class object identity counter overflow")
+		return 0
 	}
 	return -id
 }
@@ -541,6 +541,9 @@ func (r *Runtime) registerClassObjectIdentity(contextID uint64, handleID int32) 
 	}
 
 	objectID := r.nextClassObjectID()
+	if objectID == 0 {
+		return 0
+	}
 	identity := classObjectIdentity{contextID: contextID, handleID: handleID}
 	r.classObjectRegistry.Store(objectID, identity)
 

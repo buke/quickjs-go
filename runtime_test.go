@@ -351,7 +351,7 @@ func TestRuntimeContextIDAndClassObjectIdentityRegistry(t *testing.T) {
 	require.False(t, ok)
 }
 
-func TestRuntimeNextClassObjectIDOverflowPanics(t *testing.T) {
+func TestRuntimeNextClassObjectIDOverflowReturnsZero(t *testing.T) {
 	const maxInt32 = int32(^uint32(0) >> 1)
 
 	rt := &Runtime{}
@@ -359,9 +359,28 @@ func TestRuntimeNextClassObjectIDOverflowPanics(t *testing.T) {
 
 	first := rt.nextClassObjectID()
 	require.Equal(t, -(maxInt32), first)
-	require.PanicsWithValue(t, "quickjs: class object identity counter overflow", func() {
-		rt.nextClassObjectID()
+	second := rt.nextClassObjectID()
+	require.Zero(t, second)
+}
+
+func TestRuntimeRegisterClassObjectIdentityOverflowReturnsZero(t *testing.T) {
+	const maxInt32 = int32(^uint32(0) >> 1)
+
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	rt.classObjectIDCounter.Store(maxInt32)
+	objectID := rt.registerClassObjectIdentity(ctx.contextID, 1)
+	require.Zero(t, objectID)
+
+	seen := false
+	rt.classObjectRegistry.Range(func(_, _ interface{}) bool {
+		seen = true
+		return false
 	})
+	require.False(t, seen)
 }
 
 func TestRuntimeRegisterClassObjectIdentityCorruptedBucketConcurrent(t *testing.T) {
