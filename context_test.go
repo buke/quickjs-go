@@ -10,17 +10,36 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func useStableOwnerHooksForLegacySubtests(t *testing.T) {
+	oldGIDHook := ownerCheckCurrentGoroutineID
+	oldThreadHook := ownerCheckCurrentThreadID
+	ownerCheckCurrentGoroutineID = func() uint64 { return 1 }
+	ownerCheckCurrentThreadID = func() uint64 { return 1 }
+	t.Cleanup(func() {
+		ownerCheckCurrentGoroutineID = oldGIDHook
+		ownerCheckCurrentThreadID = oldThreadHook
+	})
+}
+
 func TestContextBasics(t *testing.T) {
-	rt := NewRuntime()
-	defer rt.Close()
-	ctx := rt.NewContext()
-	defer ctx.Close()
+	newTestContext := func(t *testing.T) *Context {
+		rt := NewRuntime()
+		ctx := rt.NewContext()
+		require.NotNil(t, ctx)
+		t.Cleanup(func() {
+			ctx.Close()
+			rt.Close()
+		})
+		return ctx
+	}
 
 	// Test Runtime() method
+	ctx := newTestContext(t)
 	require.NotNil(t, ctx.Runtime())
 
 	// Test basic value creation
 	t.Run("ValueCreation", func(t *testing.T) {
+		ctx := newTestContext(t)
 		values := []struct {
 			name      string
 			createVal func() *Value     // Changed to return pointer
@@ -41,16 +60,16 @@ func TestContextBasics(t *testing.T) {
 		}
 
 		for _, tc := range values {
-			t.Run(tc.name, func(t *testing.T) {
-				val := tc.createVal()
-				defer val.Free()
-				require.True(t, tc.checkFunc(val))
-			})
+			val := tc.createVal()
+			require.NotNil(t, val, tc.name)
+			defer val.Free()
+			require.True(t, tc.checkFunc(val), tc.name)
 		}
 	})
 
 	// Test ArrayBuffer with different data sizes
 	t.Run("ArrayBuffer", func(t *testing.T) {
+		ctx := newTestContext(t)
 		testCases := [][]byte{
 			{1, 2, 3, 4, 5},
 			{},
@@ -58,12 +77,11 @@ func TestContextBasics(t *testing.T) {
 		}
 
 		for i, data := range testCases {
-			t.Run(fmt.Sprintf("Case%d", i), func(t *testing.T) {
-				ab := ctx.NewArrayBuffer(data)
-				defer ab.Free()
-				require.True(t, ab.IsByteArray())
-				require.EqualValues(t, len(data), ab.ByteLen())
-			})
+			ab := ctx.NewArrayBuffer(data)
+			require.NotNil(t, ab, fmt.Sprintf("Case%d", i))
+			defer ab.Free()
+			require.True(t, ab.IsByteArray(), fmt.Sprintf("Case%d", i))
+			require.EqualValues(t, len(data), ab.ByteLen(), fmt.Sprintf("Case%d", i))
 		}
 	})
 
@@ -153,6 +171,8 @@ func TestContextIsAliveEdgeCases(t *testing.T) {
 }
 
 func TestContextEvaluation(t *testing.T) {
+	useStableOwnerHooksForLegacySubtests(t)
+
 	rt := NewRuntime()
 	defer rt.Close()
 	ctx := rt.NewContext()
@@ -204,6 +224,8 @@ func TestContextEvaluation(t *testing.T) {
 }
 
 func TestContextBytecodeOperations(t *testing.T) {
+	useStableOwnerHooksForLegacySubtests(t)
+
 	rt := NewRuntime()
 	defer rt.Close()
 	ctx := rt.NewContext()
@@ -319,6 +341,8 @@ func TestContextBytecodeOperations(t *testing.T) {
 }
 
 func TestContextModules(t *testing.T) {
+	useStableOwnerHooksForLegacySubtests(t)
+
 	rt := NewRuntime(WithModuleImport(true))
 	defer rt.Close()
 	ctx := rt.NewContext()
@@ -552,6 +576,8 @@ func TestContextLoadModuleAwaitSetTimeoutResolution(t *testing.T) {
 }
 
 func TestContextFunctions(t *testing.T) {
+	useStableOwnerHooksForLegacySubtests(t)
+
 	rt := NewRuntime()
 	defer rt.Close()
 	ctx := rt.NewContext()
@@ -603,6 +629,8 @@ func TestContextFunctions(t *testing.T) {
 }
 
 func TestContextErrorHandling(t *testing.T) {
+	useStableOwnerHooksForLegacySubtests(t)
+
 	rt := NewRuntime()
 	defer rt.Close()
 	ctx := rt.NewContext()
@@ -658,6 +686,8 @@ func TestContextErrorHandling(t *testing.T) {
 }
 
 func TestContextUtilities(t *testing.T) {
+	useStableOwnerHooksForLegacySubtests(t)
+
 	rt := NewRuntime()
 	defer rt.Close()
 	ctx := rt.NewContext()
@@ -712,6 +742,8 @@ func TestContextUtilities(t *testing.T) {
 }
 
 func TestContextAsync(t *testing.T) {
+	useStableOwnerHooksForLegacySubtests(t)
+
 	rt := NewRuntime()
 	defer rt.Close()
 	ctx := rt.NewContext()
@@ -773,6 +805,8 @@ func TestContextAsync(t *testing.T) {
 }
 
 func TestContextPromise(t *testing.T) {
+	useStableOwnerHooksForLegacySubtests(t)
+
 	rt := NewRuntime()
 	defer rt.Close()
 	ctx := rt.NewContext()
@@ -1008,6 +1042,8 @@ func TestContextPromise(t *testing.T) {
 }
 
 func TestContextScheduler(t *testing.T) {
+	useStableOwnerHooksForLegacySubtests(t)
+
 	rt := NewRuntime()
 	defer rt.Close()
 	ctx := rt.NewContext()
@@ -1397,6 +1433,8 @@ func TestContextInternalsCoverage(t *testing.T) {
 }
 
 func TestContextTypedArrays(t *testing.T) {
+	useStableOwnerHooksForLegacySubtests(t)
+
 	rt := NewRuntime()
 	defer rt.Close()
 	ctx := rt.NewContext()
@@ -1691,6 +1729,8 @@ func TestContextMemoryPressure(t *testing.T) {
 }
 
 func TestContextAsyncFunction(t *testing.T) {
+	useStableOwnerHooksForLegacySubtests(t)
+
 	rt := NewRuntime()
 	defer rt.Close()
 	ctx := rt.NewContext()
@@ -1860,6 +1900,8 @@ func TestContextAsyncFunction(t *testing.T) {
 // TestDeprecatedAPIs tests all deprecated methods to ensure they still work
 // Each deprecated method is called once for test coverage
 func TestDeprecatedAPIs(t *testing.T) {
+	useStableOwnerHooksForLegacySubtests(t)
+
 	rt := NewRuntime()
 	defer rt.Close()
 	ctx := rt.NewContext()

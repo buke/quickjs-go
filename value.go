@@ -22,12 +22,12 @@ type Value struct {
 
 // hasValidContext reports whether a Value still has a usable context pointer.
 func (v *Value) hasValidContext() bool {
-	return v != nil && v.ctx != nil && v.ctx.ref != nil
+	return v != nil && v.ctx != nil && v.ctx.hasValidRef()
 }
 
 // sameContext reports whether two values belong to the same live context.
 func sameContext(a *Value, b *Value) bool {
-	return a != nil && b != nil && a.ctx != nil && b.ctx != nil && a.ctx == b.ctx && a.ctx.ref != nil && b.ctx.ref != nil
+	return a != nil && b != nil && a.ctx != nil && b.ctx != nil && a.ctx == b.ctx && a.hasValidContext() && b.hasValidContext()
 }
 
 // Free the value.
@@ -167,6 +167,9 @@ func (v *Value) ByteLen() int64 {
 
 // Set sets the value of the property with the given name.
 func (v *Value) Set(name string, val *Value) {
+	if !v.hasValidContext() || !sameContext(v, val) {
+		return
+	}
 	var namePtr *C.char
 	if len(name) > 0 {
 		namePtr = (*C.char)(unsafe.Pointer(unsafe.StringData(name)))
@@ -176,11 +179,17 @@ func (v *Value) Set(name string, val *Value) {
 
 // SetIdx sets the value of the property with the given index.
 func (v *Value) SetIdx(idx int64, val *Value) {
+	if !v.hasValidContext() || !sameContext(v, val) {
+		return
+	}
 	C.JS_SetPropertyUint32(v.ctx.ref, v.ref, C.uint32_t(idx), val.ref)
 }
 
 // Get returns the value of the property with the given name.
 func (v *Value) Get(name string) *Value {
+	if !v.hasValidContext() {
+		return nil
+	}
 	var namePtr *C.char
 	if len(name) > 0 {
 		namePtr = (*C.char)(unsafe.Pointer(unsafe.StringData(name)))
@@ -190,17 +199,26 @@ func (v *Value) Get(name string) *Value {
 
 // GetIdx returns the value of the property with the given index.
 func (v *Value) GetIdx(idx int64) *Value {
+	if !v.hasValidContext() {
+		return nil
+	}
 	return &Value{ctx: v.ctx, ref: C.JS_GetPropertyUint32(v.ctx.ref, v.ref, C.uint32_t(idx))}
 }
 
 // Call calls the function with the given arguments.
 func (v *Value) Call(fname string, args ...*Value) *Value {
+	if !v.hasValidContext() {
+		return nil
+	}
 	var fnamePtr *C.char
 	if len(fname) > 0 {
 		fnamePtr = (*C.char)(unsafe.Pointer(unsafe.StringData(fname)))
 	}
 	cargs := []C.JSValue{}
 	for _, x := range args {
+		if !sameContext(v, x) {
+			return nil
+		}
 		cargs = append(cargs, x.ref)
 	}
 	var ref C.JSValue
@@ -215,8 +233,14 @@ func (v *Value) Call(fname string, args ...*Value) *Value {
 
 // Execute the function with the given arguments.
 func (v *Value) Execute(this *Value, args ...*Value) *Value {
+	if !v.hasValidContext() || !sameContext(v, this) {
+		return nil
+	}
 	cargs := []C.JSValue{}
 	for _, x := range args {
+		if !sameContext(v, x) {
+			return nil
+		}
 		cargs = append(cargs, x.ref)
 	}
 	var val *Value
@@ -247,8 +271,14 @@ func (v *Value) New(args ...*Value) *Value {
 // This replaces the previous NewInstance method and provides automatic property binding
 // and simplified constructor semantics where constructors work with pre-created instances.
 func (v *Value) CallConstructor(args ...*Value) *Value {
+	if !v.hasValidContext() {
+		return nil
+	}
 	cargs := []C.JSValue{}
 	for _, x := range args {
+		if !sameContext(v, x) {
+			return nil
+		}
 		cargs = append(cargs, x.ref)
 	}
 	var val *Value
@@ -743,7 +773,13 @@ func (v *Value) GetClassID() uint32 {
 // GetGoObject retrieves Go object from JavaScript class instance
 // This method extracts the opaque data stored by the constructor proxy
 func (v *Value) GetGoObject() (interface{}, error) {
-	if !v.hasValidContext() || v.ctx.handleStore == nil {
+	if v == nil || v.ctx == nil {
+		return nil, errors.New("value context is not available")
+	}
+	if v.ctx.runtime == nil || !v.ctx.runtime.ensureOwnerAccess() {
+		return nil, errOwnerAccessDenied
+	}
+	if v.ctx.ref == nil || v.ctx.handleStore == nil {
 		return nil, errors.New("value context is not available")
 	}
 

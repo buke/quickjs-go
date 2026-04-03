@@ -12,6 +12,8 @@ import (
 // =============================================================================
 
 func TestModuleBuilder_Basic(t *testing.T) {
+	useStableOwnerHooksForLegacySubtests(t)
+
 	rt := NewRuntime()
 	defer rt.Close()
 	ctx := rt.NewContext()
@@ -72,6 +74,8 @@ func TestModuleBuilder_Basic(t *testing.T) {
 // =============================================================================
 
 func TestModuleBuilder_Import(t *testing.T) {
+	useStableOwnerHooksForLegacySubtests(t)
+
 	rt := NewRuntime()
 	defer rt.Close()
 	ctx := rt.NewContext()
@@ -162,6 +166,8 @@ func TestModuleBuilder_Import(t *testing.T) {
 // =============================================================================
 
 func TestModuleBuilder_ErrorHandling(t *testing.T) {
+	useStableOwnerHooksForLegacySubtests(t)
+
 	rt := NewRuntime()
 	defer rt.Close()
 	ctx := rt.NewContext()
@@ -202,6 +208,8 @@ func TestModuleBuilder_ErrorHandling(t *testing.T) {
 // =============================================================================
 
 func TestModuleBuilder_Integration(t *testing.T) {
+	useStableOwnerHooksForLegacySubtests(t)
+
 	rt := NewRuntime()
 	defer rt.Close()
 	ctx := rt.NewContext()
@@ -303,6 +311,8 @@ func TestModuleBuilder_Integration(t *testing.T) {
 }
 
 func TestModuleBuilder_ErrorBranches(t *testing.T) {
+	useStableOwnerHooksForLegacySubtests(t)
+
 	rt := NewRuntime()
 	defer rt.Close()
 	ctx := rt.NewContext()

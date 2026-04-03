@@ -258,15 +258,16 @@ func TestReflectionMultipleReturnValues(t *testing.T) {
 // =============================================================================
 
 func TestReflectionConstructorModes(t *testing.T) {
-	rt := NewRuntime()
-	defer rt.Close()
-	ctx := rt.NewContext()
-	defer ctx.Close()
-
-	constructor, _ := ctx.BindClass(&Person{})
-	require.False(t, constructor.IsException())
-
-	ctx.Globals().Set("Person", constructor)
+	newTestContext := func(t *testing.T) *Context {
+		rt := NewRuntime()
+		ctx := rt.NewContext()
+		require.NotNil(t, ctx)
+		t.Cleanup(func() {
+			ctx.Close()
+			rt.Close()
+		})
+		return ctx
+	}
 
 	testCases := []struct {
 		name string
@@ -297,6 +298,11 @@ func TestReflectionConstructorModes(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
+			ctx := newTestContext(t)
+			constructor, _ := ctx.BindClass(&Person{})
+			require.False(t, constructor.IsException())
+			ctx.Globals().Set("Person", constructor)
+
 			result := ctx.Eval(fmt.Sprintf(`
                 (function() {
                     let person = %s;
@@ -430,13 +436,20 @@ func TestReflectionWithIgnoredMethods(t *testing.T) {
 // =============================================================================
 
 func TestReflectionInputValidation(t *testing.T) {
-	rt := NewRuntime()
-	defer rt.Close()
-	ctx := rt.NewContext()
-	defer ctx.Close()
+	newTestContext := func(t *testing.T) *Context {
+		rt := NewRuntime()
+		ctx := rt.NewContext()
+		require.NotNil(t, ctx)
+		t.Cleanup(func() {
+			ctx.Close()
+			rt.Close()
+		})
+		return ctx
+	}
 
 	// Test reflect.Type input with non-struct type
 	t.Run("NonStructReflectType", func(t *testing.T) {
+		ctx := newTestContext(t)
 		intType := reflect.TypeOf(42)
 		_, err := ctx.BindClassBuilder(intType)
 		require.Error(t, err)
@@ -445,6 +458,7 @@ func TestReflectionInputValidation(t *testing.T) {
 
 	// Test pointer to non-struct
 	t.Run("PointerToNonStruct", func(t *testing.T) {
+		ctx := newTestContext(t)
 		intPtr := new(int)
 		_, err := ctx.BindClassBuilder(intPtr)
 		require.Error(t, err)
@@ -453,6 +467,7 @@ func TestReflectionInputValidation(t *testing.T) {
 
 	// Test non-struct direct value
 	t.Run("NonStructValue", func(t *testing.T) {
+		ctx := newTestContext(t)
 		_, err := ctx.BindClassBuilder(42)
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "value must be a struct or pointer to struct")
@@ -460,6 +475,7 @@ func TestReflectionInputValidation(t *testing.T) {
 
 	// Test nil input
 	t.Run("NilInput", func(t *testing.T) {
+		ctx := newTestContext(t)
 		_, err := ctx.BindClassBuilder(nil)
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "cannot get type from nil value")
@@ -467,6 +483,7 @@ func TestReflectionInputValidation(t *testing.T) {
 
 	// Test anonymous struct types - these should fail because they have no class name
 	t.Run("AnonymousStructValue", func(t *testing.T) {
+		ctx := newTestContext(t)
 		anonymousStruct := struct {
 			Name string `js:"name"`
 			Age  int    `js:"age"`
@@ -478,6 +495,7 @@ func TestReflectionInputValidation(t *testing.T) {
 	})
 
 	t.Run("AnonymousStructPointer", func(t *testing.T) {
+		ctx := newTestContext(t)
 		anonymousStructPtr := &struct {
 			Name string `js:"name"`
 			Age  int    `js:"age"`
@@ -489,6 +507,7 @@ func TestReflectionInputValidation(t *testing.T) {
 	})
 
 	t.Run("AnonymousStructReflectType", func(t *testing.T) {
+		ctx := newTestContext(t)
 		anonymousStruct := struct {
 			Name string `js:"name"`
 			Age  int    `js:"age"`
@@ -514,6 +533,7 @@ func TestReflectionInputValidation(t *testing.T) {
 
 	for _, tc := range errorCases {
 		t.Run(tc.name, func(t *testing.T) {
+			ctx := newTestContext(t)
 			_, err := ctx.BindClassBuilder(tc.input)
 			require.Error(t, err)
 		})
@@ -521,18 +541,23 @@ func TestReflectionInputValidation(t *testing.T) {
 }
 
 func TestReflectionMethodArgumentErrors(t *testing.T) {
-	rt := NewRuntime()
-	defer rt.Close()
-	ctx := rt.NewContext()
-	defer ctx.Close()
-
-	constructor, _ := ctx.BindClass(&MethodTestStruct{})
-	require.False(t, constructor.IsException())
-
-	ctx.Globals().Set("MethodTest", constructor)
+	newMethodTestContext := func(t *testing.T) *Context {
+		rt := NewRuntime()
+		ctx := rt.NewContext()
+		require.NotNil(t, ctx)
+		constructor, _ := ctx.BindClass(&MethodTestStruct{})
+		require.False(t, constructor.IsException())
+		ctx.Globals().Set("MethodTest", constructor)
+		t.Cleanup(func() {
+			ctx.Close()
+			rt.Close()
+		})
+		return ctx
+	}
 
 	// Test too many arguments
 	t.Run("TooManyArguments", func(t *testing.T) {
+		ctx := newMethodTestContext(t)
 		result := ctx.Eval(`
             (function() {
                 let obj = new MethodTest();
@@ -551,6 +576,7 @@ func TestReflectionMethodArgumentErrors(t *testing.T) {
 
 	// Test argument conversion errors
 	t.Run("ArgumentConversionError", func(t *testing.T) {
+		ctx := newMethodTestContext(t)
 		result := ctx.Eval(`
             (function() {
                 let obj = new MethodTest();
@@ -569,6 +595,7 @@ func TestReflectionMethodArgumentErrors(t *testing.T) {
 
 	// Test missing arguments (zero value filling)
 	t.Run("MissingArguments", func(t *testing.T) {
+		ctx := newMethodTestContext(t)
 		result := ctx.Eval(`
             (function() {
                 let obj = new MethodTest();
@@ -587,17 +614,23 @@ func TestReflectionMethodArgumentErrors(t *testing.T) {
 // =============================================================================
 
 func TestReflectionConstructorErrors(t *testing.T) {
-	rt := NewRuntime()
-	defer rt.Close()
-	ctx := rt.NewContext()
-	defer ctx.Close()
-
-	constructor, _ := ctx.BindClass(&Person{})
-	require.False(t, constructor.IsException())
-	ctx.Globals().Set("Person", constructor)
+	newPersonTestContext := func(t *testing.T) *Context {
+		rt := NewRuntime()
+		ctx := rt.NewContext()
+		require.NotNil(t, ctx)
+		constructor, _ := ctx.BindClass(&Person{})
+		require.False(t, constructor.IsException())
+		ctx.Globals().Set("Person", constructor)
+		t.Cleanup(func() {
+			ctx.Close()
+			rt.Close()
+		})
+		return ctx
+	}
 
 	// Test positional argument conversion error
 	t.Run("PositionalArgumentError", func(t *testing.T) {
+		ctx := newPersonTestContext(t)
 		ret := ctx.Eval(`
             try {
                 // Pass an object where an int is expected for age
@@ -616,6 +649,7 @@ func TestReflectionConstructorErrors(t *testing.T) {
 
 	// Test object argument conversion error
 	t.Run("ObjectArgumentError", func(t *testing.T) {
+		ctx := newPersonTestContext(t)
 		ret := ctx.Eval(`
             try {
                 // Pass an object where an int is expected for age accessor
@@ -638,6 +672,7 @@ func TestReflectionConstructorErrors(t *testing.T) {
 
 	// Test positional args with unexported fields - covers the continue branch
 	t.Run("PositionalArgsSkipUnexportedFields", func(t *testing.T) {
+		ctx := newPersonTestContext(t)
 		// Person struct has: FirstName, LastName, Age, Salary, IsActive (exported)
 		// and private (unexported) - this should be skipped during positional initialization
 		result := ctx.Eval(`
@@ -836,13 +871,20 @@ func TestReflectionComplexTypes(t *testing.T) {
 }
 
 func TestReflectionEdgeCases(t *testing.T) {
-	rt := NewRuntime()
-	defer rt.Close()
-	ctx := rt.NewContext()
-	defer ctx.Close()
+	newTestContext := func(t *testing.T) *Context {
+		rt := NewRuntime()
+		ctx := rt.NewContext()
+		require.NotNil(t, ctx)
+		t.Cleanup(func() {
+			ctx.Close()
+			rt.Close()
+		})
+		return ctx
+	}
 
 	// Test empty struct
 	t.Run("EmptyStruct", func(t *testing.T) {
+		ctx := newTestContext(t)
 		constructor, _ := ctx.BindClass(&EmptyStruct{})
 		require.False(t, constructor.IsException())
 
@@ -861,6 +903,7 @@ func TestReflectionEdgeCases(t *testing.T) {
 
 	// Test struct with only private fields
 	t.Run("OnlyPrivateFields", func(t *testing.T) {
+		ctx := newTestContext(t)
 		constructor, _ := ctx.BindClass(&PrivateStruct{})
 		require.False(t, constructor.IsException())
 
@@ -879,6 +922,7 @@ func TestReflectionEdgeCases(t *testing.T) {
 
 	// Test method with zero return values
 	t.Run("VoidMethod", func(t *testing.T) {
+		ctx := newTestContext(t)
 		constructor, _ := ctx.BindClass(&VoidStruct{})
 		require.False(t, constructor.IsException())
 
@@ -898,6 +942,7 @@ func TestReflectionEdgeCases(t *testing.T) {
 
 	// Test valid reflect.Type input
 	t.Run("ValidReflectType", func(t *testing.T) {
+		ctx := newTestContext(t)
 		personType := reflect.TypeOf(Person{})
 		constructor, _ := ctx.BindClass(personType)
 		require.False(t, constructor.IsException())

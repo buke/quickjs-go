@@ -9,12 +9,19 @@ import (
 // TestDeprecatedAtomAPIs tests all deprecated Atom methods to ensure they still work
 // Each deprecated method is called once for test coverage
 func TestDeprecatedAtomAPIs(t *testing.T) {
-	rt := NewRuntime()
-	defer rt.Close()
-	ctx := rt.NewContext()
-	defer ctx.Close()
+	newTestContext := func(t *testing.T) *Context {
+		rt := NewRuntime()
+		ctx := rt.NewContext()
+		require.NotNil(t, ctx)
+		t.Cleanup(func() {
+			ctx.Close()
+			rt.Close()
+		})
+		return ctx
+	}
 
 	t.Run("DeprecatedAtomStringMethod", func(t *testing.T) {
+		ctx := newTestContext(t)
 		// Test deprecated String() method on Atom
 		atom := ctx.NewAtom("test atom")
 		defer atom.Free()
@@ -32,6 +39,7 @@ func TestDeprecatedAtomAPIs(t *testing.T) {
 	})
 
 	t.Run("DeprecatedAtomValueMethod", func(t *testing.T) {
+		ctx := newTestContext(t)
 		// Test deprecated Value() method on Atom
 		atom := ctx.NewAtom("value test")
 		defer atom.Free()
@@ -68,6 +76,7 @@ func TestDeprecatedAtomAPIs(t *testing.T) {
 
 		for _, testCase := range testCases {
 			t.Run("AtomCase_"+testCase, func(t *testing.T) {
+				ctx := newTestContext(t)
 				atom := ctx.NewAtom(testCase)
 				defer atom.Free()
 
@@ -84,6 +93,7 @@ func TestDeprecatedAtomAPIs(t *testing.T) {
 	})
 
 	t.Run("DeprecatedAtomWithPropertyAccess", func(t *testing.T) {
+		ctx := newTestContext(t)
 		// Test deprecated Atom methods in property access scenarios
 		obj := ctx.NewObject()
 		defer obj.Free()
@@ -108,6 +118,7 @@ func TestDeprecatedAtomAPIs(t *testing.T) {
 	})
 
 	t.Run("DeprecatedAtomComparison", func(t *testing.T) {
+		ctx := newTestContext(t)
 		// Test that deprecated methods work consistently
 		atom1 := ctx.NewAtom("comparison test")
 		atom2 := ctx.NewAtom("comparison test")
@@ -130,10 +141,16 @@ func TestDeprecatedAtomAPIs(t *testing.T) {
 
 // TestDeprecatedAtomEdgeCases tests edge cases with deprecated Atom methods
 func TestDeprecatedAtomEdgeCases(t *testing.T) {
-	rt := NewRuntime()
-	defer rt.Close()
-	ctx := rt.NewContext()
-	defer ctx.Close()
+	newTestContext := func(t *testing.T) *Context {
+		rt := NewRuntime()
+		ctx := rt.NewContext()
+		require.NotNil(t, ctx)
+		t.Cleanup(func() {
+			ctx.Close()
+			rt.Close()
+		})
+		return ctx
+	}
 
 	t.Run("DeprecatedAtomWithUnicodeStrings", func(t *testing.T) {
 		// Test deprecated methods with Unicode strings
@@ -147,6 +164,7 @@ func TestDeprecatedAtomEdgeCases(t *testing.T) {
 
 		for _, unicodeStr := range unicodeStrings {
 			t.Run("Unicode_"+unicodeStr, func(t *testing.T) {
+				ctx := newTestContext(t)
 				atom := ctx.NewAtom(unicodeStr)
 				defer atom.Free()
 
@@ -163,6 +181,7 @@ func TestDeprecatedAtomEdgeCases(t *testing.T) {
 	})
 
 	t.Run("DeprecatedAtomMemoryManagement", func(t *testing.T) {
+		ctx := newTestContext(t)
 		// Test that deprecated methods don't cause memory issues
 		for i := 0; i < 100; i++ {
 			atom := ctx.NewAtom("memory test " + string(rune('A'+i%26)))
@@ -179,6 +198,7 @@ func TestDeprecatedAtomEdgeCases(t *testing.T) {
 	})
 
 	t.Run("DeprecatedAtomWithLongStrings", func(t *testing.T) {
+		ctx := newTestContext(t)
 		// Test deprecated methods with very long strings
 		longString := ""
 		for i := 0; i < 1000; i++ {
@@ -202,12 +222,19 @@ func TestDeprecatedAtomEdgeCases(t *testing.T) {
 
 // TestDeprecatedAtomInteractionWithContext tests how deprecated Atom methods interact with Context
 func TestDeprecatedAtomInteractionWithContext(t *testing.T) {
-	rt := NewRuntime()
-	defer rt.Close()
-	ctx := rt.NewContext()
-	defer ctx.Close()
+	newTestContext := func(t *testing.T) *Context {
+		rt := NewRuntime()
+		ctx := rt.NewContext()
+		require.NotNil(t, ctx)
+		t.Cleanup(func() {
+			ctx.Close()
+			rt.Close()
+		})
+		return ctx
+	}
 
 	t.Run("DeprecatedAtomInJavaScriptCode", func(t *testing.T) {
+		ctx := newTestContext(t)
 		// Create atom using new API
 		atom := ctx.NewAtom("globalTestVar")
 		defer atom.Free()
@@ -225,6 +252,7 @@ func TestDeprecatedAtomInteractionWithContext(t *testing.T) {
 	})
 
 	t.Run("DeprecatedAtomValueInJavaScript", func(t *testing.T) {
+		ctx := newTestContext(t)
 		// Create atom
 		atom := ctx.NewAtom("javascript interaction")
 		defer atom.Free()
@@ -242,6 +270,7 @@ func TestDeprecatedAtomInteractionWithContext(t *testing.T) {
 	})
 
 	t.Run("DeprecatedAtomWithJavaScriptExecution", func(t *testing.T) {
+		ctx := newTestContext(t)
 		// Test using deprecated atom methods in JavaScript execution context
 		atom := ctx.NewAtom("dynamicProperty")
 		defer atom.Free()

@@ -46,11 +46,16 @@ func TestAtomBasics(t *testing.T) {
 
 // TestAtomSpecialCases tests special characters and edge cases
 func TestAtomSpecialCases(t *testing.T) {
-	rt := NewRuntime()
-	defer rt.Close()
-
-	ctx := rt.NewContext()
-	defer ctx.Close()
+	newTestContext := func(t *testing.T) *Context {
+		rt := NewRuntime()
+		ctx := rt.NewContext()
+		require.NotNil(t, ctx)
+		t.Cleanup(func() {
+			ctx.Close()
+			rt.Close()
+		})
+		return ctx
+	}
 
 	// Test various special characters and edge cases
 	testCases := []struct {
@@ -72,6 +77,7 @@ func TestAtomSpecialCases(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
+			ctx := newTestContext(t)
 			var atom *Atom
 
 			switch v := tc.input.(type) {
@@ -92,6 +98,7 @@ func TestAtomSpecialCases(t *testing.T) {
 	}
 
 	// Test long string
+	ctx := newTestContext(t)
 	longString := strings.Repeat("a", 5000)
 	longAtom := ctx.NewAtom(longString) // Changed: Atom() → NewAtom()
 	defer longAtom.Free()
@@ -225,12 +232,19 @@ func TestAtomDeduplication(t *testing.T) {
 
 // TestAtomEdgeCases tests additional edge cases for better coverage
 func TestAtomEdgeCases(t *testing.T) {
-	rt := NewRuntime()
-	defer rt.Close()
-	ctx := rt.NewContext()
-	defer ctx.Close()
+	newTestContext := func(t *testing.T) *Context {
+		rt := NewRuntime()
+		ctx := rt.NewContext()
+		require.NotNil(t, ctx)
+		t.Cleanup(func() {
+			ctx.Close()
+			rt.Close()
+		})
+		return ctx
+	}
 
 	t.Run("AtomWithUnicodeStrings", func(t *testing.T) {
+		ctx := newTestContext(t)
 		// Test atom creation with various Unicode strings
 		unicodeStrings := []string{
 			"中文测试",
@@ -256,6 +270,7 @@ func TestAtomEdgeCases(t *testing.T) {
 	})
 
 	t.Run("AtomWithSpecialCharacters", func(t *testing.T) {
+		ctx := newTestContext(t)
 		// Test atoms with special characters that could cause issues
 		specialStrings := []string{
 			"",            // empty string
@@ -281,6 +296,7 @@ func TestAtomEdgeCases(t *testing.T) {
 	})
 
 	t.Run("AtomWithLargeIndexes", func(t *testing.T) {
+		ctx := newTestContext(t)
 		// Test atoms created with various index values
 		indexes := []uint32{
 			0,
@@ -308,6 +324,7 @@ func TestAtomEdgeCases(t *testing.T) {
 	})
 
 	t.Run("AtomConsistency", func(t *testing.T) {
+		ctx := newTestContext(t)
 		// Test that atoms with same content are handled consistently
 		testString := "consistency_test"
 
@@ -329,6 +346,7 @@ func TestAtomEdgeCases(t *testing.T) {
 	})
 
 	t.Run("AtomPropertyAccess", func(t *testing.T) {
+		ctx := newTestContext(t)
 		// Test using atoms for property access
 		obj := ctx.NewObject() // Changed: Object() → NewObject()
 		defer obj.Free()

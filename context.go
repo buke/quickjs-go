@@ -31,7 +31,10 @@ type Context struct {
 
 // hasValidRef reports whether the context still has a valid native handle.
 func (ctx *Context) hasValidRef() bool {
-	return ctx != nil && ctx.ref != nil
+	if ctx == nil || ctx.ref == nil || ctx.runtime == nil {
+		return false
+	}
+	return ctx.runtime.ensureOwnerAccess()
 }
 
 // isAlive reports whether the context can safely reach QuickJS.
@@ -76,7 +79,7 @@ func zeroTerminatedBytes(s string) []byte {
 }
 
 func (ctx *Context) detectModuleSource(code string, codePtr *C.char) bool {
-	if ctx == nil || ctx.ref == nil || !mayContainModuleSyntax(code) {
+	if !ctx.hasValidRef() || !mayContainModuleSyntax(code) {
 		return false
 	}
 	return C.DetectModuleSourceWithProbe(ctx.ref, codePtr, C.size_t(len(code))) != 0
@@ -817,6 +820,10 @@ func EvalLoadOnly(loadOnly bool) EvalOption {
 // Need call Free() `quickjs.Value`'s returned by `Eval()` and `EvalFile()` and `EvalBytecode()`.
 // func (ctx *Context) Eval(code string) (*Value, error) { return ctx.EvalFile(code, "code") }
 func (ctx *Context) Eval(code string, opts ...EvalOption) *Value {
+	if !ctx.hasValidRef() {
+		return nil
+	}
+
 	options := EvalOptions{
 		js_eval_type_global: true,
 		filename:            "<input>",
@@ -934,6 +941,9 @@ func (ctx *Context) CompileModule(filePath string, moduleName string, opts ...Ev
 
 // LoadModuleByteCode returns a js value with given bytecode and module name.
 func (ctx *Context) LoadModuleBytecode(buf []byte, opts ...EvalOption) *Value {
+	if !ctx.hasValidRef() {
+		return nil
+	}
 	if len(buf) == 0 {
 		return ctx.ThrowSyntaxError("empty bytecode")
 	}
@@ -957,6 +967,9 @@ func (ctx *Context) LoadModuleBytecode(buf []byte, opts ...EvalOption) *Value {
 // EvalBytecode returns a js value with given bytecode.
 // Need call Free() `quickjs.Value`'s returned by `Eval()` and `EvalFile()` and `EvalBytecode()`.
 func (ctx *Context) EvalBytecode(buf []byte) *Value {
+	if !ctx.hasValidRef() {
+		return nil
+	}
 	cbuf := (*C.uint8_t)(unsafe.Pointer(unsafe.SliceData(buf)))
 	obj := &Value{ctx: ctx, ref: C.JS_ReadObject(ctx.ref, cbuf, C.size_t(len(buf)), C.int(C.JS_READ_OBJ_BYTECODE))}
 	if obj.IsException() {
@@ -968,6 +981,9 @@ func (ctx *Context) EvalBytecode(buf []byte) *Value {
 
 // Compile returns a compiled bytecode with given code.
 func (ctx *Context) Compile(code string, opts ...EvalOption) ([]byte, error) {
+	if !ctx.hasValidRef() {
+		return nil, errOwnerAccessDenied
+	}
 	opts = append(opts, EvalFlagCompileOnly(true))
 	val := ctx.Eval(code, opts...)
 	defer val.Free()
@@ -1009,6 +1025,9 @@ func (ctx *Context) CompileFile(filePath string, opts ...EvalOption) ([]byte, er
 
 // Global returns a context's global object.
 func (ctx *Context) Globals() *Value {
+	if !ctx.hasValidRef() {
+		return nil
+	}
 	if ctx.globals == nil {
 		ctx.globals = &Value{
 			ctx: ctx,
@@ -1020,16 +1039,25 @@ func (ctx *Context) Globals() *Value {
 
 // Throw returns a context's exception value.
 func (ctx *Context) Throw(v *Value) *Value {
+	if !ctx.hasValidRef() || v == nil || !v.hasValidContext() {
+		return nil
+	}
 	return &Value{ctx: ctx, ref: C.JS_Throw(ctx.ref, v.ref)}
 }
 
 // ThrowError returns a context's exception value with given error message.
 func (ctx *Context) ThrowError(err error) *Value {
+	if !ctx.hasValidRef() {
+		return nil
+	}
 	return ctx.Throw(ctx.NewError(err))
 }
 
 // ThrowSyntaxError returns a context's exception value with given error message.
 func (ctx *Context) ThrowSyntaxError(format string, args ...interface{}) *Value {
+	if !ctx.hasValidRef() {
+		return nil
+	}
 	cause := fmt.Sprintf(format, args...)
 	causePtr := C.CString(cause)
 	defer C.free(unsafe.Pointer(causePtr))
@@ -1038,6 +1066,9 @@ func (ctx *Context) ThrowSyntaxError(format string, args ...interface{}) *Value 
 
 // ThrowTypeError returns a context's exception value with given error message.
 func (ctx *Context) ThrowTypeError(format string, args ...interface{}) *Value {
+	if !ctx.hasValidRef() {
+		return nil
+	}
 	cause := fmt.Sprintf(format, args...)
 	causePtr := C.CString(cause)
 	defer C.free(unsafe.Pointer(causePtr))
@@ -1046,6 +1077,9 @@ func (ctx *Context) ThrowTypeError(format string, args ...interface{}) *Value {
 
 // ThrowReferenceError returns a context's exception value with given error message.
 func (ctx *Context) ThrowReferenceError(format string, args ...interface{}) *Value {
+	if !ctx.hasValidRef() {
+		return nil
+	}
 	cause := fmt.Sprintf(format, args...)
 	causePtr := C.CString(cause)
 	defer C.free(unsafe.Pointer(causePtr))
@@ -1054,6 +1088,9 @@ func (ctx *Context) ThrowReferenceError(format string, args ...interface{}) *Val
 
 // ThrowRangeError returns a context's exception value with given error message.
 func (ctx *Context) ThrowRangeError(format string, args ...interface{}) *Value {
+	if !ctx.hasValidRef() {
+		return nil
+	}
 	cause := fmt.Sprintf(format, args...)
 	causePtr := C.CString(cause)
 	defer C.free(unsafe.Pointer(causePtr))
@@ -1062,6 +1099,9 @@ func (ctx *Context) ThrowRangeError(format string, args ...interface{}) *Value {
 
 // ThrowInternalError returns a context's exception value with given error message.
 func (ctx *Context) ThrowInternalError(format string, args ...interface{}) *Value {
+	if !ctx.hasValidRef() {
+		return nil
+	}
 	cause := fmt.Sprintf(format, args...)
 	causePtr := C.CString(cause)
 	defer C.free(unsafe.Pointer(causePtr))
@@ -1105,6 +1145,9 @@ func (ctx *Context) Loop() {
 // iterations, enabling async Go bridge functions (fetch, storage, etc.) to
 // resolve Promises from goroutines without blocking the event loop.
 func (ctx *Context) Await(v *Value) *Value {
+	if !ctx.hasValidRef() {
+		return nil
+	}
 	if v == nil || !v.IsPromise() {
 		return v
 	}
@@ -1207,6 +1250,9 @@ func (ctx *Context) Await(v *Value) *Value {
 // The resolver helpers ensure only the first resolve/reject wins, matching
 // native Promise semantics.
 func (ctx *Context) NewPromise(executor func(resolve, reject func(*Value))) *Value {
+	if !ctx.hasValidRef() {
+		return nil
+	}
 	// Create Promise using JavaScript code to avoid complex C API reference management
 	promiseSetup := ctx.Eval(`
         (() => {

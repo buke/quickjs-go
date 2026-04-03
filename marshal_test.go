@@ -121,6 +121,8 @@ func (t *TimeWrapper) UnmarshalJS(ctx *Context, val *Value) error {
 }
 
 func TestMarshalBasicTypes(t *testing.T) {
+	useStableOwnerHooksForLegacySubtests(t)
+
 	rt := NewRuntime()
 	defer rt.Close()
 	ctx := rt.NewContext()
@@ -227,6 +229,8 @@ func TestMarshalBasicTypes(t *testing.T) {
 }
 
 func TestFieldTagParsing(t *testing.T) {
+	useStableOwnerHooksForLegacySubtests(t)
+
 	rt := NewRuntime()
 	defer rt.Close()
 	ctx := rt.NewContext()
@@ -422,6 +426,8 @@ func TestFieldTagParsing(t *testing.T) {
 }
 
 func TestCamelCaseConversion(t *testing.T) {
+	useStableOwnerHooksForLegacySubtests(t)
+
 	rt := NewRuntime()
 	defer rt.Close()
 	ctx := rt.NewContext()
@@ -475,6 +481,8 @@ func TestCamelCaseConversion(t *testing.T) {
 }
 
 func TestRoundTripWithNewTagParsing(t *testing.T) {
+	useStableOwnerHooksForLegacySubtests(t)
+
 	rt := NewRuntime()
 	defer rt.Close()
 	ctx := rt.NewContext()
@@ -531,6 +539,8 @@ func TestRoundTripWithNewTagParsing(t *testing.T) {
 }
 
 func TestTypedArrays(t *testing.T) {
+	useStableOwnerHooksForLegacySubtests(t)
+
 	rt := NewRuntime()
 	defer rt.Close()
 	ctx := rt.NewContext()
@@ -666,6 +676,8 @@ func TestTypedArrays(t *testing.T) {
 }
 
 func TestTypedArrayErrors(t *testing.T) {
+	useStableOwnerHooksForLegacySubtests(t)
+
 	rt := NewRuntime()
 	defer rt.Close()
 	ctx := rt.NewContext()
@@ -751,6 +763,8 @@ func TestTypedArrayErrors(t *testing.T) {
 }
 
 func TestComplexTypes(t *testing.T) {
+	useStableOwnerHooksForLegacySubtests(t)
+
 	rt := NewRuntime()
 	defer rt.Close()
 	ctx := rt.NewContext()
@@ -897,6 +911,8 @@ func TestComplexTypes(t *testing.T) {
 }
 
 func TestStructsAndCustomTypes(t *testing.T) {
+	useStableOwnerHooksForLegacySubtests(t)
+
 	rt := NewRuntime()
 	defer rt.Close()
 	ctx := rt.NewContext()
@@ -979,6 +995,8 @@ func TestStructsAndCustomTypes(t *testing.T) {
 }
 
 func TestUnmarshalInterface(t *testing.T) {
+	useStableOwnerHooksForLegacySubtests(t)
+
 	rt := NewRuntime()
 	defer rt.Close()
 	ctx := rt.NewContext()
@@ -1048,6 +1066,8 @@ func TestUnmarshalInterface(t *testing.T) {
 }
 
 func TestErrorCases(t *testing.T) {
+	useStableOwnerHooksForLegacySubtests(t)
+
 	rt := NewRuntime()
 	defer rt.Close()
 	ctx := rt.NewContext()
@@ -1247,6 +1267,8 @@ func TestErrorCases(t *testing.T) {
 }
 
 func TestIntegrationExample(t *testing.T) {
+	useStableOwnerHooksForLegacySubtests(t)
+
 	rt := NewRuntime()
 	defer rt.Close()
 	ctx := rt.NewContext()
@@ -1294,7 +1316,11 @@ func TestIntegrationExample(t *testing.T) {
 }
 
 func TestMarshalNilAndInvalidValues(t *testing.T) {
-	ctx := NewRuntime().NewContext()
+	useStableOwnerHooksForLegacySubtests(t)
+
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
 	defer ctx.Close()
 
 	valNil, err := ctx.Marshal(nil)

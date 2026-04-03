@@ -44,37 +44,26 @@ The runtime sources under deps/quickjs are no longer updated via git submodule. 
 
 ## Guidelines
 
+### Lifecycle, Memory, and Concurrency
+- QuickJS is not thread-safe; a Runtime and its Contexts must be created, used, and closed by the same serialized owner goroutine.
+- This library enforces owner-goroutine checks by default for APIs that touch QuickJS; non-owner calls are rejected with fail-closed behavior.
+- If you want to additionally verify that a Runtime stays fixed to the same OS thread, enable `WithStrictOSThread(true)`; this option only enables validation and does not bind the thread automatically. If you enable this mode, call `runtime.LockOSThread()` yourself in the owner goroutine before creating the Runtime.
+- Call `value.Free()` for `*Value` objects you create or receive. Runtime and Context objects must be cleaned up via `Close()`.
+- `Value.Free()` is fail-closed when its context pointer is no longer valid, avoiding unsafe cgo calls after close.
+- After `Context.Close()`, boundary queries are fail-closed: `Runtime()` returns `nil`, `HasException()` returns `false`, `Exception()` returns `nil`, `Loop()` becomes a no-op, and `Schedule()` returns `false`.
+- Bridge mapping and handle-store reads are fail-closed under corrupted entries (wrong types), preventing panic-based crashes.
+- Class instance opaque data is resolved via runtime-scoped object identity (`contextID` + `handleID`), so finalizer and `Value.GetGoObject()` use deterministic ownership lookup.
+- Go callbacks returning `nil` from function/method/getter/setter proxies are normalized to JavaScript `undefined`.
+- Module exports are validated during module initialization: export values must be non-`nil`, context-live, and belong to the initializing context.
+- Use `runtime.SetFinalizer()` cautiously as it may interfere with QuickJS GC.
+- For concurrency or isolation, use a thread pool pattern with pre-initialized runtimes, or separate Runtime/Context instances by task/user.
+- Reuse Runtime and Context objects when possible, avoid frequent Go/JS value conversion, and consider bytecode compilation for frequently executed scripts.
+
 ### Error Handling
 - Use `Value.IsException()` or `Context.HasException()` to check for exceptions
 - Use `Context.Exception()` to get the exception as a Go error
 - Always call `defer value.Free()` for returned values to prevent memory leaks
 - Check `Context.HasException()` after operations that might throw
-
-### Memory Management
-- Call  `value.Free()` for `*Value` objects you create or receive. QuickJS uses reference counting for memory management, so if a value is referenced by other objects, you only need to ensure the referencing objects are properly freed.
-- Runtime and Context objects have their own cleanup methods (`Close()`). Close them once you are done using them.
-- Use `runtime.SetFinalizer()` cautiously as it may interfere with QuickJS's GC.
-
-### Lifecycle and Boundary Contracts
-- After `Context.Close()`, boundary queries are fail-closed: `Runtime()` returns `nil`, `HasException()` returns `false`, `Exception()` returns `nil`, `Loop()` becomes a no-op, and `Schedule()` returns `false`.
-- `Value.Free()` is fail-closed when its context pointer is no longer valid, avoiding unsafe cgo calls after close.
-- Bridge mapping and handle-store reads are fail-closed under corrupted entries (wrong types), preventing panic-based crashes.
-- Class instance opaque data is resolved via runtime-scoped object identity (`contextID` + `handleID`), so finalizer and `Value.GetGoObject()` use deterministic ownership lookup instead of scanning all contexts.
-- Go callbacks returning `nil` from function/method/getter/setter proxies are normalized to JavaScript `undefined`.
-- Module exports are validated during module initialization: export values must be non-`nil`, context-live, and belong to the initializing context.
-
-### Performance Tips
-- QuickJS is not thread-safe. For concurrency or isolation, use a thread pool pattern with pre-initialized runtimes, or manage separate Runtime/Context instances for different tasks or users.
-- Thread affinity is the caller's responsibility. This library no longer calls `runtime.LockOSThread()` / `runtime.UnlockOSThread()` internally.
-- For a given Runtime and its Contexts, create, use, and close them from one serialized owner goroutine. If you need strict OS-thread affinity, call `runtime.LockOSThread()` in that owner goroutine yourself before creating the Runtime.
-- Reuse Runtime and Context objects when possible.
-- Avoid frequent conversion between Go and JS values.
-- Consider using bytecode compilation for frequently executed scripts.
-
-### Best Practices
-- Use appropriate `EvalOptions` for different script types.
-- Handle both JavaScript exceptions and Go errors appropriately.
-- Test memory usage under load to prevent leaks.
 
 
 ## Usage

@@ -1,8 +1,10 @@
 package quickjs
 
 import (
+	"errors"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -150,6 +152,8 @@ func TestAwaitPollSliceMsConfig(t *testing.T) {
 
 // TestRuntimeInterruptHandler tests interrupt handler functionality and coverage
 func TestRuntimeInterruptHandler(t *testing.T) {
+	useStableOwnerHooksForLegacySubtests(t)
+
 	rt := NewRuntime()
 	defer rt.Close()
 
@@ -468,6 +472,63 @@ func TestRuntimeRegisterClassObjectIdentityCorruptedBucketRepairedBeforeLock(t *
 	require.True(t, exists)
 }
 
+func TestRuntimeRegisterClassObjectIdentityCorruptionBranchesDeterministic(t *testing.T) {
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	// Normal typed-bucket path.
+	normalID := rt.registerClassObjectIdentity(ctx.contextID, 1)
+	require.NotZero(t, normalID)
+
+	// Corruption replacement path.
+	rt.classObjectIDsByCtx.Store(ctx.contextID, "corrupted-bucket")
+	replacementID := rt.registerClassObjectIdentity(ctx.contextID, 2)
+	require.NotZero(t, replacementID)
+	bucketValue, ok := rt.classObjectIDsByCtx.Load(ctx.contextID)
+	require.True(t, ok)
+	_, typed := bucketValue.(*sync.Map)
+	require.True(t, typed)
+
+	// Corruption repaired-before-lock path (existing typed bucket reused).
+	rt.classObjectIDsByCtx.Store(ctx.contextID, "corrupted-bucket-again")
+	repairedBucket := &sync.Map{}
+
+	rt.mu.Lock()
+	resultCh := make(chan int32, 1)
+	go func() {
+		resultCh <- rt.registerClassObjectIdentity(ctx.contextID, 3)
+	}()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		found := false
+		rt.classObjectRegistry.Range(func(_, value interface{}) bool {
+			identity, ok := value.(classObjectIdentity)
+			if ok && identity.handleID == 3 {
+				found = true
+				return false
+			}
+			return true
+		})
+		if found {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("timed out waiting for registerClassObjectIdentity pre-lock state")
+		}
+	}
+
+	rt.classObjectIDsByCtx.Store(ctx.contextID, repairedBucket)
+	rt.mu.Unlock()
+
+	repairedID := <-resultCh
+	require.NotZero(t, repairedID)
+	_, exists := repairedBucket.Load(repairedID)
+	require.True(t, exists)
+}
+
 func TestRuntimeIdentityRegistryCorruptionFailClosed(t *testing.T) {
 	rt := NewRuntime()
 	defer rt.Close()
@@ -760,35 +821,34 @@ func TestRuntimeTimeoutOpaqueConcurrentLifecycle(t *testing.T) {
 
 func TestRuntimeCrossGoroutineLifecycleWithoutInternalThreadBinding(t *testing.T) {
 	created := make(chan *Runtime, 1)
+	ownerClosed := make(chan struct{})
+	closeRequested := make(chan struct{})
 
 	go func() {
 		rt := NewRuntime()
 		created <- rt
+		<-closeRequested
+		rt.Close()
+		close(ownerClosed)
 	}()
 
 	rt := <-created
 	require.NotNil(t, rt)
 
-	ctx := rt.NewContext()
-	require.NotNil(t, ctx)
+	// Cross-goroutine access is rejected by owner contract.
+	require.Nil(t, rt.NewContext())
 
-	result := ctx.Eval(`1 + 2`)
-	require.NotNil(t, result)
-	require.False(t, result.IsException())
-	require.EqualValues(t, 3, result.ToInt32())
-	result.Free()
+	// Non-owner close is fail-closed no-op; owner goroutine must close it.
+	rt.Close()
+	require.NotNil(t, rt.ref)
 
-	closed := make(chan struct{})
-	go func() {
-		ctx.Close()
-		rt.Close()
-		close(closed)
-	}()
+	close(closeRequested)
 
 	select {
-	case <-closed:
+	case <-ownerClosed:
+		require.Nil(t, rt.ref)
 	case <-time.After(2 * time.Second):
-		t.Fatal("cross-goroutine close blocked")
+		t.Fatal("owner goroutine close blocked")
 	}
 }
 
@@ -993,4 +1053,241 @@ func TestInitializeContextGlobalsFailurePaths(t *testing.T) {
 
 		require.True(t, initializeContextGlobals(ctx.ref, "globalThis.__initProbeDisabled = 1", "hook-success-disable.js"))
 	})
+}
+
+func TestRuntimeOwnerCheckHooksAndStrictThreadAffinity(t *testing.T) {
+	oldGIDHook := ownerCheckCurrentGoroutineID
+	oldThreadHook := ownerCheckCurrentThreadID
+	defer func() {
+		ownerCheckCurrentGoroutineID = oldGIDHook
+		ownerCheckCurrentThreadID = oldThreadHook
+	}()
+
+	var gid atomic.Uint64
+	var tid atomic.Uint64
+	gid.Store(11)
+	tid.Store(101)
+
+	ownerCheckCurrentGoroutineID = func() uint64 { return gid.Load() }
+	ownerCheckCurrentThreadID = func() uint64 { return tid.Load() }
+
+	var nilRuntime *Runtime
+	require.False(t, nilRuntime.ensureOwnerAccess())
+
+	rt := NewRuntime(WithStrictOSThread(true))
+	require.NotNil(t, rt)
+	defer rt.Close()
+
+	require.True(t, rt.ensureOwnerAccess())
+	require.Equal(t, uint64(11), rt.ownerGoroutineID.Load())
+	require.Equal(t, uint64(101), rt.ownerThreadID.Load())
+	require.NotZero(t, currentGoroutineID())
+	require.NotZero(t, currentThreadID())
+
+	gid.Store(0)
+	require.False(t, rt.ensureOwnerAccess())
+	gid.Store(11)
+	tid.Store(0)
+	require.False(t, rt.ensureOwnerAccess())
+	tid.Store(101)
+
+	gid.Store(12)
+	require.False(t, rt.ensureOwnerAccess())
+
+	gid.Store(11)
+	tid.Store(102)
+	require.False(t, rt.ensureOwnerAccess())
+
+	tid.Store(101)
+	require.True(t, rt.ensureOwnerAccess())
+
+	rtNoCheck := NewRuntime()
+	require.True(t, rtNoCheck.ensureOwnerAccess())
+	rtNoCheck.Close()
+}
+
+func TestRuntimeOwnerCheckGatesRuntimeContextAndValuePaths(t *testing.T) {
+	oldGIDHook := ownerCheckCurrentGoroutineID
+	oldThreadHook := ownerCheckCurrentThreadID
+	defer func() {
+		ownerCheckCurrentGoroutineID = oldGIDHook
+		ownerCheckCurrentThreadID = oldThreadHook
+	}()
+
+	var gid atomic.Uint64
+	gid.Store(21)
+	ownerCheckCurrentGoroutineID = func() uint64 { return gid.Load() }
+	ownerCheckCurrentThreadID = func() uint64 { return 1 }
+
+	rt := NewRuntime()
+	require.NotNil(t, rt)
+	ctx := rt.NewContext()
+	require.NotNil(t, ctx)
+	defer ctx.Close()
+	defer rt.Close()
+
+	obj := ctx.Eval(`({ x: 1, inc: function(){ return this.x + 1; } })`)
+	require.NotNil(t, obj)
+	require.False(t, obj.IsException())
+	defer obj.Free()
+
+	throwVal := ctx.ThrowError(errors.New("owner-check-path"))
+	require.NotNil(t, throwVal)
+	require.True(t, throwVal.IsException())
+	throwVal.Free()
+
+	incFn := obj.Get("inc")
+	require.NotNil(t, incFn)
+	defer incFn.Free()
+
+	ctor := ctx.Eval(`(function C(){ this.v = 1; })`)
+	require.NotNil(t, ctor)
+	require.False(t, ctor.IsException())
+	defer ctor.Free()
+
+	val := ctx.NewInt32(9)
+	require.NotNil(t, val)
+	defer val.Free()
+	val1 := ctx.NewInt32(1)
+	defer val1.Free()
+	val2 := ctx.NewInt32(2)
+	defer val2.Free()
+
+	adderObj := ctx.Eval(`({ add: function(a, b){ return a + b; } })`)
+	require.NotNil(t, adderObj)
+	require.False(t, adderObj.IsException())
+	defer adderObj.Free()
+
+	adderFn := ctx.Eval(`(function(a, b){ return a + b; })`)
+	require.NotNil(t, adderFn)
+	require.False(t, adderFn.IsException())
+	defer adderFn.Free()
+	thisVal := ctx.NewUndefined()
+	defer thisVal.Free()
+
+	ctorWithArg := ctx.Eval(`(function D(v){ this.v = v; })`)
+	require.NotNil(t, ctorWithArg)
+	require.False(t, ctorWithArg.IsException())
+	defer ctorWithArg.Free()
+
+	ctxOther := rt.NewContext()
+	require.NotNil(t, ctxOther)
+	defer ctxOther.Close()
+	otherVal := ctxOther.NewInt32(99)
+	defer otherVal.Free()
+
+	gid.Store(22)
+
+	require.Nil(t, rt.NewContext())
+	rt.RunGC()
+	rt.SetMemoryLimit(1024)
+	rt.SetGCThreshold(2048)
+	rt.SetMaxStackSize(4096)
+	rt.SetCanBlock(true)
+	rt.SetStripInfo(1)
+	rt.SetModuleImport(true)
+	rt.SetExecuteTimeout(1)
+	rt.SetInterruptHandler(func() int { return 1 })
+	rt.ClearInterruptHandler()
+
+	require.Nil(t, ctx.Eval("1 + 1"))
+	_, err := ctx.Compile("1 + 1")
+	require.ErrorIs(t, err, errOwnerAccessDenied)
+	require.Nil(t, ctx.LoadModuleBytecode([]byte{1, 2, 3}))
+	require.Nil(t, ctx.EvalBytecode([]byte{1, 2, 3}))
+	require.Nil(t, ctx.Globals())
+	require.Nil(t, ctx.ThrowSyntaxError("x"))
+	require.Nil(t, ctx.ThrowTypeError("x"))
+	require.Nil(t, ctx.ThrowReferenceError("x"))
+	require.Nil(t, ctx.ThrowRangeError("x"))
+	require.Nil(t, ctx.ThrowInternalError("x"))
+	require.Nil(t, ctx.ThrowError(errors.New("x")))
+	require.Nil(t, ctx.Throw(val))
+	require.Nil(t, ctx.NewPromise(func(resolve, reject func(*Value)) {}))
+	require.Nil(t, ctx.Await(nil))
+	require.False(t, ctx.HasException())
+	require.Nil(t, ctx.Exception())
+	require.NotPanics(t, func() { ctx.Loop() })
+
+	obj.Set("x", val)
+	obj.SetIdx(0, val)
+	require.Nil(t, obj.Get("x"))
+	require.Nil(t, obj.GetIdx(0))
+	require.Nil(t, obj.Call("inc"))
+	require.Nil(t, adderObj.Call("add", val1, val2))
+	require.Nil(t, incFn.Execute(obj))
+	require.Nil(t, adderFn.Execute(thisVal, val1, val2))
+	require.Nil(t, adderFn.Execute(thisVal, otherVal))
+	require.Nil(t, ctor.CallConstructor())
+	require.Nil(t, ctorWithArg.CallConstructor(val1))
+	_, err = obj.GetGoObject()
+	require.ErrorIs(t, err, errOwnerAccessDenied)
+
+	gid.Store(21)
+	rtClose := NewRuntime()
+	ctxClose := rtClose.NewContext()
+	require.NotNil(t, ctxClose)
+	gid.Store(22)
+	rtClose.Close()
+	require.NotNil(t, rtClose.ref)
+	gid.Store(21)
+	ctxClose.Close()
+	rtClose.Close()
+	require.Nil(t, rtClose.ref)
+
+	gid.Store(21)
+
+	extraCtx := rt.NewContext()
+	require.NotNil(t, extraCtx)
+	extraCtx.Close()
+	result := ctx.Eval("1 + 1")
+	require.NotNil(t, result)
+	require.False(t, result.IsException())
+	require.EqualValues(t, 2, result.ToInt32())
+	result.Free()
+
+	next := obj.Call("inc")
+	require.NotNil(t, next)
+	require.False(t, next.IsException())
+	require.EqualValues(t, 2, next.ToInt32())
+	next.Free()
+
+	emptyNameCall := obj.Call("")
+	require.NotNil(t, emptyNameCall)
+	emptyNameCall.Free()
+
+	addResult := adderObj.Call("add", val1, val2)
+	require.NotNil(t, addResult)
+	require.False(t, addResult.IsException())
+	require.EqualValues(t, 3, addResult.ToInt32())
+	addResult.Free()
+	require.Nil(t, adderObj.Call("add", otherVal))
+
+	execResult := adderFn.Execute(thisVal, val1, val2)
+	require.NotNil(t, execResult)
+	require.False(t, execResult.IsException())
+	require.EqualValues(t, 3, execResult.ToInt32())
+	execResult.Free()
+	require.Nil(t, adderFn.Execute(thisVal, otherVal))
+	require.Nil(t, adderFn.Execute(otherVal, val1))
+
+	execZeroArg := incFn.Execute(obj)
+	require.NotNil(t, execZeroArg)
+	require.False(t, execZeroArg.IsException())
+	require.EqualValues(t, 2, execZeroArg.ToInt32())
+	execZeroArg.Free()
+
+	instanceNoArg := ctor.CallConstructor()
+	require.NotNil(t, instanceNoArg)
+	instanceNoArg.Free()
+
+	instance := ctorWithArg.CallConstructor(val1)
+	require.NotNil(t, instance)
+	require.False(t, instance.IsException())
+	require.Nil(t, ctorWithArg.CallConstructor(otherVal))
+	got := instance.Get("v")
+	require.NotNil(t, got)
+	require.EqualValues(t, 1, got.ToInt32())
+	got.Free()
+	instance.Free()
 }

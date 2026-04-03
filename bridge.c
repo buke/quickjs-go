@@ -3,6 +3,7 @@
 #include "quickjs-libc.h"
 #include "cutils.h" 
 #include <pthread.h>
+#include <stdint.h>
 #include <time.h>
 
 // ============================================================================
@@ -51,6 +52,10 @@ int GetAwaitPollSliceMs(void) {
     value = g_await_poll_slice_ms;
     pthread_mutex_unlock(&g_await_poll_slice_mu);
     return value;
+}
+
+uint64_t CurrentThreadID(void) {
+    return (uint64_t)(uintptr_t)pthread_self();
 }
 
 void SetAwaitPollSliceMs(int timeout_ms) {
