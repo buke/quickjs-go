@@ -509,16 +509,11 @@ func (r *Runtime) nextClassObjectID() int32 {
 	if r == nil {
 		return 0
 	}
-	for {
-		id := r.classObjectIDCounter.Add(1)
-		if id > 0 {
-			return -id
-		}
-
-		// Overflow wraps int32 into non-positive values; best-effort reset keeps
-		// identity IDs in the negative namespace.
-		r.classObjectIDCounter.CompareAndSwap(id, 0)
+	id := r.classObjectIDCounter.Add(1)
+	if id <= 0 {
+		panic("quickjs: class object identity counter overflow")
 	}
+	return -id
 }
 
 func (r *Runtime) getOwnedContextByID(contextID uint64) *Context {

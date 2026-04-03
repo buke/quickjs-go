@@ -351,18 +351,17 @@ func TestRuntimeContextIDAndClassObjectIdentityRegistry(t *testing.T) {
 	require.False(t, ok)
 }
 
-func TestRuntimeNextClassObjectIDOverflowWrapsBackToNegative(t *testing.T) {
+func TestRuntimeNextClassObjectIDOverflowPanics(t *testing.T) {
 	const maxInt32 = int32(^uint32(0) >> 1)
 
 	rt := &Runtime{}
 	rt.classObjectIDCounter.Store(maxInt32 - 1)
 
 	first := rt.nextClassObjectID()
-	second := rt.nextClassObjectID()
-
 	require.Equal(t, -(maxInt32), first)
-	require.Less(t, second, int32(0))
-	require.Equal(t, int32(-1), second)
+	require.PanicsWithValue(t, "quickjs: class object identity counter overflow", func() {
+		rt.nextClassObjectID()
+	})
 }
 
 func TestRuntimeRegisterClassObjectIdentityCorruptedBucketConcurrent(t *testing.T) {
@@ -398,6 +397,56 @@ func TestRuntimeRegisterClassObjectIdentityCorruptedBucketConcurrent(t *testing.
 		require.Equal(t, ctx.contextID, identity.contextID)
 	}
 	require.Equal(t, workers, len(seen))
+}
+
+func TestRuntimeRegisterClassObjectIdentityCorruptedBucketRepairedBeforeLock(t *testing.T) {
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	rt.classObjectIDsByCtx.Store(ctx.contextID, "corrupted-bucket")
+
+	// Hold the mutex so registerClassObjectIdentity blocks on the corruption path.
+	rt.mu.Lock()
+	resultCh := make(chan int32, 1)
+	go func() {
+		resultCh <- rt.registerClassObjectIdentity(ctx.contextID, 99)
+	}()
+
+	// Wait until the goroutine has stored identity metadata, which happens before
+	// it attempts to take rt.mu in the corruption branch.
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		ready := false
+		rt.classObjectRegistry.Range(func(_, _ interface{}) bool {
+			ready = true
+			return false
+		})
+		if ready {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("timed out waiting for identity registration pre-lock state")
+		}
+	}
+
+	// Repair the bucket before releasing the lock so the double-check path
+	// observes a typed *sync.Map value.
+	repairedBucket := &sync.Map{}
+	rt.classObjectIDsByCtx.Store(ctx.contextID, repairedBucket)
+	rt.mu.Unlock()
+
+	objectID := <-resultCh
+	require.Less(t, objectID, int32(0))
+
+	identity, ok := rt.getClassObjectIdentity(objectID)
+	require.True(t, ok)
+	require.Equal(t, ctx.contextID, identity.contextID)
+	require.Equal(t, int32(99), identity.handleID)
+
+	_, exists := repairedBucket.Load(objectID)
+	require.True(t, exists)
 }
 
 func TestRuntimeIdentityRegistryCorruptionFailClosed(t *testing.T) {

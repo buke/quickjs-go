@@ -207,6 +207,26 @@ func TestResolveClassObjectFromOpaqueContracts(t *testing.T) {
 	require.False(t, ok)
 }
 
+func TestFindRuntimeContextByLegacyHandleContracts(t *testing.T) {
+	require.Nil(t, findRuntimeContextByLegacyHandle(nil, 1))
+
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	require.Nil(t, findRuntimeContextByLegacyHandle(rt, 0))
+
+	// Corrupted and invalid entries should be ignored safely.
+	rt.contexts.Store("corrupted", "bad-entry")
+	rt.contexts.Store("invalid-context", &Context{})
+	require.Nil(t, findRuntimeContextByLegacyHandle(rt, 12345))
+
+	handleID := ctx.handleStore.Store("legacy-match")
+	defer ctx.handleStore.Delete(handleID)
+	require.Equal(t, ctx, findRuntimeContextByLegacyHandle(rt, handleID))
+}
+
 func TestClassOpaqueWrapperGuards(t *testing.T) {
 	require.Nil(t, legacyHandleOpaque(0))
 	require.Nil(t, legacyHandleOpaque(-1))
