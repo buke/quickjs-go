@@ -58,10 +58,15 @@ func resolveClassObjectFromOpaque(ctx *Context, opaque unsafe.Pointer) (*Context
 	if legacyHandleID <= 0 {
 		return nil, 0, false
 	}
-	if _, exists := ctx.handleStore.Load(legacyHandleID); !exists {
+	if _, exists := ctx.handleStore.Load(legacyHandleID); exists {
+		return ctx, legacyHandleID, true
+	}
+
+	ownerCtx := findRuntimeContextByLegacyHandle(ctx.runtime, legacyHandleID)
+	if ownerCtx == nil || ownerCtx.handleStore == nil {
 		return nil, 0, false
 	}
-	return ctx, legacyHandleID, true
+	return ownerCtx, legacyHandleID, true
 }
 
 func findRuntimeContextByLegacyHandle(rt *Runtime, handleID int32) *Context {
