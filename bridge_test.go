@@ -4,10 +4,21 @@ import (
 	"fmt"
 	"runtime"
 	"runtime/cgo"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 )
+
+type bridgeFinalizerProbe struct {
+	mark *atomic.Bool
+}
+
+func (p *bridgeFinalizerProbe) Finalize() {
+	if p != nil && p.mark != nil {
+		p.mark.Store(true)
+	}
+}
 
 func TestBridgeGetContextFromJSReturnNil(t *testing.T) {
 	// Test getContextFromJS return nil
@@ -100,6 +111,239 @@ func TestBridgeGetRuntimeFromJSReturnNil(t *testing.T) {
 		rt.Close()
 
 		t.Log("Successfully triggered getRuntimeFromJS return nil branch")
+	})
+}
+
+func TestBridgeMappingCorruptionFailClosed(t *testing.T) {
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	require.NotNil(t, getContextFromJS(ctx.ref))
+	require.NotNil(t, getRuntimeFromJS(rt.ref))
+
+	contextMapping.Store(ctx.ref, "corrupted-context")
+	require.Nil(t, getContextFromJS(ctx.ref))
+
+	runtimeMapping.Store(rt.ref, "corrupted-runtime")
+	require.Nil(t, getRuntimeFromJS(rt.ref))
+	require.NotPanics(t, func() {
+		_ = goInterruptHandler(rt.ref)
+	})
+
+	registerContext(ctx.ref, ctx)
+	registerRuntime(rt.ref, rt)
+
+	fn := ctx.NewFunction(func(ctx *Context, this *Value, args []*Value) *Value {
+		return ctx.NewString("ok")
+	})
+	ctx.Globals().Set("__bridge_boundary_fn", fn)
+
+	result := ctx.Eval(`
+		try {
+			__bridge_boundary_fn();
+			"ok";
+		} catch (e) {
+			String(e);
+		}
+	`)
+	defer result.Free()
+	require.False(t, result.IsException())
+	require.Equal(t, "ok", result.ToString())
+}
+
+func TestBridgeMappingClosedTargetsFailClosed(t *testing.T) {
+	rt := NewRuntime()
+	ctx := rt.NewContext()
+	require.NotNil(t, ctx)
+
+	ctxRef := ctx.ref
+	rtRef := rt.ref
+
+	ctx.Close()
+	contextMapping.Store(ctxRef, ctx)
+	require.Nil(t, getContextFromJS(ctxRef))
+
+	rt.Close()
+	runtimeMapping.Store(rtRef, rt)
+	require.Nil(t, getRuntimeFromJS(rtRef))
+}
+
+func TestBridgeNilCallbackResultsNormalizeToUndefined(t *testing.T) {
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	ctx.Globals().Set("nilFn", ctx.NewFunction(func(ctx *Context, this *Value, args []*Value) *Value {
+		return nil
+	}))
+
+	fnType := ctx.Eval(`typeof nilFn()`)
+	defer fnType.Free()
+	require.False(t, fnType.IsException())
+	require.Equal(t, "undefined", fnType.ToString())
+
+	constructor, _ := NewClassBuilder("NilBridgeClass").
+		Constructor(func(ctx *Context, instance *Value, args []*Value) (interface{}, error) {
+			return map[string]int{"ok": 1}, nil
+		}).
+		Method("m", func(ctx *Context, this *Value, args []*Value) *Value {
+			return nil
+		}).
+		Accessor("a", func(ctx *Context, this *Value) *Value {
+			return nil
+		}, func(ctx *Context, this *Value, val *Value) *Value {
+			return nil
+		}).
+		Build(ctx)
+	require.False(t, constructor.IsException())
+
+	ctx.Globals().Set("NilBridgeClass", constructor)
+
+	result := ctx.Eval(`
+		(() => {
+			const o = new NilBridgeClass();
+			const m = o.m();
+			const g = o.a;
+			o.a = 123;
+			return [m === undefined, g === undefined].join(',');
+		})()
+	`)
+	defer result.Free()
+	require.False(t, result.IsException())
+	require.Equal(t, "true,true", result.ToString())
+}
+
+func TestBridgeModuleInitFailClosedInvalidExportAndBuilderHandle(t *testing.T) {
+	rt := NewRuntime(WithModuleImport(true))
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	t.Run("InvalidExportValue", func(t *testing.T) {
+		mb := NewModuleBuilder("invalid-export-module").
+			Export("bad", nil)
+		require.NoError(t, mb.Build(ctx))
+
+		result := ctx.Eval(`import('invalid-export-module')`, EvalAwait(true))
+		defer result.Free()
+		require.True(t, result.IsException())
+		err := ctx.Exception()
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "invalid module export value")
+	})
+
+	t.Run("InvalidModuleBuilderHandle", func(t *testing.T) {
+		mb := NewModuleBuilder("invalid-builder-module").
+			Export("ok", ctx.NewString("value"))
+		require.NoError(t, mb.Build(ctx))
+
+		var builderID int32
+		var originalHandle cgo.Handle
+		ctx.handleStore.handles.Range(func(key, value interface{}) bool {
+			id, ok := key.(int32)
+			if !ok {
+				return true
+			}
+			h, ok := value.(cgo.Handle)
+			if !ok {
+				return true
+			}
+			stored, ok := h.Value().(*ModuleBuilder)
+			if ok && stored != nil && stored.name == "invalid-builder-module" {
+				builderID = id
+				originalHandle = h
+				return false
+			}
+			return true
+		})
+		require.Greater(t, builderID, int32(0))
+
+		tempHandle := cgo.NewHandle("not-a-module-builder")
+		ctx.handleStore.handles.Store(builderID, tempHandle)
+		defer func() {
+			ctx.handleStore.handles.Store(builderID, originalHandle)
+			tempHandle.Delete()
+		}()
+
+		result := ctx.Eval(`import('invalid-builder-module')`, EvalAwait(true))
+		defer result.Free()
+		require.True(t, result.IsException())
+		err := ctx.Exception()
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "invalid module builder handle")
+	})
+}
+
+func TestBridgeClassConstructorHandleStoreUnavailable(t *testing.T) {
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	backupStore := ctx.handleStore
+
+	constructor, _ := NewClassBuilder("HandleStoreUnavailableClass").
+		Constructor(func(ctx *Context, instance *Value, args []*Value) (interface{}, error) {
+			ctx.handleStore = nil
+			return map[string]int{"x": 1}, nil
+		}).
+		Build(ctx)
+	require.False(t, constructor.IsException())
+
+	ctx.Globals().Set("HandleStoreUnavailableClass", constructor)
+
+	result := ctx.Eval(`new HandleStoreUnavailableClass()`)
+	ctx.handleStore = backupStore
+
+	defer result.Free()
+	require.True(t, result.IsException())
+	err := ctx.Exception()
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "Handle store not available")
+}
+
+func TestBridgeClassFinalizerProxyContracts(t *testing.T) {
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	var finalized atomic.Bool
+
+	constructor, _ := NewClassBuilder("FinalizerProbeClass").
+		Constructor(func(ctx *Context, instance *Value, args []*Value) (interface{}, error) {
+			return &bridgeFinalizerProbe{mark: &finalized}, nil
+		}).
+		Build(ctx)
+	require.False(t, constructor.IsException())
+	ctx.Globals().Set("FinalizerProbeClass", constructor)
+
+	instance := ctx.Eval(`new FinalizerProbeClass()`)
+	defer instance.Free()
+	require.False(t, instance.IsException())
+
+	ctxRef := ctx.ref
+	unregisterContext(ctxRef)
+	contextMapping.Store(ctxRef, "corrupted-finalizer-mapping")
+	require.NotPanics(t, func() {
+		goClassFinalizerProxy(rt.ref, instance.ref)
+	})
+	registerContext(ctxRef, ctx)
+
+	rt2 := NewRuntime()
+	defer rt2.Close()
+	goClassFinalizerProxy(rt2.ref, instance.ref)
+	require.False(t, finalized.Load())
+
+	goClassFinalizerProxy(rt.ref, instance.ref)
+	require.True(t, finalized.Load())
+
+	// Second finalizer call should be safely ignored after handle cleanup.
+	require.NotPanics(t, func() {
+		goClassFinalizerProxy(rt.ref, instance.ref)
 	})
 }
 

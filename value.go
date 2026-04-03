@@ -20,12 +20,23 @@ type Value struct {
 	ref C.JSValue
 }
 
+// hasValidContext reports whether a Value still has a usable context pointer.
+func (v *Value) hasValidContext() bool {
+	return v != nil && v.ctx != nil && v.ctx.ref != nil
+}
+
+// sameContext reports whether two values belong to the same live context.
+func sameContext(a *Value, b *Value) bool {
+	return a != nil && b != nil && a.ctx != nil && b.ctx != nil && a.ctx == b.ctx && a.ctx.ref != nil && b.ctx.ref != nil
+}
+
 // Free the value.
 func (v *Value) Free() {
-	if v.ctx == nil || bool(C.JS_IsUndefined(v.ref)) {
+	if !v.hasValidContext() || bool(C.JS_IsUndefined(v.ref)) {
 		return // No context or undefined value, nothing to free
 	}
 	C.JS_FreeValue(v.ctx.ref, v.ref)
+	v.ref = C.JS_NewUndefined()
 }
 
 // Context returns the context of the value.
@@ -690,7 +701,7 @@ func (v *Value) IsClassInstance() bool {
 // HasInstanceData checks if the value has associated Go object data
 // This is the most reliable way to identify our class instances
 func (v *Value) HasInstanceData() bool {
-	if v == nil || !v.IsObject() {
+	if v == nil || !v.hasValidContext() || v.ctx.handleStore == nil || !v.IsObject() {
 		return false
 	}
 
@@ -730,6 +741,10 @@ func (v *Value) GetClassID() uint32 {
 // GetGoObject retrieves Go object from JavaScript class instance
 // This method extracts the opaque data stored by the constructor proxy
 func (v *Value) GetGoObject() (interface{}, error) {
+	if !v.hasValidContext() || v.ctx.handleStore == nil {
+		return nil, errors.New("value context is not available")
+	}
+
 	// First check if the value is an object
 	if !v.IsObject() {
 		return nil, errors.New("value is not an object")

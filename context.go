@@ -28,6 +28,22 @@ type Context struct {
 	closeOnce   sync.Once
 }
 
+// hasValidRef reports whether the context still has a valid native handle.
+func (ctx *Context) hasValidRef() bool {
+	return ctx != nil && ctx.ref != nil
+}
+
+// isAlive reports whether the context can safely reach QuickJS.
+func (ctx *Context) isAlive() bool {
+	if ctx == nil || ctx.ref == nil {
+		return false
+	}
+	if ctx.runtime == nil {
+		return false
+	}
+	return ctx.runtime.isAlive()
+}
+
 const defaultJobQueueSize = 1024
 
 // awaitPollInterval is the duration the Await loop sleeps when no JS or Go
@@ -122,7 +138,7 @@ func (ctx *Context) drainJobs() {
 }
 
 func (ctx *Context) duplicateValue(val *Value) *Value {
-	if val == nil || val.ctx == nil {
+	if !ctx.hasValidRef() || !val.hasValidContext() || val.ctx != ctx {
 		return nil
 	}
 	return &Value{ctx: ctx, ref: C.JS_DupValue(ctx.ref, val.ref)}
@@ -177,6 +193,9 @@ func (ctx *Context) wrapPromiseCallback(fn *Value) (func(*Value), func()) {
 
 // Runtime returns the runtime of the context.
 func (ctx *Context) Runtime() *Runtime {
+	if ctx == nil {
+		return nil
+	}
 	return ctx.runtime
 }
 
@@ -215,6 +234,11 @@ func (ctx *Context) Close() {
 			C.JS_FreeContext(ctx.ref)
 		}
 
+		ctx.ref = nil
+		ctx.globals = nil
+		ctx.handleStore = nil
+		ctx.jobQueue = nil
+		ctx.jobClosed = nil
 		ctx.runtime = nil
 	})
 }
@@ -677,6 +701,9 @@ func (ctx *Context) AsyncFunction(asyncFn func(ctx *Context, this *Value, promis
 
 // getFunction gets function from HandleStore (internal use)
 func (ctx *Context) loadFunctionFromHandleID(id int32) interface{} {
+	if ctx == nil || ctx.handleStore == nil || id <= 0 {
+		return nil
+	}
 	fn, _ := ctx.handleStore.Load(id)
 	return fn
 }
@@ -1041,12 +1068,18 @@ func (ctx *Context) ThrowInternalError(format string, args ...interface{}) *Valu
 
 // HasException checks if the context has an exception set.
 func (ctx *Context) HasException() bool {
+	if !ctx.hasValidRef() {
+		return false
+	}
 	// Check if the context has an exception set
 	return bool(C.JS_HasException(ctx.ref))
 }
 
 // Exception returns a context's exception value.
 func (ctx *Context) Exception() error {
+	if !ctx.hasValidRef() {
+		return nil
+	}
 	val := &Value{ctx: ctx, ref: C.JS_GetException(ctx.ref)}
 	defer val.Free()
 	return val.Error()
@@ -1054,6 +1087,9 @@ func (ctx *Context) Exception() error {
 
 // Loop runs the context's event loop.
 func (ctx *Context) Loop() {
+	if !ctx.hasValidRef() {
+		return
+	}
 	ctx.ProcessJobs()
 	C.js_std_loop(ctx.ref)
 	ctx.ProcessJobs()

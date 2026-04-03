@@ -146,6 +146,36 @@ func TestHandleStore_EdgeCases(t *testing.T) {
 	})
 }
 
+func TestHandleStore_FailClosedOnCorruptedEntries(t *testing.T) {
+	hs := newHandleStore()
+	require.NotNil(t, hs)
+
+	hs.handles.Store(int32(1001), "corrupted")
+	loaded, ok := hs.Load(1001)
+	require.False(t, ok)
+	require.Nil(t, loaded)
+
+	hs.handles.Store(int32(1002), "corrupted")
+	require.False(t, hs.Delete(1002))
+
+	hs.handles.Store(int32(1003), "corrupted")
+	require.NotPanics(t, func() {
+		hs.Clear()
+	})
+	require.Equal(t, 0, hs.Count())
+
+	var nilStore *handleStore
+	require.EqualValues(t, 0, nilStore.Store("ignored"))
+	loaded, ok = nilStore.Load(1)
+	require.False(t, ok)
+	require.Nil(t, loaded)
+	require.False(t, nilStore.Delete(1))
+	require.NotPanics(t, func() {
+		nilStore.Clear()
+	})
+	require.Equal(t, 0, nilStore.Count())
+}
+
 func TestHandleStore_CustomStartID(t *testing.T) {
 	t.Run("StartFromZero", func(t *testing.T) {
 		hs := newHandleStoreWithStartID(0)
