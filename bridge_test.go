@@ -190,6 +190,12 @@ func TestResolveClassObjectFromOpaqueContracts(t *testing.T) {
 	require.Equal(t, ctx2, ownerCtx)
 	require.Equal(t, legacyHandleInCtx2, handleID)
 
+	ctxNoStoreLegacy := &Context{runtime: rt}
+	ownerCtx, handleID, ok = resolveClassObjectFromOpaque(ctxNoStoreLegacy, legacyHandleOpaque(legacyHandleInCtx2))
+	require.True(t, ok)
+	require.Equal(t, ctx2, ownerCtx)
+	require.Equal(t, legacyHandleInCtx2, handleID)
+
 	idHandle := ctx.handleStore.Store("identity-handle")
 	defer ctx.handleStore.Delete(idHandle)
 	objectID := rt.registerClassObjectIdentity(ctx.contextID, idHandle)
