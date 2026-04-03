@@ -174,13 +174,13 @@ func getContextAndModuleBuilder(ctx *C.JSContext, m *C.JSModuleDef) (*Context, *
 
 	goCtx, builderInterface, err := getContextAndObject(ctx, C.int(builderID), errFunctionNotFound)
 	if err != nil {
-		return nil, nil, fmt.Errorf("Failed to get context and ModuleBuilder: %v", err.message)
+		return nil, nil, fmt.Errorf("failed to get context and module builder: %v", err.message)
 	}
 
 	// Type assertion to ModuleBuilder
 	builder, ok := builderInterface.(*ModuleBuilder)
 	if !ok || builder == nil {
-		return nil, nil, fmt.Errorf("Failed to get context and ModuleBuilder: invalid module builder handle")
+		return nil, nil, fmt.Errorf("failed to get context and module builder: invalid module builder handle")
 	}
 
 	return goCtx, builder, nil
