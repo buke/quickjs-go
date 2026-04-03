@@ -64,6 +64,31 @@ func resolveClassObjectFromOpaque(ctx *Context, opaque unsafe.Pointer) (*Context
 	return ctx, legacyHandleID, true
 }
 
+func findRuntimeContextByLegacyHandle(rt *Runtime, handleID int32) *Context {
+	if rt == nil || handleID <= 0 {
+		return nil
+	}
+
+	var targetCtx *Context
+	rt.contexts.Range(func(_, value interface{}) bool {
+		ctx, ok := value.(*Context)
+		if !ok || ctx == nil || !ctx.hasValidRef() || ctx.handleStore == nil {
+			return true
+		}
+		if _, exists := ctx.handleStore.Load(handleID); exists {
+			targetCtx = ctx
+			return false
+		}
+		return true
+	})
+
+	return targetCtx
+}
+
+func setValueOpaqueForTest(val C.JSValue, opaqueID int32) {
+	C.JS_SetOpaque(val, C.IntToOpaque(C.int32_t(opaqueID)))
+}
+
 // =============================================================================
 // CONTEXT AND RUNTIME MAPPING FUNCTIONS
 // =============================================================================
@@ -522,18 +547,29 @@ func goClassFinalizerProxy(rt *C.JSRuntime, val C.JSValue) {
 	}
 
 	objectID := int32(C.OpaqueToInt(opaque))
-	identity, ok := goRt.takeClassObjectIdentity(objectID)
-	if !ok {
-		return
+
+	var targetCtx *Context
+	var handleID int32
+
+	if objectID < 0 {
+		identity, ok := goRt.takeClassObjectIdentity(objectID)
+		if !ok {
+			return
+		}
+
+		targetCtx = goRt.getOwnedContextByID(identity.contextID)
+		handleID = identity.handleID
+	} else {
+		handleID = objectID
+		targetCtx = findRuntimeContextByLegacyHandle(goRt, handleID)
 	}
 
-	targetCtx := goRt.getOwnedContextByID(identity.contextID)
 	if targetCtx == nil || targetCtx.handleStore == nil {
 		return
 	}
 
 	// Get Go object from HandleStore
-	if goObj, exists := targetCtx.handleStore.Load(identity.handleID); exists {
+	if goObj, exists := targetCtx.handleStore.Load(handleID); exists {
 		// Check if object implements optional ClassFinalizer interface
 		if finalizer, ok := goObj.(ClassFinalizer); ok {
 			// Call user-defined cleanup method
@@ -547,7 +583,7 @@ func goClassFinalizerProxy(rt *C.JSRuntime, val C.JSValue) {
 		}
 
 		// Always clean up HandleStore reference (corresponds to point.c: js_free_rt)
-		targetCtx.handleStore.Delete(identity.handleID)
+		targetCtx.handleStore.Delete(handleID)
 	}
 }
 

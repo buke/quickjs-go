@@ -351,6 +351,55 @@ func TestRuntimeContextIDAndClassObjectIdentityRegistry(t *testing.T) {
 	require.False(t, ok)
 }
 
+func TestRuntimeNextClassObjectIDOverflowWrapsBackToNegative(t *testing.T) {
+	const maxInt32 = int32(^uint32(0) >> 1)
+
+	rt := &Runtime{}
+	rt.classObjectIDCounter.Store(maxInt32 - 1)
+
+	first := rt.nextClassObjectID()
+	second := rt.nextClassObjectID()
+
+	require.Equal(t, -(maxInt32), first)
+	require.Less(t, second, int32(0))
+	require.Equal(t, int32(-1), second)
+}
+
+func TestRuntimeRegisterClassObjectIdentityCorruptedBucketConcurrent(t *testing.T) {
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	rt.classObjectIDsByCtx.Store(ctx.contextID, "corrupted-bucket")
+
+	const workers = 32
+	ids := make(chan int32, workers)
+	var wg sync.WaitGroup
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			ids <- rt.registerClassObjectIdentity(ctx.contextID, int32(i+1))
+		}(i)
+	}
+	wg.Wait()
+	close(ids)
+
+	seen := make(map[int32]struct{}, workers)
+	for id := range ids {
+		require.Less(t, id, int32(0))
+		_, exists := seen[id]
+		require.False(t, exists)
+		seen[id] = struct{}{}
+
+		identity, ok := rt.getClassObjectIdentity(id)
+		require.True(t, ok)
+		require.Equal(t, ctx.contextID, identity.contextID)
+	}
+	require.Equal(t, workers, len(seen))
+}
+
 func TestRuntimeIdentityRegistryCorruptionFailClosed(t *testing.T) {
 	rt := NewRuntime()
 	defer rt.Close()

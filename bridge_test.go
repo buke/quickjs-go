@@ -468,6 +468,56 @@ func TestBridgeClassFinalizerProxyContracts(t *testing.T) {
 	})
 }
 
+func TestBridgeClassFinalizerLegacyHandleFallback(t *testing.T) {
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	var finalized atomic.Bool
+
+	constructor, _ := NewClassBuilder("LegacyFinalizerFallbackClass").
+		Constructor(func(ctx *Context, instance *Value, args []*Value) (interface{}, error) {
+			return &bridgeFinalizerProbe{mark: &finalized}, nil
+		}).
+		Build(ctx)
+	require.False(t, constructor.IsException())
+	ctx.Globals().Set("LegacyFinalizerFallbackClass", constructor)
+
+	instance := ctx.Eval(`new LegacyFinalizerFallbackClass()`)
+	defer instance.Free()
+	require.False(t, instance.IsException())
+
+	var objectID int32
+	rt.classObjectRegistry.Range(func(key, value interface{}) bool {
+		id, ok := key.(int32)
+		if !ok {
+			return true
+		}
+		identity, ok := value.(classObjectIdentity)
+		if !ok {
+			return true
+		}
+		if identity.contextID == ctx.contextID {
+			objectID = id
+			return false
+		}
+		return true
+	})
+	require.Less(t, objectID, int32(0))
+
+	identity, ok := rt.takeClassObjectIdentity(objectID)
+	require.True(t, ok)
+	require.Greater(t, identity.handleID, int32(0))
+
+	setValueOpaqueForTest(instance.ref, identity.handleID)
+	goClassFinalizerProxy(rt.ref, instance.ref)
+
+	require.True(t, finalized.Load())
+	_, exists := ctx.handleStore.Load(identity.handleID)
+	require.False(t, exists)
+}
+
 func TestBridgeClassFinalizerOwnershipInSameRuntime(t *testing.T) {
 	rt := NewRuntime()
 	defer rt.Close()

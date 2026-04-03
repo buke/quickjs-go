@@ -509,7 +509,16 @@ func (r *Runtime) nextClassObjectID() int32 {
 	if r == nil {
 		return 0
 	}
-	return -r.classObjectIDCounter.Add(1)
+	for {
+		id := r.classObjectIDCounter.Add(1)
+		if id > 0 {
+			return -id
+		}
+
+		// Overflow wraps int32 into non-positive values; best-effort reset keeps
+		// identity IDs in the negative namespace.
+		r.classObjectIDCounter.CompareAndSwap(id, 0)
+	}
 }
 
 func (r *Runtime) getOwnedContextByID(contextID uint64) *Context {
@@ -543,9 +552,21 @@ func (r *Runtime) registerClassObjectIdentity(contextID uint64, handleID int32) 
 	bucketValue, _ := r.classObjectIDsByCtx.LoadOrStore(contextID, &sync.Map{})
 	bucket, ok := bucketValue.(*sync.Map)
 	if !ok {
-		replacement := &sync.Map{}
-		r.classObjectIDsByCtx.Store(contextID, replacement)
-		bucket = replacement
+		// Corruption path: serialize replacement to avoid concurrent overwrite.
+		r.mu.Lock()
+		currentBucket, loaded := r.classObjectIDsByCtx.Load(contextID)
+		if loaded {
+			if existing, typed := currentBucket.(*sync.Map); typed {
+				bucket = existing
+				ok = true
+			}
+		}
+		if !ok {
+			replacement := &sync.Map{}
+			r.classObjectIDsByCtx.Store(contextID, replacement)
+			bucket = replacement
+		}
+		r.mu.Unlock()
 	}
 	bucket.Store(objectID, struct{}{})
 
