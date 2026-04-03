@@ -55,6 +55,13 @@ deps/quickjs 中的运行时源码不再通过 git submodule 更新，而是按 
 - Runtime 和 Context 对象有自己的清理方法 (`Close()`)。使用完毕后立即关闭它们。
 - 谨慎使用 `runtime.SetFinalizer()`，因为它可能会干扰 QuickJS 的 GC。
 
+### 生命周期与边界契约
+- 在 `Context.Close()` 之后，边界查询采用 fail-closed 语义：`Runtime()` 返回 `nil`，`HasException()` 返回 `false`，`Exception()` 返回 `nil`，`Loop()` 变为 no-op，`Schedule()` 返回 `false`。
+- 当 `Value` 的上下文引用已失效时，`Value.Free()` 会 fail-closed，避免关闭后的不安全 cgo 调用。
+- bridge 映射和 handleStore 在遇到损坏条目（错误类型）时采用 fail-closed，避免 panic 级崩溃。
+- Go 回调在 function/method/getter/setter 代理里返回 `nil` 时，会统一映射为 JavaScript `undefined`。
+- 模块初始化阶段会校验导出值：导出值必须非 `nil`、上下文可用且属于当前初始化上下文。
+
 ### 性能建议
 - QuickJS 不是线程安全的。如需并发或隔离，建议使用线程池模式预初始化运行时，或为不同任务/用户管理独立的 Runtime/Context 实例。
 - 线程归属由调用方自己负责。当前库不再在内部偷偷调用 `runtime.LockOSThread()` / `runtime.UnlockOSThread()`。

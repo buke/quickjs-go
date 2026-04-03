@@ -889,6 +889,38 @@ func TestValueClassInstanceEdgeCases(t *testing.T) {
 	})
 }
 
+func TestValueInternalStateHelpers(t *testing.T) {
+	var nilValue *Value
+	require.False(t, nilValue.hasValidContext())
+	require.False(t, sameContext(nilValue, nil))
+
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx1 := rt.NewContext()
+	defer ctx1.Close()
+	ctx2 := rt.NewContext()
+	defer ctx2.Close()
+
+	v1 := ctx1.NewInt32(1)
+	v2 := ctx1.NewInt32(2)
+	v3 := ctx2.NewInt32(3)
+	defer v1.Free()
+	defer v2.Free()
+	defer v3.Free()
+
+	require.True(t, v1.hasValidContext())
+	require.True(t, sameContext(v1, v2))
+	require.False(t, sameContext(v1, v3))
+	require.False(t, sameContext(v1, nil))
+}
+
+func TestValueGetGoObjectUnavailableContext(t *testing.T) {
+	v := &Value{}
+	_, err := v.GetGoObject()
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "value context is not available")
+}
+
 // TestValueCallConstructorEdgeCases tests edge cases and error conditions in CallConstructor
 // MODIFIED FOR SCHEME C: Removed all NewInstance tests, enhanced CallConstructor coverage
 func TestValueCallConstructorEdgeCases(t *testing.T) {

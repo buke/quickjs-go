@@ -37,7 +37,15 @@ func unregisterContext(cCtx *C.JSContext) {
 // getContextFromJS gets Go Context from C JSContext (internal use)
 func getContextFromJS(cCtx *C.JSContext) *Context {
 	if value, ok := contextMapping.Load(cCtx); ok {
-		return value.(*Context)
+		ctx, ok := value.(*Context)
+		if !ok {
+			contextMapping.Delete(cCtx)
+			return nil
+		}
+		if !ctx.hasValidRef() {
+			return nil
+		}
+		return ctx
 	}
 	return nil
 }
@@ -55,7 +63,15 @@ func unregisterRuntime(cRt *C.JSRuntime) {
 // getRuntimeFromJS gets Go Runtime from C JSRuntime (internal use)
 func getRuntimeFromJS(cRt *C.JSRuntime) *Runtime {
 	if value, ok := runtimeMapping.Load(cRt); ok {
-		return value.(*Runtime)
+		rt, ok := value.(*Runtime)
+		if !ok {
+			runtimeMapping.Delete(cRt)
+			return nil
+		}
+		if !rt.isAlive() {
+			return nil
+		}
+		return rt
 	}
 	return nil
 }
@@ -162,7 +178,10 @@ func getContextAndModuleBuilder(ctx *C.JSContext, m *C.JSModuleDef) (*Context, *
 	}
 
 	// Type assertion to ModuleBuilder
-	builder, _ := builderInterface.(*ModuleBuilder)
+	builder, ok := builderInterface.(*ModuleBuilder)
+	if !ok || builder == nil {
+		return nil, nil, fmt.Errorf("Failed to get context and ModuleBuilder: invalid module builder handle")
+	}
 
 	return goCtx, builder, nil
 }
@@ -221,6 +240,9 @@ func goFunctionProxy(ctx *C.JSContext, thisVal C.JSValueConst,
 	args := convertCArgsToGoValues(argc, (*C.JSValue)(argv), goCtx)
 	thisValue := &Value{ctx: goCtx, ref: thisVal}
 	result := goFn(goCtx, thisValue, args)
+	if result == nil {
+		return C.JS_NewUndefined()
+	}
 	return result.ref
 }
 
@@ -323,6 +345,10 @@ func goClassConstructorProxy(ctx *C.JSContext, newTarget C.JSValue,
 
 	// SCHEME C STEP 4: Associate Go object with instance if constructor returned non-nil object
 	if goObj != nil {
+		if goCtx.handleStore == nil {
+			C.JS_FreeValue(ctx, instance)
+			return throwProxyError(ctx, proxyError{"InternalError", "Handle store not available"})
+		}
 		handleID := goCtx.handleStore.Store(goObj)
 		C.JS_SetOpaque(instance, C.IntToOpaque(C.int32_t(handleID)))
 	}
@@ -354,6 +380,9 @@ func goClassMethodProxy(ctx *C.JSContext, thisVal C.JSValue,
 	thisValue := &Value{ctx: goCtx, ref: thisVal}
 	args := convertCArgsToGoValues(argc, argv, goCtx)
 	result := method(goCtx, thisValue, args)
+	if result == nil {
+		return C.JS_NewUndefined()
+	}
 	return result.ref
 }
 
@@ -379,6 +408,9 @@ func goClassGetterProxy(ctx *C.JSContext, thisVal C.JSValue, magic C.int) C.JSVa
 	// Call getter with this value only - MODIFIED: now uses pointer conversion
 	thisValue := &Value{ctx: goCtx, ref: thisVal}
 	result := getter(goCtx, thisValue)
+	if result == nil {
+		return C.JS_NewUndefined()
+	}
 	return result.ref
 }
 
@@ -406,6 +438,9 @@ func goClassSetterProxy(ctx *C.JSContext, thisVal C.JSValue,
 	thisValue := &Value{ctx: goCtx, ref: thisVal}
 	setValue := &Value{ctx: goCtx, ref: val}
 	result := setter(goCtx, thisValue, setValue)
+	if result == nil {
+		return C.JS_NewUndefined()
+	}
 	return result.ref
 }
 
@@ -434,7 +469,10 @@ func goClassFinalizerProxy(rt *C.JSRuntime, val C.JSValue) {
 	// Since finalizer is called at runtime level, we iterate through contexts
 	var targetCtx *Context
 	contextMapping.Range(func(key, value interface{}) bool {
-		ctx := value.(*Context)
+		ctx, ok := value.(*Context)
+		if !ok || ctx == nil || ctx.runtime == nil || ctx.handleStore == nil || !ctx.hasValidRef() {
+			return true
+		}
 		if ctx.runtime.ref == rt {
 			// Check if this context has the handle
 			if _, exists := ctx.handleStore.Load(handleID); exists {
@@ -487,6 +525,10 @@ func goModuleInitProxy(ctx *C.JSContext, m *C.JSModuleDef) C.int {
 
 	// Step 2: Set all export values using JS_SetModuleExport
 	for _, export := range builder.exports {
+		if export.Value == nil || !export.Value.hasValidContext() || export.Value.ctx != goCtx {
+			return throwModuleError(ctx, fmt.Errorf("invalid module export value: %s", export.Name))
+		}
+
 		exportName := C.CString(export.Name)
 		// JS_SetModuleExport takes ownership of the JSValue (it will free it on failure).
 		// To prevent Go-side double free (issue #688), invalidate the Go Value after

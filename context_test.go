@@ -76,6 +76,82 @@ func TestContextCloseNilReceiver(t *testing.T) {
 	})
 }
 
+func TestContextPostCloseContracts(t *testing.T) {
+	rt := NewRuntime()
+	ctx := rt.NewContext()
+	require.NotNil(t, ctx)
+
+	v := ctx.NewString("post-close-free")
+	require.NotNil(t, v)
+
+	ctx.Close()
+
+	require.Nil(t, ctx.Runtime())
+	require.False(t, ctx.HasException())
+	require.Nil(t, ctx.Exception())
+	require.False(t, ctx.Schedule(func(*Context) {}))
+	require.NotPanics(t, func() {
+		ctx.Loop()
+	})
+	require.NotPanics(t, func() {
+		v.Free()
+	})
+
+	rt.Close()
+}
+
+func TestContextInternalStateHelpers(t *testing.T) {
+	var nilCtx *Context
+	require.Nil(t, nilCtx.Runtime())
+	require.False(t, nilCtx.isAlive())
+
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+
+	require.True(t, ctx.isAlive())
+
+	fn := ctx.NewFunction(func(ctx *Context, this *Value, args []*Value) *Value {
+		return ctx.NewUndefined()
+	})
+
+	var handleID int32
+	ctx.handleStore.handles.Range(func(key, _ interface{}) bool {
+		handleID = key.(int32)
+		return false
+	})
+	require.Greater(t, handleID, int32(0))
+	require.NotNil(t, ctx.loadFunctionFromHandleID(handleID))
+
+	require.Nil(t, ctx.loadFunctionFromHandleID(0))
+	require.Nil(t, ctx.loadFunctionFromHandleID(-1))
+
+	empty := &Context{}
+	require.Nil(t, empty.loadFunctionFromHandleID(handleID))
+
+	fn.Free()
+	ctx.Close()
+	require.False(t, ctx.isAlive())
+}
+
+func TestContextIsAliveEdgeCases(t *testing.T) {
+	var nilCtx *Context
+	require.False(t, nilCtx.isAlive())
+
+	refOnly := &Context{ref: nil}
+	require.False(t, refOnly.isAlive())
+
+	rt := NewRuntime()
+	ctx := rt.NewContext()
+	require.NotNil(t, ctx)
+
+	orphan := &Context{ref: ctx.ref}
+	require.False(t, orphan.isAlive())
+
+	ctx.Close()
+	rt.Close()
+}
+
 func TestContextEvaluation(t *testing.T) {
 	rt := NewRuntime()
 	defer rt.Close()

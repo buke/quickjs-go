@@ -55,6 +55,13 @@ The runtime sources under deps/quickjs are no longer updated via git submodule. 
 - Runtime and Context objects have their own cleanup methods (`Close()`). Close them once you are done using them.
 - Use `runtime.SetFinalizer()` cautiously as it may interfere with QuickJS's GC.
 
+### Lifecycle and Boundary Contracts
+- After `Context.Close()`, boundary queries are fail-closed: `Runtime()` returns `nil`, `HasException()` returns `false`, `Exception()` returns `nil`, `Loop()` becomes a no-op, and `Schedule()` returns `false`.
+- `Value.Free()` is fail-closed when its context pointer is no longer valid, avoiding unsafe cgo calls after close.
+- Bridge mapping and handle-store reads are fail-closed under corrupted entries (wrong types), preventing panic-based crashes.
+- Go callbacks returning `nil` from function/method/getter/setter proxies are normalized to JavaScript `undefined`.
+- Module exports are validated during module initialization: export values must be non-`nil`, context-live, and belong to the initializing context.
+
 ### Performance Tips
 - QuickJS is not thread-safe. For concurrency or isolation, use a thread pool pattern with pre-initialized runtimes, or manage separate Runtime/Context instances for different tasks or users.
 - Thread affinity is the caller's responsibility. This library no longer calls `runtime.LockOSThread()` / `runtime.UnlockOSThread()` internally.

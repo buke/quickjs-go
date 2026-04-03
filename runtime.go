@@ -45,6 +45,12 @@ type Runtime struct {
 	stdHandlersInitialized bool
 }
 
+// isAlive reports whether the runtime still has a valid native handle and
+// has not started closing.
+func (r *Runtime) isAlive() bool {
+	return r != nil && r.ref != nil && !r.closed.Load()
+}
+
 type Options struct {
 	timeout      uint64
 	memoryLimit  uint64

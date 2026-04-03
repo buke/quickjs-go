@@ -27,6 +27,10 @@ func newHandleStoreWithStartID(startID int32) *handleStore {
 
 // Store stores a value and returns int32 ID (safe for JS magic parameter)
 func (hs *handleStore) Store(value interface{}) int32 {
+	if hs == nil {
+		return 0
+	}
+
 	id := hs.nextID.Add(1)
 
 	// check int32 overflow to prevent magic parameter issues
@@ -41,8 +45,16 @@ func (hs *handleStore) Store(value interface{}) int32 {
 
 // Load loads value by ID
 func (hs *handleStore) Load(id int32) (interface{}, bool) {
+	if hs == nil || id <= 0 {
+		return nil, false
+	}
+
 	if value, ok := hs.handles.Load(id); ok {
-		handle := value.(cgo.Handle)
+		handle, ok := value.(cgo.Handle)
+		if !ok {
+			hs.handles.Delete(id)
+			return nil, false
+		}
 		return handle.Value(), true
 	}
 	return nil, false
@@ -50,8 +62,15 @@ func (hs *handleStore) Load(id int32) (interface{}, bool) {
 
 // Delete deletes handle by ID and properly releases cgo.Handle
 func (hs *handleStore) Delete(id int32) bool {
+	if hs == nil || id <= 0 {
+		return false
+	}
+
 	if value, ok := hs.handles.LoadAndDelete(id); ok {
-		handle := value.(cgo.Handle)
+		handle, ok := value.(cgo.Handle)
+		if !ok {
+			return false
+		}
 		handle.Delete() // critical: release cgo.Handle to prevent memory leak
 		return true
 	}
@@ -60,9 +79,15 @@ func (hs *handleStore) Delete(id int32) bool {
 
 // Clear clears all handles (called on Context.Close)
 func (hs *handleStore) Clear() {
+	if hs == nil {
+		return
+	}
+
 	hs.handles.Range(func(key, value interface{}) bool {
-		handle := value.(cgo.Handle)
-		handle.Delete() // ensure all cgo.Handle are properly released
+		handle, ok := value.(cgo.Handle)
+		if ok {
+			handle.Delete() // ensure all cgo.Handle are properly released
+		}
 		hs.handles.Delete(key)
 		return true
 	})
@@ -70,6 +95,10 @@ func (hs *handleStore) Clear() {
 
 // Count returns number of stored handles (for debugging)
 func (hs *handleStore) Count() int {
+	if hs == nil {
+		return 0
+	}
+
 	count := 0
 	hs.handles.Range(func(_, _ interface{}) bool {
 		count++
