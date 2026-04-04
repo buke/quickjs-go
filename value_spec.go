@@ -54,3 +54,15 @@ func (s contextValueSpec) Materialize(_ *Context) (*Value, error) {
 	}
 	return s.value, nil
 }
+
+func isContextValueSpec(spec ValueSpec) bool {
+	if spec == nil {
+		return false
+	}
+	_, ok := spec.(contextValueSpec)
+	if ok {
+		return true
+	}
+	_, ok = spec.(*contextValueSpec)
+	return ok
+}

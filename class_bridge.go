@@ -1,6 +1,9 @@
 package quickjs
 
-import "unsafe"
+import (
+	"fmt"
+	"unsafe"
+)
 
 /*
 #include <stdint.h>
@@ -59,13 +62,41 @@ func goClassConstructorProxy(ctx *C.JSContext, newTarget C.JSValueConst,
 
 	var instanceProperties []C.PropertyEntry
 	var instancePropertyNames []*C.char
+	type materializedInstanceProperty struct {
+		spec  ValueSpec
+		value *Value
+	}
+	var materializedProperties []materializedInstanceProperty
+	defer func() {
+		for _, p := range materializedProperties {
+			if p.value == nil || isContextValueSpec(p.spec) {
+				continue
+			}
+			p.value.Free()
+		}
+	}()
+	defer func() {
+		for _, cStr := range instancePropertyNames {
+			C.free(unsafe.Pointer(cStr))
+		}
+	}()
+
 	for _, property := range builder.properties {
 		if !property.Static {
+			if property.Spec == nil {
+				return throwProxyError(ctx, proxyError{"InternalError", fmt.Sprintf("property value is required: %s", property.Name)})
+			}
+			propertyValue, err := property.Spec.Materialize(goCtx)
+			if err != nil || propertyValue == nil || !propertyValue.belongsTo(goCtx) {
+				return throwProxyError(ctx, proxyError{"InternalError", fmt.Sprintf("invalid property value: %s", property.Name)})
+			}
+			materializedProperties = append(materializedProperties, materializedInstanceProperty{spec: property.Spec, value: propertyValue})
+
 			propertyName := C.CString(property.Name)
 			instancePropertyNames = append(instancePropertyNames, propertyName)
 			instanceProperties = append(instanceProperties, C.PropertyEntry{
 				name:      propertyName,
-				value:     property.Value.ref,
+				value:     propertyValue.ref,
 				is_static: C.int(0),
 				flags:     C.int(property.Flags),
 			})
@@ -84,10 +115,6 @@ func goClassConstructorProxy(ctx *C.JSContext, newTarget C.JSValueConst,
 		instancePropertiesPtr,
 		C.int(len(instanceProperties)),
 	)
-
-	for _, cStr := range instancePropertyNames {
-		C.free(unsafe.Pointer(cStr))
-	}
 
 	if bool(C.JS_IsException(instance)) {
 		return instance

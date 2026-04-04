@@ -107,9 +107,9 @@ type AccessorEntry struct {
 // PropertyEntry represents a property binding configuration - changed to use pointer
 type PropertyEntry struct {
 	Name   string // Property name in JavaScript
-	Value  *Value // Property value (JavaScript Value) - changed to pointer
-	Static bool   // true for static properties, false for instance properties
-	Flags  int    // Property flags (writable, enumerable, configurable)
+	Spec   ValueSpec
+	Static bool // true for static properties, false for instance properties
+	Flags  int  // Property flags (writable, enumerable, configurable)
 }
 
 // =============================================================================
@@ -222,6 +222,14 @@ func (cb *ClassBuilder) StaticAccessor(name string, getter ClassGetterFunc, sett
 // Default flags: writable, enumerable, configurable
 // SCHEME C: Instance properties will be bound during instance creation
 func (cb *ClassBuilder) Property(name string, value *Value, flags ...int) *ClassBuilder {
+	if value == nil {
+		return cb.PropertyValue(name, nil, flags...)
+	}
+	return cb.PropertyValue(name, contextValueSpec{value: value}, flags...)
+}
+
+// PropertyValue adds a data property spec to the class instance.
+func (cb *ClassBuilder) PropertyValue(name string, spec ValueSpec, flags ...int) *ClassBuilder {
 	propFlags := PropertyDefault
 	if len(flags) > 0 {
 		propFlags = flags[0]
@@ -229,16 +237,25 @@ func (cb *ClassBuilder) Property(name string, value *Value, flags ...int) *Class
 
 	cb.properties = append(cb.properties, PropertyEntry{
 		Name:   name,
-		Value:  value, // Now expects *Value
+		Spec:   spec,
 		Static: false, // Instance property
 		Flags:  propFlags,
 	})
 	return cb
 }
 
+// PropertyLiteral adds a literal data property to the class instance.
+func (cb *ClassBuilder) PropertyLiteral(name string, value interface{}, flags ...int) *ClassBuilder {
+	return cb.PropertyValue(name, LiteralSpec{Value: value}, flags...)
+}
+
 // StaticProperty adds a data property to the class constructor - changed to use pointer
 // Default flags: writable, enumerable, configurable
 func (cb *ClassBuilder) StaticProperty(name string, value *Value, flags ...int) *ClassBuilder {
+	var spec ValueSpec
+	if value != nil {
+		spec = contextValueSpec{value: value}
+	}
 	propFlags := PropertyDefault
 	if len(flags) > 0 {
 		propFlags = flags[0]
@@ -246,8 +263,8 @@ func (cb *ClassBuilder) StaticProperty(name string, value *Value, flags ...int) 
 
 	cb.properties = append(cb.properties, PropertyEntry{
 		Name:   name,
-		Value:  value, // Now expects *Value
-		Static: true,  // Static property
+		Spec:   spec,
+		Static: true, // Static property
 		Flags:  propFlags,
 	})
 	return cb
@@ -285,7 +302,7 @@ func validateClassBuilder(builder *ClassBuilder) error {
 		}
 	}
 	for _, property := range builder.properties {
-		if property.Value == nil {
+		if property.Spec == nil {
 			return fmt.Errorf("property value is required: %s", property.Name)
 		}
 	}
@@ -311,14 +328,24 @@ func createClass(ctx *Context, builder *ClassBuilder) (*Value, uint32) {
 
 	// Step 3: Prepare classID variable for C function to allocate internally - unchanged
 	var classID C.JSClassID
+	var methodIDs []int32
+	var accessorIDs []int32
 
 	// SCHEME C STEP 4: Store entire ClassBuilder in HandleStore (not just constructor)
 	// This allows constructor proxy to access both constructor function and instance properties
 	constructorID := ctx.handleStore.Store(builder)
+	cleanupStoredHandlers := func() {
+		ctx.handleStore.Delete(constructorID)
+		for _, id := range methodIDs {
+			ctx.handleStore.Delete(id)
+		}
+		for _, id := range accessorIDs {
+			ctx.handleStore.Delete(id)
+		}
+	}
 
 	// Step 5: Prepare method entries for C layer - unchanged logic, same implementation
 	var cMethods []C.MethodEntry
-	var methodIDs []int32
 
 	for _, method := range builder.methods {
 		// Store method function in handleStore
@@ -349,7 +376,6 @@ func createClass(ctx *Context, builder *ClassBuilder) (*Value, uint32) {
 
 	// Step 6: Prepare accessor entries for C layer - unchanged logic, same implementation
 	var cAccessors []C.AccessorEntry
-	var accessorIDs []int32
 
 	for _, accessor := range builder.accessors {
 		// Convert accessor name to C string
@@ -390,20 +416,47 @@ func createClass(ctx *Context, builder *ClassBuilder) (*Value, uint32) {
 	// SCHEME C STEP 7: Prepare property entries - ONLY STATIC PROPERTIES for CreateClass
 	// Instance properties are handled separately by constructor proxy
 	var cProperties []C.PropertyEntry
+	var staticPropertyNames []*C.char
+	type materializedStaticProperty struct {
+		spec  ValueSpec
+		value *Value
+	}
+	var materializedStatic []materializedStaticProperty
+	defer func() {
+		for _, p := range materializedStatic {
+			if p.value == nil || isContextValueSpec(p.spec) {
+				continue
+			}
+			p.value.Free()
+		}
+	}()
+	defer func() {
+		for _, name := range staticPropertyNames {
+			C.free(unsafe.Pointer(name))
+		}
+	}()
 
 	for _, property := range builder.properties {
 		// SCHEME C: Only include static properties for CreateClass call
 		// Instance properties will be handled by constructor proxy during instance creation
 		if property.Static {
+			propertyValue, err := property.Spec.Materialize(ctx)
+			if err != nil || propertyValue == nil || !propertyValue.belongsTo(ctx) {
+				cleanupStoredHandlers()
+				return ctx.ThrowError(fmt.Errorf("invalid property value: %s", property.Name)), 0
+			}
+			materializedStatic = append(materializedStatic, materializedStaticProperty{spec: property.Spec, value: propertyValue})
+
 			// Convert property name to C string
 			propertyName := C.CString(property.Name)
+			staticPropertyNames = append(staticPropertyNames, propertyName)
 			// Note: Don't defer free as C layer needs these strings during binding
 
 			// Create C property entry for static property only
 			cProperties = append(cProperties, C.PropertyEntry{
 				name:      propertyName,
-				value:     property.Value.ref, // Use JSValue directly from *Value
-				is_static: C.int(1),           // Always static for CreateClass
+				value:     propertyValue.ref,
+				is_static: C.int(1), // Always static for CreateClass
 				flags:     C.int(property.Flags),
 			})
 		}
@@ -443,18 +496,7 @@ func createClass(ctx *Context, builder *ClassBuilder) (*Value, uint32) {
 	// Step 10: Error handling - clean up all stored handlers on failure - unchanged logic
 	if bool(C.JS_IsException(constructor)) {
 		fmt.Printf("Failed to create class '%s'\n", builder.name)
-		// Clean up constructor handler (now stores ClassBuilder)
-		ctx.handleStore.Delete(constructorID)
-
-		// Clean up method handlers
-		for _, id := range methodIDs {
-			ctx.handleStore.Delete(id)
-		}
-
-		// Clean up accessor handlers
-		for _, id := range accessorIDs {
-			ctx.handleStore.Delete(id)
-		}
+		cleanupStoredHandlers()
 
 		// Note: Don't clean up className and classDef - let Go GC handle them
 		// The C function failed, so QuickJS isn't using them

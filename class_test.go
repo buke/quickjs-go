@@ -1125,6 +1125,127 @@ func TestMemoryManagement(t *testing.T) {
 	t.Logf("Created and cleaned up multiple classes, finalizers called: %d", getFinalizeCount())
 }
 
+func TestClassBuilder_ValueSpecProperties(t *testing.T) {
+	useStableOwnerHooksForLegacySubtests(t)
+
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	t.Run("PropertyValueAndLiteral", func(t *testing.T) {
+		constructor, _ := NewClassBuilder("SpecPropertyClass").
+			Constructor(func(ctx *Context, instance *Value, args []*Value) (interface{}, error) {
+				return &Point{X: 0, Y: 0}, nil
+			}).
+			PropertyLiteral("label", "spec").
+			PropertyValue("num", FactorySpec{Factory: func(ctx *Context) (*Value, error) {
+				return ctx.NewInt32(7), nil
+			}}).
+			PropertyValue("meta", MarshalSpec{Value: map[string]interface{}{"x": 1}}).
+			StaticProperty("kind", ctx.NewString("legacy-static")).
+			Build(ctx)
+		require.False(t, constructor.IsException())
+
+		ctx.Globals().Set("SpecPropertyClass", constructor)
+		result := ctx.Eval(`
+			(() => {
+				const o = new SpecPropertyClass();
+				return [o.label, o.num, o.meta.x, SpecPropertyClass.kind].join(':');
+			})()
+		`)
+		defer result.Free()
+		require.False(t, result.IsException())
+		require.Equal(t, "spec:7:1:legacy-static", result.ToString())
+	})
+
+	t.Run("InvalidInstancePropertySpec", func(t *testing.T) {
+		constructor, _ := NewClassBuilder("SpecInvalidInstanceClass").
+			Constructor(func(ctx *Context, instance *Value, args []*Value) (interface{}, error) {
+				return &Point{X: 0, Y: 0}, nil
+			}).
+			PropertyValue("bad", FactorySpec{}).
+			Build(ctx)
+		require.False(t, constructor.IsException())
+
+		ctx.Globals().Set("SpecInvalidInstanceClass", constructor)
+		result := ctx.Eval(`new SpecInvalidInstanceClass()`)
+		defer result.Free()
+		require.True(t, result.IsException())
+		err := ctx.Exception()
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "invalid property value")
+	})
+
+	t.Run("InvalidStaticPropertySpec", func(t *testing.T) {
+		builder := NewClassBuilder("SpecInvalidStaticClass").
+			Constructor(func(ctx *Context, instance *Value, args []*Value) (interface{}, error) {
+				return &Point{X: 0, Y: 0}, nil
+			})
+		builder.properties = append(builder.properties, PropertyEntry{
+			Name:   "badStatic",
+			Spec:   FactorySpec{},
+			Static: true,
+			Flags:  PropertyDefault,
+		})
+
+		constructor, _ := builder.Build(ctx)
+		require.True(t, constructor.IsException())
+		err := ctx.Exception()
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "invalid property value")
+	})
+
+	t.Run("StaticNonLegacySpec", func(t *testing.T) {
+		builder := NewClassBuilder("SpecStaticNonLegacyClass").
+			Constructor(func(ctx *Context, instance *Value, args []*Value) (interface{}, error) {
+				return &Point{X: 0, Y: 0}, nil
+			})
+		builder.properties = append(builder.properties, PropertyEntry{
+			Name:   "tag",
+			Spec:   LiteralSpec{Value: 99},
+			Static: true,
+			Flags:  PropertyDefault,
+		})
+
+		constructor, _ := builder.Build(ctx)
+		require.False(t, constructor.IsException())
+
+		ctx.Globals().Set("SpecStaticNonLegacyClass", constructor)
+		result := ctx.Eval(`SpecStaticNonLegacyClass.tag`)
+		defer result.Free()
+		require.False(t, result.IsException())
+		require.Equal(t, int32(99), result.ToInt32())
+	})
+
+	t.Run("NilInstanceSpecAfterBuild", func(t *testing.T) {
+		builder := NewClassBuilder("SpecNilAfterBuildClass").
+			Constructor(func(ctx *Context, instance *Value, args []*Value) (interface{}, error) {
+				return &Point{X: 0, Y: 0}, nil
+			})
+
+		constructor, _ := builder.Build(ctx)
+		require.False(t, constructor.IsException())
+
+		builder.properties = append(builder.properties, PropertyEntry{
+			Name:   "lateBad",
+			Spec:   nil,
+			Static: false,
+			Flags:  PropertyDefault,
+		})
+
+		ctx.Globals().Set("SpecNilAfterBuildClass", constructor)
+		result := ctx.Eval(`new SpecNilAfterBuildClass()`)
+		defer result.Free()
+		require.True(t, result.IsException())
+		err := ctx.Exception()
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "property value is required")
+	})
+
+	require.False(t, isContextValueSpec(nil))
+}
+
 // TestComplexClassHierarchy tests complex inheritance scenarios
 func TestComplexClassHierarchy(t *testing.T) {
 	rt := NewRuntime()
