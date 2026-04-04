@@ -1100,9 +1100,11 @@ func TestRuntimeContextBootstrapOwnerDenied(t *testing.T) {
 func TestRuntimeContextBootstrapHooks(t *testing.T) {
 	oldStdOSHook := runtimeBootstrapStdOSHook
 	oldTimersHook := runtimeBootstrapTimersHook
+	oldStdOSInitHook := runtimeBootstrapStdOSInitHook
 	defer func() {
 		runtimeBootstrapStdOSHook = oldStdOSHook
 		runtimeBootstrapTimersHook = oldTimersHook
+		runtimeBootstrapStdOSInitHook = oldStdOSInitHook
 	}()
 
 	rt := NewRuntime()
@@ -1119,6 +1121,30 @@ func TestRuntimeContextBootstrapHooks(t *testing.T) {
 	ctx := rt.NewContextWithOptions(DefaultBootstrap())
 	require.NotNil(t, ctx)
 	ctx.Close()
+}
+
+func TestRuntimeBootstrapStdOSInitHook(t *testing.T) {
+	oldStdOSInitHook := runtimeBootstrapStdOSInitHook
+	defer func() {
+		runtimeBootstrapStdOSInitHook = oldStdOSInitHook
+	}()
+
+	rt := NewRuntime()
+	defer rt.Close()
+
+	ctx := rt.NewBareContext()
+	require.NotNil(t, ctx)
+	defer ctx.Close()
+
+	runtimeBootstrapStdOSInitHook = func(_ *Context) (bool, bool) {
+		return true, false
+	}
+	require.False(t, BootstrapStdOS(ctx))
+
+	runtimeBootstrapStdOSInitHook = func(_ *Context) (bool, bool) {
+		return true, true
+	}
+	require.True(t, BootstrapStdOS(ctx))
 }
 
 func TestRuntimeContextBootstrapStressContract(t *testing.T) {

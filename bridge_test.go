@@ -158,50 +158,25 @@ func TestResolveClassObjectFromOpaqueContracts(t *testing.T) {
 	ctx := rt.NewContext()
 	defer ctx.Close()
 
-	_, _, ok := resolveClassObjectFromOpaque(nil, legacyHandleOpaque(1))
+	_, _, ok := resolveClassObjectFromOpaque(nil, opaqueFromIDForTest(1))
 	require.False(t, ok)
 
 	orphanCtx := &Context{handleStore: ctx.handleStore}
-	_, _, ok = resolveClassObjectFromOpaque(orphanCtx, legacyHandleOpaque(1))
+	_, _, ok = resolveClassObjectFromOpaque(orphanCtx, classObjectOpaque(-1))
 	require.False(t, ok)
 
 	_, _, ok = resolveClassObjectFromOpaque(ctx, nil)
 	require.False(t, ok)
 
-	legacyHandle := ctx.handleStore.Store("legacy-handle")
-	defer ctx.handleStore.Delete(legacyHandle)
-
-	ownerCtx, handleID, ok := resolveClassObjectFromOpaque(ctx, legacyHandleOpaque(legacyHandle))
-	require.True(t, ok)
-	require.Equal(t, ctx, ownerCtx)
-	require.Equal(t, legacyHandle, handleID)
-
-	ctx.handleStore.Delete(legacyHandle)
-	_, _, ok = resolveClassObjectFromOpaque(ctx, legacyHandleOpaque(legacyHandle))
+	_, _, ok = resolveClassObjectFromOpaque(ctx, opaqueFromIDForTest(123))
 	require.False(t, ok)
-
-	ctx2 := rt.NewContext()
-	defer ctx2.Close()
-	legacyHandleInCtx2 := ctx2.handleStore.Store("legacy-handle-other-context")
-	defer ctx2.handleStore.Delete(legacyHandleInCtx2)
-
-	ownerCtx, handleID, ok = resolveClassObjectFromOpaque(ctx, legacyHandleOpaque(legacyHandleInCtx2))
-	require.True(t, ok)
-	require.Equal(t, ctx2, ownerCtx)
-	require.Equal(t, legacyHandleInCtx2, handleID)
-
-	ctxNoStoreLegacy := &Context{runtime: rt}
-	ownerCtx, handleID, ok = resolveClassObjectFromOpaque(ctxNoStoreLegacy, legacyHandleOpaque(legacyHandleInCtx2))
-	require.True(t, ok)
-	require.Equal(t, ctx2, ownerCtx)
-	require.Equal(t, legacyHandleInCtx2, handleID)
 
 	idHandle := ctx.handleStore.Store("identity-handle")
 	defer ctx.handleStore.Delete(idHandle)
 	objectID := rt.registerClassObjectIdentity(ctx.contextID, idHandle)
 	require.NotZero(t, objectID)
 
-	ownerCtx, handleID, ok = resolveClassObjectFromOpaque(ctx, classObjectOpaque(objectID))
+	ownerCtx, handleID, ok := resolveClassObjectFromOpaque(ctx, classObjectOpaque(objectID))
 	require.True(t, ok)
 	require.Equal(t, ctx, ownerCtx)
 	require.Equal(t, idHandle, handleID)
@@ -223,29 +198,7 @@ func TestResolveClassObjectFromOpaqueContracts(t *testing.T) {
 	require.False(t, ok)
 }
 
-func TestFindRuntimeContextByLegacyHandleContracts(t *testing.T) {
-	require.Nil(t, findRuntimeContextByLegacyHandle(nil, 1))
-
-	rt := NewRuntime()
-	defer rt.Close()
-	ctx := rt.NewContext()
-	defer ctx.Close()
-
-	require.Nil(t, findRuntimeContextByLegacyHandle(rt, 0))
-
-	// Corrupted and invalid entries should be ignored safely.
-	rt.contexts.Store("corrupted", "bad-entry")
-	rt.contexts.Store("invalid-context", &Context{})
-	require.Nil(t, findRuntimeContextByLegacyHandle(rt, 12345))
-
-	handleID := ctx.handleStore.Store("legacy-match")
-	defer ctx.handleStore.Delete(handleID)
-	require.Equal(t, ctx, findRuntimeContextByLegacyHandle(rt, handleID))
-}
-
 func TestClassOpaqueWrapperGuards(t *testing.T) {
-	require.Nil(t, legacyHandleOpaque(0))
-	require.Nil(t, legacyHandleOpaque(-1))
 	require.Nil(t, classObjectOpaque(0))
 	require.NotNil(t, classObjectOpaque(-1))
 }
@@ -261,10 +214,50 @@ func TestBridgeMappingClosedTargetsFailClosed(t *testing.T) {
 	ctx.Close()
 	contextMapping.Store(ctxRef, ctx)
 	require.Nil(t, getContextFromJS(ctxRef))
+	_, ok := contextMapping.Load(ctxRef)
+	require.False(t, ok)
 
 	rt.Close()
 	runtimeMapping.Store(rtRef, rt)
 	require.Nil(t, getRuntimeFromJS(rtRef))
+	_, ok = runtimeMapping.Load(rtRef)
+	require.False(t, ok)
+}
+
+func TestBridgeMappingCloseContractStress(t *testing.T) {
+	for i := 0; i < 64; i++ {
+		rt := NewRuntime()
+		ctx := rt.NewContext()
+		require.NotNil(t, ctx)
+
+		ctxRef := ctx.ref
+		rtRef := rt.ref
+
+		require.NotNil(t, getContextFromJS(ctxRef))
+		require.NotNil(t, getRuntimeFromJS(rtRef))
+
+		for j := 0; j < 32; j++ {
+			unregisterContext(ctxRef)
+			require.Nil(t, getContextFromJS(ctxRef))
+			registerContext(ctxRef, ctx)
+			require.NotNil(t, getContextFromJS(ctxRef))
+		}
+
+		ctx.Close()
+		rt.Close()
+
+		contextMapping.Store(ctxRef, ctx)
+		runtimeMapping.Store(rtRef, rt)
+
+		require.Nil(t, getContextFromJS(ctxRef))
+		require.Nil(t, getRuntimeFromJS(rtRef))
+		require.NotPanics(t, func() {
+			_ = goInterruptHandler(rtRef)
+		})
+
+		contextMapping.Delete(ctxRef)
+		runtimeMapping.Delete(rtRef)
+	}
 }
 
 func TestBridgeNilCallbackResultsNormalizeToUndefined(t *testing.T) {
@@ -346,7 +339,6 @@ func TestBridgeModuleInitFailClosedInvalidExportAndBuilderHandle(t *testing.T) {
 		require.NoError(t, mb.Build(ctx))
 
 		var builderID int32
-		var originalHandle cgo.Handle
 		ctx.handleStore.handles.Range(func(key, value interface{}) bool {
 			id, ok := key.(int32)
 			if !ok {
@@ -359,19 +351,15 @@ func TestBridgeModuleInitFailClosedInvalidExportAndBuilderHandle(t *testing.T) {
 			stored, ok := h.Value().(*ModuleBuilder)
 			if ok && stored != nil && stored.name == "invalid-builder-module" {
 				builderID = id
-				originalHandle = h
 				return false
 			}
 			return true
 		})
 		require.Greater(t, builderID, int32(0))
+		ctx.handleStore.Delete(builderID)
 
 		tempHandle := cgo.NewHandle("not-a-module-builder")
 		ctx.handleStore.handles.Store(builderID, tempHandle)
-		defer func() {
-			ctx.handleStore.handles.Store(builderID, originalHandle)
-			tempHandle.Delete()
-		}()
 
 		result := ctx.Eval(`import('invalid-builder-module')`, EvalAwait(true))
 		defer result.Free()
@@ -379,6 +367,76 @@ func TestBridgeModuleInitFailClosedInvalidExportAndBuilderHandle(t *testing.T) {
 		err := ctx.Exception()
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "invalid module builder handle")
+
+		_, exists := ctx.handleStore.Load(builderID)
+		require.False(t, exists)
+	})
+
+	t.Run("InvalidModuleBuilderIDPrivateValue", func(t *testing.T) {
+		restore := forceModuleBuilderIDParseFailureForTest(true)
+		defer restore()
+
+		ctx := newModuleContext(t)
+		mb := NewModuleBuilder("invalid-builder-id-module").
+			Export("ok", ctx.NewString("value"))
+		require.NoError(t, mb.Build(ctx))
+
+		result := ctx.Eval(`import('invalid-builder-id-module')`, EvalAwait(true))
+		defer result.Free()
+		require.True(t, result.IsException())
+		err := ctx.Exception()
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "failed to parse module builder id from module private value")
+
+		hasBuilderHandle := false
+		ctx.handleStore.handles.Range(func(_, value interface{}) bool {
+			h, ok := value.(cgo.Handle)
+			if !ok {
+				return true
+			}
+			mb, ok := h.Value().(*ModuleBuilder)
+			if ok && mb != nil && mb.name == "invalid-builder-id-module" {
+				hasBuilderHandle = true
+				return false
+			}
+			return true
+		})
+		require.True(t, hasBuilderHandle)
+	})
+
+	t.Run("MissingModuleBuilderHandle", func(t *testing.T) {
+		ctx := newModuleContext(t)
+		mb := NewModuleBuilder("missing-builder-id-module").
+			Export("ok", ctx.NewString("value"))
+		require.NoError(t, mb.Build(ctx))
+
+		var builderID int32
+		ctx.handleStore.handles.Range(func(key, value interface{}) bool {
+			id, ok := key.(int32)
+			if !ok {
+				return true
+			}
+			h, ok := value.(cgo.Handle)
+			if !ok {
+				return true
+			}
+			stored, ok := h.Value().(*ModuleBuilder)
+			if ok && stored != nil && stored.name == "missing-builder-id-module" {
+				builderID = id
+				return false
+			}
+			return true
+		})
+		require.Greater(t, builderID, int32(0))
+
+		ctx.handleStore.Delete(builderID)
+
+		result := ctx.Eval(`import('missing-builder-id-module')`, EvalAwait(true))
+		defer result.Free()
+		require.True(t, result.IsException())
+		err := ctx.Exception()
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "failed to get context and module builder")
 	})
 }
 
@@ -512,7 +570,7 @@ func TestBridgeClassFinalizerProxyContracts(t *testing.T) {
 	})
 }
 
-func TestBridgeClassFinalizerLegacyHandleFallback(t *testing.T) {
+func TestBridgeClassFinalizerRejectsLegacyOpaque(t *testing.T) {
 	rt := NewRuntime()
 	defer rt.Close()
 	ctx := rt.NewContext()
@@ -520,15 +578,15 @@ func TestBridgeClassFinalizerLegacyHandleFallback(t *testing.T) {
 
 	var finalized atomic.Bool
 
-	constructor, _ := NewClassBuilder("LegacyFinalizerFallbackClass").
+	constructor, _ := NewClassBuilder("LegacyFinalizerRejectedClass").
 		Constructor(func(ctx *Context, instance *Value, args []*Value) (interface{}, error) {
 			return &bridgeFinalizerProbe{mark: &finalized}, nil
 		}).
 		Build(ctx)
 	require.False(t, constructor.IsException())
-	ctx.Globals().Set("LegacyFinalizerFallbackClass", constructor)
+	ctx.Globals().Set("LegacyFinalizerRejectedClass", constructor)
 
-	instance := ctx.Eval(`new LegacyFinalizerFallbackClass()`)
+	instance := ctx.Eval(`new LegacyFinalizerRejectedClass()`)
 	defer instance.Free()
 	require.False(t, instance.IsException())
 
@@ -553,13 +611,14 @@ func TestBridgeClassFinalizerLegacyHandleFallback(t *testing.T) {
 	identity, ok := rt.takeClassObjectIdentity(objectID)
 	require.True(t, ok)
 	require.Greater(t, identity.handleID, int32(0))
+	defer ctx.handleStore.Delete(identity.handleID)
 
 	setValueOpaqueForTest(instance.ref, identity.handleID)
 	goClassFinalizerProxy(rt.ref, instance.ref)
 
-	require.True(t, finalized.Load())
+	require.False(t, finalized.Load())
 	_, exists := ctx.handleStore.Load(identity.handleID)
-	require.False(t, exists)
+	require.True(t, exists)
 }
 
 func TestBridgeClassFinalizerOwnershipInSameRuntime(t *testing.T) {
