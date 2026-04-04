@@ -79,7 +79,7 @@ func zeroTerminatedBytes(s string) []byte {
 }
 
 func (ctx *Context) detectModuleSource(code string, codePtr *C.char) bool {
-	if !ctx.hasValidRef() || !mayContainModuleSyntax(code) {
+	if !mayContainModuleSyntax(code) || !ctx.hasValidRef() {
 		return false
 	}
 	return C.DetectModuleSourceWithProbe(ctx.ref, codePtr, C.size_t(len(code))) != 0

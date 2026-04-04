@@ -33,7 +33,7 @@ var runtimeInitContextHook func(ctx *C.JSContext) C.JSValue
 // It must remain nil in production.
 var runtimeEvalFunctionHook func(ctx *C.JSContext, compiled C.JSValue) C.JSValue
 
-var errOwnerAccessDenied = errors.New("quickjs: owner access denied; if strict OS thread mode is enabled, bind the owner goroutine with runtime.LockOSThread()")
+var errOwnerAccessDenied = errors.New("quickjs: owner access denied; runtime/context/value APIs must be called from the owner goroutine; if strict OS thread mode is enabled, also bind that goroutine with runtime.LockOSThread()")
 
 var ownerCheckCurrentGoroutineID = currentGoroutineID
 var ownerCheckCurrentThreadID = currentThreadID
