@@ -48,6 +48,8 @@ The runtime sources under deps/quickjs are no longer updated via git submodule. 
 - QuickJS is not thread-safe; a Runtime and its Contexts must be created, used, and closed by the same serialized owner goroutine.
 - This library enforces owner-goroutine checks by default for APIs that touch QuickJS (non-owner calls are rejected with fail-closed behavior); you can explicitly disable this with `WithOwnerGoroutineCheck(false)`, but it is an unsafe escape hatch and should be used only when your own scheduler strictly serializes all QuickJS access externally. If that guarantee is broken, cross-goroutine calls can race QuickJS internals and may cause memory corruption.
 - If you want to additionally verify that a Runtime stays fixed to the same OS thread, enable `WithStrictOSThread(true)`; this option only enables validation and does not bind the thread automatically. If you enable this mode, call `runtime.LockOSThread()` yourself in the owner goroutine before creating the Runtime.
+- `Runtime.NewContext()` keeps the default host bootstrap behavior (`std/os` + global `setTimeout`/`clearTimeout`). If you need finer control, use `Runtime.NewBareContext()` and apply `BootstrapStdOS` / `BootstrapTimers` manually, or use `Runtime.NewContextWithOptions(...)` with `DefaultBootstrap`, `MinimalBootstrap`, and `NoBootstrap`.
+- In `Runtime.NewContextWithOptions(...)`, enabling `WithBootstrapTimers(true)` implicitly enables std/os registration, because timer injection imports `setTimeout`/`clearTimeout` from the `os` module.
 - Call `value.Free()` for `*Value` objects you create or receive. Runtime and Context objects must be cleaned up via `Close()`.
 - `Value.Free()` is fail-closed when its context pointer is no longer valid, avoiding unsafe cgo calls after close.
 - After `Context.Close()`, boundary queries are fail-closed: `Runtime()` returns `nil`, `HasException()` returns `false`, `Exception()` returns `nil`, `Loop()` becomes a no-op, and `Schedule()` returns `false`.
@@ -70,6 +72,29 @@ The runtime sources under deps/quickjs are no longer updated via git submodule. 
 
 ```go
 import "github.com/buke/quickjs-go"
+```
+
+### Context Bootstrap Modes
+
+```go
+rt := quickjs.NewRuntime()
+defer rt.Close()
+
+// Default (compatible with previous behavior)
+ctxDefault := rt.NewContext()
+defer ctxDefault.Close()
+
+// Bare context (no std/os registration, no timer injection)
+ctxBare := rt.NewBareContext()
+defer ctxBare.Close()
+
+// Manual bootstrap for bare context
+quickjs.BootstrapStdOS(ctxBare)
+quickjs.BootstrapTimers(ctxBare)
+
+// Option-based bootstrap
+ctxMinimal := rt.NewContextWithOptions(quickjs.MinimalBootstrap())
+defer ctxMinimal.Close()
 ```
 
 ### Run a script

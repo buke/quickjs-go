@@ -924,6 +924,8 @@ func TestRuntimeNilAndZeroValueGuards(t *testing.T) {
 		nilRT.SetInterruptHandler(func() int { return 0 })
 		nilRT.ClearInterruptHandler()
 		require.Nil(t, nilRT.NewContext())
+		require.Nil(t, nilRT.NewBareContext())
+		require.Nil(t, nilRT.NewContextWithOptions(DefaultBootstrap()))
 		require.Equal(t, 0, nilRT.callInterruptHandler())
 		nilRT.registerOwnedContext(nil)
 		nilRT.unregisterOwnedContext(nil, 0)
@@ -956,6 +958,8 @@ func TestRuntimeNilAndZeroValueGuards(t *testing.T) {
 		require.Zero(t, zeroRT.registerClassObjectIdentity(0, 1))
 		require.Zero(t, zeroRT.registerClassObjectIdentity(1, 0))
 		require.Nil(t, zeroRT.NewContext())
+		require.Nil(t, zeroRT.NewBareContext())
+		require.Nil(t, zeroRT.NewContextWithOptions(DefaultBootstrap()))
 		zeroRT.Close()
 		zeroRT.Close()
 	})
@@ -999,6 +1003,159 @@ func TestRuntimeNewContextInitFailureHook(t *testing.T) {
 	defer restoreInit()
 
 	ctx = rt.NewContext()
+	require.NotNil(t, ctx)
+	ctx.Close()
+}
+
+func TestRuntimeContextBootstrapOptions(t *testing.T) {
+	rt := NewRuntime()
+	defer rt.Close()
+
+	typeOfSetTimeout := func(ctx *Context) string {
+		v := ctx.Eval(`typeof globalThis.setTimeout`)
+		require.NotNil(t, v)
+		defer v.Free()
+		require.False(t, v.IsException())
+		return v.ToString()
+	}
+
+	defaultCtx := rt.NewContext()
+	require.NotNil(t, defaultCtx)
+	require.Equal(t, "function", typeOfSetTimeout(defaultCtx))
+	defaultCtx.Close()
+
+	bareCtx := rt.NewBareContext()
+	require.NotNil(t, bareCtx)
+	require.Equal(t, "undefined", typeOfSetTimeout(bareCtx))
+	require.True(t, BootstrapStdOS(bareCtx))
+	require.True(t, BootstrapTimers(bareCtx))
+	require.Equal(t, "function", typeOfSetTimeout(bareCtx))
+	bareCtx.Close()
+
+	minimalCtx := rt.NewContextWithOptions(MinimalBootstrap())
+	require.NotNil(t, minimalCtx)
+	require.Equal(t, "undefined", typeOfSetTimeout(minimalCtx))
+	require.True(t, BootstrapTimers(minimalCtx))
+	require.Equal(t, "function", typeOfSetTimeout(minimalCtx))
+	minimalCtx.Close()
+
+	noBootstrapCtx := rt.NewContextWithOptions(NoBootstrap())
+	require.NotNil(t, noBootstrapCtx)
+	require.Equal(t, "undefined", typeOfSetTimeout(noBootstrapCtx))
+	noBootstrapCtx.Close()
+
+	customCtx := rt.NewContextWithOptions(DefaultBootstrap(), WithBootstrapTimers(false))
+	require.NotNil(t, customCtx)
+	require.Equal(t, "undefined", typeOfSetTimeout(customCtx))
+	customCtx.Close()
+
+	autoStdCtx := rt.NewContextWithOptions(WithBootstrapStdOS(false), WithBootstrapTimers(true))
+	require.NotNil(t, autoStdCtx)
+	require.Equal(t, "function", typeOfSetTimeout(autoStdCtx))
+	autoStdCtx.Close()
+}
+
+func TestRuntimeContextBootstrapFailClosedAfterClose(t *testing.T) {
+	require.False(t, BootstrapStdOS(nil))
+	require.False(t, BootstrapTimers(nil))
+
+	rt := NewRuntime()
+	defer rt.Close()
+
+	ctx := rt.NewBareContext()
+	require.NotNil(t, ctx)
+	ctx.Close()
+
+	require.False(t, BootstrapStdOS(ctx))
+	require.False(t, BootstrapTimers(ctx))
+}
+
+func TestRuntimeContextBootstrapOwnerDenied(t *testing.T) {
+	oldGIDHook := ownerCheckCurrentGoroutineID
+	oldThreadHook := ownerCheckCurrentThreadID
+	defer func() {
+		ownerCheckCurrentGoroutineID = oldGIDHook
+		ownerCheckCurrentThreadID = oldThreadHook
+	}()
+
+	var gid atomic.Uint64
+	gid.Store(71)
+	ownerCheckCurrentGoroutineID = func() uint64 { return gid.Load() }
+	ownerCheckCurrentThreadID = func() uint64 { return 1 }
+
+	rt := NewRuntime()
+	defer rt.Close()
+
+	ctx := rt.NewBareContext()
+	require.NotNil(t, ctx)
+
+	gid.Store(72)
+	require.False(t, BootstrapStdOS(ctx))
+	require.False(t, BootstrapTimers(ctx))
+
+	gid.Store(71)
+	ctx.Close()
+}
+
+func TestRuntimeContextBootstrapHooks(t *testing.T) {
+	oldStdOSHook := runtimeBootstrapStdOSHook
+	oldTimersHook := runtimeBootstrapTimersHook
+	defer func() {
+		runtimeBootstrapStdOSHook = oldStdOSHook
+		runtimeBootstrapTimersHook = oldTimersHook
+	}()
+
+	rt := NewRuntime()
+	defer rt.Close()
+
+	runtimeBootstrapStdOSHook = func(ctx *Context) bool { return false }
+	require.Nil(t, rt.NewContextWithOptions(DefaultBootstrap()))
+	runtimeBootstrapStdOSHook = nil
+
+	runtimeBootstrapTimersHook = func(ctx *Context) bool { return false }
+	require.Nil(t, rt.NewContextWithOptions(DefaultBootstrap()))
+	runtimeBootstrapTimersHook = nil
+
+	ctx := rt.NewContextWithOptions(DefaultBootstrap())
+	require.NotNil(t, ctx)
+	ctx.Close()
+}
+
+func TestRuntimeContextBootstrapStressContract(t *testing.T) {
+	rt := NewRuntime()
+	defer rt.Close()
+
+	for i := 0; i < 64; i++ {
+		ctx := rt.NewBareContext()
+		require.NotNil(t, ctx)
+
+		if i%2 == 0 {
+			require.True(t, BootstrapStdOS(ctx))
+			require.True(t, BootstrapTimers(ctx))
+		}
+
+		result := ctx.Eval(`1 + 1`)
+		require.NotNil(t, result)
+		require.False(t, result.IsException())
+		require.EqualValues(t, 2, result.ToInt32())
+		result.Free()
+
+		ctx.Close()
+		require.False(t, ctx.Schedule(func(*Context) {}))
+	}
+}
+
+func TestRuntimeNewContextWithOptionsInitFailureHook(t *testing.T) {
+	restore := forceRuntimeInitFailureForTest(true)
+	defer restore()
+
+	rt := NewRuntime()
+	defer rt.Close()
+
+	ctx := rt.NewContextWithOptions(DefaultBootstrap())
+	require.Nil(t, ctx)
+
+	ctx = rt.NewContextWithOptions(NoBootstrap())
 	require.NotNil(t, ctx)
 	ctx.Close()
 }
