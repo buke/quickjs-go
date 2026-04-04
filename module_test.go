@@ -176,6 +176,7 @@ func TestModuleBuilder_ValueSpec(t *testing.T) {
 			spec ValueSpec
 		}{
 			{name: "NilFactory", spec: FactorySpec{}},
+			{name: "ContextBoundNil", spec: contextValueSpec{}},
 			{name: "FactoryError", spec: FactorySpec{Factory: func(ctx *Context) (*Value, error) {
 				return nil, fmt.Errorf("factory failed")
 			}}},
