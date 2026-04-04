@@ -322,14 +322,9 @@ func TestBridgeModuleInitFailClosedInvalidExportAndBuilderHandle(t *testing.T) {
 		ctx := newModuleContext(t)
 		mb := NewModuleBuilder("invalid-export-module").
 			Export("bad", nil)
-		require.NoError(t, mb.Build(ctx))
-
-		result := ctx.Eval(`import('invalid-export-module')`, EvalAwait(true))
-		defer result.Free()
-		require.True(t, result.IsException())
-		err := ctx.Exception()
+		err := mb.Build(ctx)
 		require.Error(t, err)
-		require.Contains(t, err.Error(), "invalid module export value")
+		require.Contains(t, err.Error(), "export value is required")
 	})
 
 	t.Run("InvalidModuleBuilderHandle", func(t *testing.T) {

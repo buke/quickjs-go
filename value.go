@@ -18,6 +18,9 @@ import (
 type Value struct {
 	ctx *Context
 	ref C.JSValue
+	// borrowed indicates ref is an alias to a JSValue owned elsewhere.
+	// Free should only invalidate this Go handle, not decrement QuickJS refcount.
+	borrowed bool
 }
 
 // hasValidContext reports whether a Value still has a usable context pointer.
@@ -51,6 +54,11 @@ func sameContext(a *Value, b *Value) bool {
 func (v *Value) Free() {
 	if !v.hasValidContext() || bool(C.JS_IsUndefined(v.ref)) {
 		return // No context or undefined value, nothing to free
+	}
+	if v.borrowed {
+		v.ref = C.JS_NewUndefined()
+		v.borrowed = false
+		return
 	}
 	C.JS_FreeValue(v.ctx.ref, v.ref)
 	v.ref = C.JS_NewUndefined()

@@ -1,6 +1,9 @@
 package quickjs
 
-import "unsafe"
+import (
+	"fmt"
+	"unsafe"
+)
 
 /*
 #include <stdint.h>
@@ -59,13 +62,52 @@ func goClassConstructorProxy(ctx *C.JSContext, newTarget C.JSValueConst,
 
 	var instanceProperties []C.PropertyEntry
 	var instancePropertyNames []*C.char
+	type materializedInstanceProperty struct {
+		spec  ValueSpec
+		value *Value
+	}
+	var materializedProperties []materializedInstanceProperty
+	defer func() {
+		// bridge.c/BindPropertyToObject duplicates property values with JS_DupValue
+		// before defining properties on the instance. Free only non-legacy values
+		// that were materialized for this constructor invocation.
+		for _, p := range materializedProperties {
+			if p.value == nil || isContextValueSpec(p.spec) {
+				continue
+			}
+			p.value.Free()
+		}
+	}()
+	defer func() {
+		for _, cStr := range instancePropertyNames {
+			C.free(unsafe.Pointer(cStr))
+		}
+	}()
+
 	for _, property := range builder.properties {
 		if !property.Static {
+			if property.Spec == nil {
+				return throwProxyError(ctx, proxyError{"InternalError", fmt.Sprintf("property value is required: %s", property.Name)})
+			}
+			propertyValue, err := materializeValueSpecSafely(goCtx, property.Spec)
+			if err != nil {
+				return throwProxyError(ctx, proxyError{"InternalError", fmt.Sprintf("invalid property value: %s (materialize error: %v)", property.Name, err)})
+			}
+			if propertyValue != nil && propertyValue.ctx == goCtx {
+				materializedProperties = append(materializedProperties, materializedInstanceProperty{spec: property.Spec, value: propertyValue})
+			}
+			if propertyValue == nil {
+				return throwProxyError(ctx, proxyError{"InternalError", fmt.Sprintf("invalid property value: %s (materialize returned nil)", property.Name)})
+			}
+			if !propertyValue.belongsTo(goCtx) {
+				return throwProxyError(ctx, proxyError{"InternalError", fmt.Sprintf("invalid property value: %s (materialized in a different context)", property.Name)})
+			}
+
 			propertyName := C.CString(property.Name)
 			instancePropertyNames = append(instancePropertyNames, propertyName)
 			instanceProperties = append(instanceProperties, C.PropertyEntry{
 				name:      propertyName,
-				value:     property.Value.ref,
+				value:     propertyValue.ref,
 				is_static: C.int(0),
 				flags:     C.int(property.Flags),
 			})
@@ -84,10 +126,6 @@ func goClassConstructorProxy(ctx *C.JSContext, newTarget C.JSValueConst,
 		instancePropertiesPtr,
 		C.int(len(instanceProperties)),
 	)
-
-	for _, cStr := range instancePropertyNames {
-		C.free(unsafe.Pointer(cStr))
-	}
 
 	if bool(C.JS_IsException(instance)) {
 		return instance

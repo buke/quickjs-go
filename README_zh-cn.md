@@ -897,6 +897,9 @@ func main() {
 
 ModuleBuilder API 允许您从 Go 代码创建 JavaScript 模块，使 Go 函数、值和对象可以通过标准 ES6 import 语法在 JavaScript 应用程序中使用。
 
+对于新代码，建议优先使用声明式 ValueSpec 导出（`ExportValue` / `ExportLiteral`）。
+`Export(name, *Value)` 仍保留，作为同一 `Context` 下已有值的 context-bound convenience API。
+
 #### 基本模块创建
 
 ```go
@@ -1028,6 +1031,54 @@ func main() {
 }
 ```
 
+#### 声明式 ValueSpec 导出（推荐）
+
+```go
+package main
+
+import (
+	"fmt"
+	"github.com/buke/quickjs-go"
+)
+
+func main() {
+	rt := quickjs.NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	module := quickjs.NewModuleBuilder("app-config").
+		ExportLiteral("version", "2.1.0").
+		ExportLiteral("featureFlags", map[string]bool{"beta": true}).
+		ExportValue("now", quickjs.FactorySpec{Factory: func(ctx *quickjs.Context) (*quickjs.Value, error) {
+			return ctx.NewInt64(1700000000), nil
+		}}).
+		ExportValue("meta", quickjs.MarshalSpec{Value: map[string]interface{}{
+			"name":  "quickjs-go",
+			"typed": true,
+		}})
+
+	if err := module.Build(ctx); err != nil {
+		panic(err)
+	}
+
+	result := ctx.Eval(`
+		(async function() {
+			const { version, featureFlags, now, meta } = await import('app-config');
+			return [version, featureFlags.beta, now > 0, meta.name].join(':');
+		})()
+	`, quickjs.EvalAwait(true))
+	defer result.Free()
+
+	if result.IsException() {
+		panic(ctx.Exception())
+	}
+
+	fmt.Println("声明式模块结果:", result.ToString())
+	// 输出: 声明式模块结果: 2.1.0:true:true:quickjs-go
+}
+```
+
 #### 多模块集成
 
 ```go
@@ -1112,12 +1163,17 @@ func main() {
 
 **核心方法:**
 - `NewModuleBuilder(name)` - 创建具有指定名称的新模块构建器
-- `Export(name, value)` - 向模块添加命名导出（可链式调用的方法）
+- `ExportValue(name, spec)` - 添加声明式导出定义（推荐）
+- `ExportLiteral(name, value)` - 添加字面量导出，无需先创建 JS 值（推荐）
+- `Export(name, value)` - 从已有 JS 值添加导出（context-bound convenience API）
 - `Build(ctx)` - 在 JavaScript 上下文中注册模块
 
 ### 使用 ClassBuilder 从 Go 创建 JavaScript 类
 
 ClassBuilder API 允许您从 Go 代码创建 JavaScript 类。
+
+对于新代码，建议优先使用声明式属性 API（`PropertyValue` / `PropertyLiteral` / `StaticPropertyValue` / `StaticPropertyLiteral`）。
+`Property(name, *Value)` 与 `StaticProperty(name, *Value)` 仍保留，作为 context-bound convenience API。
 
 #### 手动类创建
 
@@ -1187,6 +1243,7 @@ func main() {
                 return ctx.NewUndefined()
             }).
         // 属性直接绑定到每个实例
+        // context-bound convenience API: Property(name, *Value)
         Property("version", ctx.NewString("1.0.0")).
         Property("type", ctx.NewString("Point")).
         // 只读属性
@@ -1279,6 +1336,57 @@ func main() {
     }
     
     fmt.Println("属性 vs 访问器:", propertyTest.JSONStringify())
+}
+```
+
+#### 声明式属性定义（推荐）
+
+```go
+package main
+
+import (
+    "fmt"
+    "github.com/buke/quickjs-go"
+)
+
+type Point struct {
+    X, Y float64
+}
+
+func main() {
+    rt := quickjs.NewRuntime()
+    defer rt.Close()
+    ctx := rt.NewContext()
+    defer ctx.Close()
+
+    pointConstructor, _ := quickjs.NewClassBuilder("Point").
+        Constructor(func(ctx *quickjs.Context, instance *quickjs.Value, args []*quickjs.Value) (interface{}, error) {
+            return &Point{X: 0, Y: 0}, nil
+        }).
+        PropertyLiteral("label", "point-instance").
+        PropertyValue("meta", quickjs.MarshalSpec{Value: map[string]interface{}{"kind": "2d"}}).
+        StaticPropertyLiteral("kind", "PointClass").
+        StaticPropertyValue("version", quickjs.FactorySpec{Factory: func(ctx *quickjs.Context) (*quickjs.Value, error) {
+            return ctx.NewInt32(1), nil
+        }}).
+        Build(ctx)
+
+    ctx.Globals().Set("Point", pointConstructor)
+
+    result := ctx.Eval(`
+        (() => {
+            const p = new Point();
+            return [p.label, p.meta.kind, Point.kind, Point.version].join(':');
+        })()
+    `)
+    defer result.Free()
+
+    if result.IsException() {
+        panic(ctx.Exception())
+    }
+
+    fmt.Println("声明式属性结果:", result.ToString())
+    // 输出: 声明式属性结果: point-instance:2d:PointClass:1
 }
 ```
 
