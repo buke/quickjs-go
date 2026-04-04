@@ -60,7 +60,7 @@ func (mb *ModuleBuilder) ExportValue(name string, spec ValueSpec) *ModuleBuilder
 
 // ExportLiteral adds a literal export definition to the module.
 func (mb *ModuleBuilder) ExportLiteral(name string, value interface{}) *ModuleBuilder {
-	return mb.ExportValue(name, LiteralSpec{Value: value})
+	return mb.ExportValue(name, MarshalSpec{Value: value})
 }
 
 // Build creates and registers the JavaScript module in the given context

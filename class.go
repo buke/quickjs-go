@@ -247,7 +247,7 @@ func (cb *ClassBuilder) PropertyValue(name string, spec ValueSpec, flags ...int)
 
 // PropertyLiteral adds a literal data property to the class instance.
 func (cb *ClassBuilder) PropertyLiteral(name string, value interface{}, flags ...int) *ClassBuilder {
-	return cb.PropertyValue(name, LiteralSpec{Value: value}, flags...)
+	return cb.PropertyValue(name, MarshalSpec{Value: value}, flags...)
 }
 
 // StaticProperty adds a data property to the class constructor - changed to use pointer
@@ -278,7 +278,7 @@ func (cb *ClassBuilder) StaticPropertyValue(name string, spec ValueSpec, flags .
 
 // StaticPropertyLiteral adds a literal data property to the class constructor.
 func (cb *ClassBuilder) StaticPropertyLiteral(name string, value interface{}, flags ...int) *ClassBuilder {
-	return cb.StaticPropertyValue(name, LiteralSpec{Value: value}, flags...)
+	return cb.StaticPropertyValue(name, MarshalSpec{Value: value}, flags...)
 }
 
 // Build creates and registers the JavaScript class in the given context

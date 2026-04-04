@@ -1234,7 +1234,7 @@ func TestClassBuilder_ValueSpecProperties(t *testing.T) {
 			})
 		builder.properties = append(builder.properties, PropertyEntry{
 			Name:   "tag",
-			Spec:   LiteralSpec{Value: 99},
+			Spec:   MarshalSpec{Value: 99},
 			Static: true,
 			Flags:  PropertyDefault,
 		})

@@ -10,18 +10,6 @@ type ValueSpec interface {
 	Materialize(ctx *Context) (*Value, error)
 }
 
-// LiteralSpec materializes a value from a literal Go value.
-type LiteralSpec struct {
-	Value interface{}
-}
-
-func (s LiteralSpec) Materialize(ctx *Context) (*Value, error) {
-	if s.Value == nil {
-		return ctx.NewNull(), nil
-	}
-	return ctx.Marshal(s.Value)
-}
-
 // MarshalSpec materializes a value via Context.Marshal.
 type MarshalSpec struct {
 	Value interface{}
