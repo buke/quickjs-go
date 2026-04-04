@@ -14,6 +14,13 @@ import "C"
 
 var moduleBuilderIDForceParseFailure atomic.Bool
 
+func cleanupModuleBuilderHandle(ctx *Context, builderID C.int32_t) {
+	if ctx == nil || ctx.handleStore == nil {
+		return
+	}
+	ctx.handleStore.Delete(int32(builderID))
+}
+
 // getContextAndModuleBuilder retrieves context and ModuleBuilder from module private value.
 func getContextAndModuleBuilder(ctx *C.JSContext, m *C.JSModuleDef) (*Context, *ModuleBuilder, error) {
 	privateValue := C.JS_GetModulePrivateValue(ctx, m)
@@ -27,17 +34,13 @@ func getContextAndModuleBuilder(ctx *C.JSContext, m *C.JSModuleDef) (*Context, *
 
 	goCtx, builderInterface, err := getContextAndObject(ctx, C.int(builderID), errFunctionNotFound)
 	if err != nil {
-		if goCtx != nil && goCtx.handleStore != nil {
-			goCtx.handleStore.Delete(int32(builderID))
-		}
+		cleanupModuleBuilderHandle(goCtx, builderID)
 		return nil, nil, fmt.Errorf("failed to get context and module builder: %v", err.message)
 	}
 
 	builder, ok := builderInterface.(*ModuleBuilder)
 	if !ok || builder == nil {
-		if goCtx != nil && goCtx.handleStore != nil {
-			goCtx.handleStore.Delete(int32(builderID))
-		}
+		cleanupModuleBuilderHandle(goCtx, builderID)
 		return nil, nil, fmt.Errorf("failed to get context and module builder: invalid module builder handle")
 	}
 
@@ -69,7 +72,7 @@ func goModuleInitProxy(ctx *C.JSContext, m *C.JSModuleDef) C.int {
 	privateValue := C.JS_GetModulePrivateValue(ctx, m)
 	var builderID C.int32_t
 	if C.JS_ToInt32(ctx, &builderID, privateValue) >= 0 {
-		goCtx.handleStore.Delete(int32(builderID))
+		cleanupModuleBuilderHandle(goCtx, builderID)
 	}
 	C.JS_FreeValue(ctx, privateValue)
 
