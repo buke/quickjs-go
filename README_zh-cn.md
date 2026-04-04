@@ -46,12 +46,14 @@ deps/quickjs 中的运行时源码不再通过 git submodule 更新，而是按 
 
 ### 生命周期、内存与并发约束
 - QuickJS 本身不是线程安全的；同一个 Runtime 及其 Context 必须由同一个串行 owner goroutine 创建、使用和关闭。
-- 库默认对触达 QuickJS 的 API 强制执行 owner goroutine 校验（非 owner 调用按 fail-closed 语义拒绝）；可以使用`WithOwnerGoroutineCheck(false)`显示关闭 owner goroutine 校验,  注意`WithOwnerGoroutineCheck(false)` 是显式不安全开关，仅适用于由你自己的调度器在外部严格串行化所有 QuickJS 访问的场景，一旦该前提被破坏，跨 goroutine 调用可能与 QuickJS 内部状态竞争并导致内存破坏。
+- 库默认对触达 QuickJS 的 API 强制执行 owner goroutine 校验（非 owner 调用按 fail-closed 语义拒绝）；可以使用 `WithOwnerGoroutineCheck(false)` 显式关闭 owner goroutine 校验。注意 `WithOwnerGoroutineCheck(false)` 是显式不安全开关，仅适用于由你自己的调度器在外部严格串行化所有 QuickJS 访问的场景，一旦该前提被破坏，跨 goroutine 调用可能与 QuickJS 内部状态竞争并导致内存破坏。
 - 如需额外校验 Runtime 是否固定在同一个 OS 线程上，可启用 `WithStrictOSThread(true)`；该选项只负责校验，不会自动绑定线程。如果启用了该模式，请由调用方在 owner goroutine 中自行调用 `runtime.LockOSThread()`，并在创建 Runtime 之前完成绑定。
 - `Runtime.NewContext()` 保持默认宿主 bootstrap 行为（注册 `std/os` 并注入全局 `setTimeout`/`clearTimeout`）。如需更细粒度控制，可使用 `Runtime.NewBareContext()` 后手动调用 `BootstrapStdOS` / `BootstrapTimers`，或使用 `Runtime.NewContextWithOptions(...)` 配合 `DefaultBootstrap`、`MinimalBootstrap`、`NoBootstrap`。
 - 在 `Runtime.NewContextWithOptions(...)` 中，启用 `WithBootstrapTimers(true)` 会隐式启用 `std/os` 注册，因为计时器注入依赖从 `os` 模块导入 `setTimeout`/`clearTimeout`。
 - 对您创建或接收的 `*Value` 对象调用 `value.Free()`；Runtime 和 Context 使用完毕后通过 `Close()` 清理。
 - 当 `Value` 的上下文引用已失效时，`Value.Free()` 会 fail-closed，避免关闭后的不安全 cgo 调用。
+- Value 边界 API 在 foreign-context 或 closed/orphan context 输入下采用 fail-closed：`Set`/`SetIdx` 变为 no-op，`Call`/`Execute`/`CallConstructor`/已废弃的 `Context.Invoke` 返回 `nil`。
+- `Marshal`/`Unmarshal` 在无效 context/value 输入下采用 fail-closed：对 nil/closed context、nil 源值或跨 Context 值返回受控错误，不再向 C 层传递无效 ref。
 - 在 `Context.Close()` 之后，边界查询采用 fail-closed：`Runtime()` 返回 `nil`，`HasException()` 返回 `false`，`Exception()` 返回 `nil`，`Loop()` 变为 no-op，`Schedule()` 返回 `false`。
 - bridge 映射和 handleStore 在遇到损坏条目（错误类型）时采用 fail-closed，避免 panic 级崩溃。
 - 类实例 opaque 数据通过 runtime 级对象身份（`contextID` + `handleID`）解析，finalizer 与 `Value.GetGoObject()` 使用确定性归属定位。

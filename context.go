@@ -749,8 +749,15 @@ func (ctx *Context) AtomIdx(idx uint32) *Atom {
 // Invoke invokes a function with given this value and arguments.
 // Deprecated: Use Value.Execute() instead for better API consistency.
 func (ctx *Context) Invoke(fn *Value, this *Value, args ...*Value) *Value {
+	if ctx == nil || !ctx.hasValidRef() || !fn.belongsTo(ctx) || !this.belongsTo(ctx) {
+		return nil
+	}
+
 	cargs := []C.JSValue{}
 	for _, x := range args {
+		if !x.belongsTo(ctx) {
+			return nil
+		}
 		cargs = append(cargs, x.ref)
 	}
 	var val *Value

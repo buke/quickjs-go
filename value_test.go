@@ -918,6 +918,8 @@ func TestValueClassInstanceEdgeCases(t *testing.T) {
 func TestValueInternalStateHelpers(t *testing.T) {
 	var nilValue *Value
 	require.False(t, nilValue.hasValidContext())
+	require.False(t, nilValue.isAlive())
+	require.False(t, nilValue.belongsTo(nil))
 	require.False(t, sameContext(nilValue, nil))
 
 	rt := NewRuntime()
@@ -935,9 +937,62 @@ func TestValueInternalStateHelpers(t *testing.T) {
 	defer v3.Free()
 
 	require.True(t, v1.hasValidContext())
+	require.True(t, v1.isAlive())
+	require.True(t, v1.belongsTo(ctx1))
+	require.False(t, v1.belongsTo(ctx2))
 	require.True(t, sameContext(v1, v2))
 	require.False(t, sameContext(v1, v3))
 	require.False(t, sameContext(v1, nil))
+
+	ctx1.Close()
+	require.False(t, v1.isAlive())
+	require.False(t, v1.belongsTo(ctx1))
+	require.False(t, sameContext(v1, v2))
+}
+
+func TestValueBoundaryFailClosedAfterContextCloseStress(t *testing.T) {
+	useStableOwnerHooksForLegacySubtests(t)
+
+	rt := NewRuntime()
+	ctx := rt.NewContext()
+	require.NotNil(t, ctx)
+
+	obj := ctx.Eval(`({ x: 1, inc: function(){ return this.x + 1; } })`)
+	require.NotNil(t, obj)
+	require.False(t, obj.IsException())
+
+	incFn := obj.Get("inc")
+	require.NotNil(t, incFn)
+
+	ctor := ctx.Eval(`(function C(v){ this.v = v; })`)
+	require.NotNil(t, ctor)
+	require.False(t, ctor.IsException())
+
+	v := ctx.NewInt32(7)
+	require.NotNil(t, v)
+	thisVal := ctx.NewNull()
+	require.NotNil(t, thisVal)
+
+	obj.Free()
+	incFn.Free()
+	ctor.Free()
+	v.Free()
+	thisVal.Free()
+
+	ctx.Close()
+
+	require.NotPanics(t, func() {
+		for i := 0; i < 64; i++ {
+			obj.Set("x", v)
+			obj.SetIdx(int64(i), v)
+			require.Nil(t, obj.Get("x"))
+			require.Nil(t, obj.GetIdx(int64(i)))
+			require.Nil(t, obj.Call("inc"))
+			require.Nil(t, incFn.Execute(thisVal, v))
+			require.Nil(t, ctor.CallConstructor(v))
+		}
+	})
+	rt.Close()
 }
 
 func TestValueGetGoObjectUnavailableContext(t *testing.T) {

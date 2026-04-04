@@ -686,6 +686,52 @@ func TestContextErrorHandling(t *testing.T) {
 	})
 }
 
+func TestContextInvokeFailClosedContracts(t *testing.T) {
+	useStableOwnerHooksForLegacySubtests(t)
+
+	rt := NewRuntime()
+	defer rt.Close()
+
+	ctx := rt.NewContext()
+	require.NotNil(t, ctx)
+
+	other := rt.NewContext()
+	require.NotNil(t, other)
+
+	fn := ctx.NewFunction(func(ctx *Context, this *Value, args []*Value) *Value {
+		if len(args) > 0 {
+			return ctx.NewString("ok:" + args[0].ToString())
+		}
+		return ctx.NewString("ok")
+	})
+
+	thisVal := ctx.NewNull()
+	arg := ctx.NewString("x")
+
+	result := ctx.Invoke(fn, thisVal, arg)
+	require.NotNil(t, result)
+	require.EqualValues(t, "ok:x", result.ToString())
+	result.Free()
+
+	foreignThis := other.NewObject()
+	foreignArg := other.NewString("y")
+
+	require.Nil(t, ctx.Invoke(fn, foreignThis, arg))
+	require.Nil(t, ctx.Invoke(fn, thisVal, foreignArg))
+	require.Nil(t, ctx.Invoke(nil, thisVal, arg))
+	require.Nil(t, ctx.Invoke(fn, nil, arg))
+
+	foreignArg.Free()
+	foreignThis.Free()
+	arg.Free()
+	thisVal.Free()
+	fn.Free()
+	other.Close()
+
+	ctx.Close()
+	require.Nil(t, ctx.Invoke(fn, thisVal, arg))
+}
+
 func TestContextUtilities(t *testing.T) {
 	useStableOwnerHooksForLegacySubtests(t)
 

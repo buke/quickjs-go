@@ -2,12 +2,25 @@ package quickjs
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"math"
 	"reflect"
 	"strconv"
 	"strings"
 )
+
+var errMarshalContextUnavailable = errors.New("marshal context is not available")
+
+func (ctx *Context) ensureMarshalContextAvailable() error {
+	if ctx == nil || ctx.ref == nil || ctx.runtime == nil || !ctx.runtime.isAlive() {
+		return errMarshalContextUnavailable
+	}
+	if !ctx.runtime.ensureOwnerAccess() {
+		return errOwnerAccessDenied
+	}
+	return nil
+}
 
 // Marshaler is the interface implemented by types that can marshal themselves into a JavaScript value.
 type Marshaler interface {
@@ -138,6 +151,9 @@ func isEmptyValue(v reflect.Value) bool {
 //
 // Types implementing the Marshaler interface are marshaled using their MarshalJS method.
 func (ctx *Context) Marshal(v interface{}) (*Value, error) {
+	if err := ctx.ensureMarshalContextAvailable(); err != nil {
+		return nil, err
+	}
 	if v == nil {
 		return ctx.NewNull(), nil
 	}
@@ -175,6 +191,16 @@ func (ctx *Context) Marshal(v interface{}) (*Value, error) {
 //
 // Types implementing the Unmarshaler interface are unmarshaled using their UnmarshalJS method.
 func (ctx *Context) Unmarshal(jsVal *Value, v interface{}) error {
+	if err := ctx.ensureMarshalContextAvailable(); err != nil {
+		return err
+	}
+	if jsVal == nil {
+		return errors.New("unmarshal source value must be non-nil")
+	}
+	if !jsVal.belongsTo(ctx) || !jsVal.isAlive() {
+		return errors.New("unmarshal source value must belong to the same live context")
+	}
+
 	rv := reflect.ValueOf(v)
 	if rv.Kind() != reflect.Ptr || rv.IsNil() {
 		return fmt.Errorf("unmarshal target must be a non-nil pointer")
