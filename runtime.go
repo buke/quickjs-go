@@ -33,6 +33,11 @@ var runtimeInitContextHook func(ctx *C.JSContext) C.JSValue
 // It must remain nil in production.
 var runtimeEvalFunctionHook func(ctx *C.JSContext, compiled C.JSValue) C.JSValue
 
+// runtimeBootstrapStdOSHook and runtimeBootstrapTimersHook are used in tests
+// to force bootstrap failure paths. They must remain nil in production.
+var runtimeBootstrapStdOSHook func(ctx *Context) bool
+var runtimeBootstrapTimersHook func(ctx *Context) bool
+
 var errOwnerAccessDenied = errors.New("quickjs: owner access denied; runtime/context/value APIs must be called from the owner goroutine; if strict OS thread mode is enabled, also bind that goroutine with runtime.LockOSThread()")
 
 var ownerCheckCurrentGoroutineID = currentGoroutineID
@@ -84,6 +89,74 @@ type Options struct {
 
 type Option func(*Options)
 
+type ContextBootstrapOptions struct {
+	loadStdOS    bool
+	injectTimers bool
+}
+
+type ContextBootstrapOption func(*ContextBootstrapOptions)
+
+// DefaultBootstrap enables the same bootstrap pipeline as Runtime.NewContext:
+// std/os module registration plus global timer injection.
+func DefaultBootstrap() ContextBootstrapOption {
+	return func(o *ContextBootstrapOptions) {
+		o.loadStdOS = true
+		o.injectTimers = true
+	}
+}
+
+// MinimalBootstrap enables std/os module registration but skips timer injection.
+func MinimalBootstrap() ContextBootstrapOption {
+	return func(o *ContextBootstrapOptions) {
+		o.loadStdOS = true
+		o.injectTimers = false
+	}
+}
+
+// NoBootstrap disables all host bootstrap steps.
+func NoBootstrap() ContextBootstrapOption {
+	return func(o *ContextBootstrapOptions) {
+		o.loadStdOS = false
+		o.injectTimers = false
+	}
+}
+
+// WithBootstrapStdOS toggles std/os module registration in bootstrap.
+func WithBootstrapStdOS(enabled bool) ContextBootstrapOption {
+	return func(o *ContextBootstrapOptions) {
+		o.loadStdOS = enabled
+	}
+}
+
+// WithBootstrapTimers toggles timer injection in bootstrap.
+func WithBootstrapTimers(enabled bool) ContextBootstrapOption {
+	return func(o *ContextBootstrapOptions) {
+		o.injectTimers = enabled
+	}
+}
+
+func newContextBootstrapOptions(opts ...ContextBootstrapOption) ContextBootstrapOptions {
+	cfg := ContextBootstrapOptions{
+		loadStdOS:    true,
+		injectTimers: true,
+	}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(&cfg)
+		}
+	}
+	if cfg.injectTimers && !cfg.loadStdOS {
+		cfg.loadStdOS = true
+	}
+	return cfg
+}
+
+const defaultTimerBootstrapCode = `
+import { setTimeout, clearTimeout } from "os";
+globalThis.setTimeout = setTimeout;
+globalThis.clearTimeout = clearTimeout;
+`
+
 func (r *Runtime) ensureOwnerAccess() bool {
 	if r == nil {
 		return false
@@ -115,10 +188,7 @@ func (r *Runtime) ensureOwnerAccess() bool {
 func (r *Runtime) claimOrVerifyOwnerGoroutine(current uint64) bool {
 	owner := r.ownerGoroutineID.Load()
 	if owner == 0 {
-		if r.ownerGoroutineID.CompareAndSwap(0, current) {
-			return true
-		}
-		owner = r.ownerGoroutineID.Load()
+		return r.ownerGoroutineID.CompareAndSwap(0, current) || r.ownerGoroutineID.Load() == current
 	}
 	return owner == current
 }
@@ -547,14 +617,60 @@ func (r *Runtime) callInterruptHandler() int {
 	return 0 // No interrupt
 }
 
-// NewContext creates a new JavaScript context.
+// NewContext creates a new JavaScript context with default host bootstrap.
 func (r *Runtime) NewContext() *Context {
+	return r.NewContextWithOptions(DefaultBootstrap())
+}
+
+// NewBareContext creates a JavaScript context without host bootstrap.
+func (r *Runtime) NewBareContext() *Context {
+	return r.NewContextWithOptions(NoBootstrap())
+}
+
+// BootstrapStdOS registers std/os modules for the given context.
+func BootstrapStdOS(ctx *Context) bool {
+	if runtimeBootstrapStdOSHook != nil {
+		return runtimeBootstrapStdOSHook(ctx)
+	}
+	if ctx == nil || ctx.ref == nil || ctx.runtime == nil {
+		return false
+	}
+	if !ctx.runtime.ensureOwnerAccess() || !ctx.runtime.isAlive() {
+		return false
+	}
+
+	stdModuleName := C.CString("std")
+	defer C.free(unsafe.Pointer(stdModuleName))
+	osModuleName := C.CString("os")
+	defer C.free(unsafe.Pointer(osModuleName))
+	C.js_init_module_std(ctx.ref, stdModuleName)
+	C.js_init_module_os(ctx.ref, osModuleName)
+	return true
+}
+
+// BootstrapTimers injects setTimeout/clearTimeout into globalThis.
+func BootstrapTimers(ctx *Context) bool {
+	if runtimeBootstrapTimersHook != nil {
+		return runtimeBootstrapTimersHook(ctx)
+	}
+	if ctx == nil || ctx.ref == nil || ctx.runtime == nil {
+		return false
+	}
+	if !ctx.runtime.ensureOwnerAccess() || !ctx.runtime.isAlive() {
+		return false
+	}
+	return initializeContextGlobals(ctx.ref, defaultTimerBootstrapCode, "init.js")
+}
+
+// NewContextWithOptions creates a JavaScript context with configurable host bootstrap.
+func (r *Runtime) NewContextWithOptions(opts ...ContextBootstrapOption) *Context {
 	if r == nil {
 		return nil
 	}
 	if !r.ensureOwnerAccess() {
 		return nil
 	}
+	bootstrap := newContextBootstrapOptions(opts...)
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -578,25 +694,6 @@ func (r *Runtime) NewContext() *Context {
 		return nil
 	}
 
-	// import the 'std' and 'os' modules
-	stdModuleName := C.CString("std")
-	defer C.free(unsafe.Pointer(stdModuleName))
-	osModuleName := C.CString("os")
-	defer C.free(unsafe.Pointer(osModuleName))
-	C.js_init_module_std(ctx_ref, stdModuleName)
-	C.js_init_module_os(ctx_ref, osModuleName)
-
-	// import setTimeout and clearTimeout from 'os' to globalThis
-	code := `
-    import { setTimeout, clearTimeout } from "os";
-    globalThis.setTimeout = setTimeout;
-    globalThis.clearTimeout = clearTimeout;
-    `
-	if !initializeContextGlobals(ctx_ref, code, "init.js") {
-		C.JS_FreeContext(ctx_ref)
-		return nil
-	}
-
 	// Create Context with HandleStore for function management
 	ctx := &Context{
 		contextID:   r.nextContextID(),
@@ -609,6 +706,15 @@ func (r *Runtime) NewContext() *Context {
 	// Register context mapping for C callbacks
 	registerContext(ctx_ref, ctx)
 	r.registerOwnedContext(ctx)
+
+	if bootstrap.loadStdOS && !BootstrapStdOS(ctx) {
+		ctx.Close()
+		return nil
+	}
+	if bootstrap.injectTimers && !BootstrapTimers(ctx) {
+		ctx.Close()
+		return nil
+	}
 
 	return ctx
 }
