@@ -197,7 +197,7 @@ func (ctx *Context) Unmarshal(jsVal *Value, v interface{}) error {
 	if jsVal == nil {
 		return errors.New("unmarshal source value must be non-nil")
 	}
-	if !jsVal.belongsTo(ctx) || !jsVal.isAlive() {
+	if !jsVal.belongsTo(ctx) {
 		return errors.New("unmarshal source value must belong to the same live context")
 	}
 
