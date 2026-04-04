@@ -6,6 +6,7 @@ import (
 	"math"
 	"math/big"
 	"reflect"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -1352,4 +1353,104 @@ func TestMarshalNilAndInvalidValues(t *testing.T) {
 	val3, err := ctx.marshal(reflect.Value{})
 	require.NoError(t, err)
 	require.True(t, val3.IsNull())
+}
+
+func TestMarshalUnmarshalFailClosedContracts(t *testing.T) {
+	useStableOwnerHooksForLegacySubtests(t)
+
+	rt := NewRuntime()
+	defer rt.Close()
+
+	ctx := rt.NewContext()
+	require.NotNil(t, ctx)
+
+	other := rt.NewContext()
+	require.NotNil(t, other)
+
+	jsVal, err := ctx.Marshal(map[string]int{"a": 1})
+	require.NoError(t, err)
+	require.NotNil(t, jsVal)
+
+	var out map[string]int
+	err = ctx.Unmarshal(jsVal, &out)
+	require.NoError(t, err)
+	require.Equal(t, map[string]int{"a": 1}, out)
+	jsVal.Free()
+
+	foreign := other.NewInt32(7)
+	require.NotNil(t, foreign)
+
+	var target int32
+	err = ctx.Unmarshal(foreign, &target)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "same live context")
+
+	err = ctx.Unmarshal(nil, &target)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "non-nil")
+
+	var nilCtx *Context
+	val, err := nilCtx.Marshal(1)
+	require.ErrorIs(t, err, errMarshalContextUnavailable)
+	require.Nil(t, val)
+	err = nilCtx.Unmarshal(foreign, &target)
+	require.ErrorIs(t, err, errMarshalContextUnavailable)
+
+	orphanCtx := &Context{}
+	val, err = orphanCtx.Marshal(1)
+	require.ErrorIs(t, err, errMarshalContextUnavailable)
+	require.Nil(t, val)
+	err = orphanCtx.Unmarshal(foreign, &target)
+	require.ErrorIs(t, err, errMarshalContextUnavailable)
+
+	foreign.Free()
+
+	ctx.Close()
+	val, err = ctx.Marshal(1)
+	require.ErrorIs(t, err, errMarshalContextUnavailable)
+	require.Nil(t, val)
+
+	afterClose := other.NewInt32(9)
+	require.NotNil(t, afterClose)
+	err = ctx.Unmarshal(afterClose, &target)
+	require.ErrorIs(t, err, errMarshalContextUnavailable)
+	afterClose.Free()
+
+	other.Close()
+}
+
+func TestMarshalUnmarshalOwnerDeniedFailClosed(t *testing.T) {
+	oldGIDHook := ownerCheckCurrentGoroutineID
+	oldThreadHook := ownerCheckCurrentThreadID
+	defer func() {
+		ownerCheckCurrentGoroutineID = oldGIDHook
+		ownerCheckCurrentThreadID = oldThreadHook
+	}()
+
+	var gid atomic.Uint64
+	gid.Store(101)
+	ownerCheckCurrentGoroutineID = func() uint64 { return gid.Load() }
+	ownerCheckCurrentThreadID = func() uint64 { return 1 }
+
+	rt := NewRuntime()
+	require.NotNil(t, rt)
+	ctx := rt.NewContext()
+	require.NotNil(t, ctx)
+
+	source := ctx.NewInt32(1)
+	require.NotNil(t, source)
+
+	gid.Store(202)
+	val, err := ctx.Marshal(1)
+	require.ErrorIs(t, err, errOwnerAccessDenied)
+	require.Nil(t, val)
+
+	var out int32
+	err = ctx.Unmarshal(source, &out)
+	require.ErrorIs(t, err, errOwnerAccessDenied)
+
+	gid.Store(101)
+	source.Free()
+	ctx.Close()
+	rt.Close()
 }

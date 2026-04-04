@@ -25,13 +25,26 @@ func (v *Value) hasValidContext() bool {
 	return v != nil && v.ctx != nil && v.ctx.hasValidRef()
 }
 
+// isAlive reports whether a Value can safely reach QuickJS.
+func (v *Value) isAlive() bool {
+	return v != nil && v.ctx != nil && v.ctx.isAlive() && v.ctx.hasValidRef()
+}
+
+// belongsTo reports whether a Value belongs to the given live Context.
+func (v *Value) belongsTo(ctx *Context) bool {
+	return v != nil && ctx != nil && v.ctx == ctx && v.hasValidContext()
+}
+
 func sameContextRef(a *Value, b *Value) bool {
 	return a != nil && b != nil && a.ctx != nil && b.ctx != nil && a.ctx == b.ctx
 }
 
 // sameContext reports whether two values belong to the same live context.
 func sameContext(a *Value, b *Value) bool {
-	return sameContextRef(a, b) && a.ctx.hasValidRef()
+	if !sameContextRef(a, b) {
+		return false
+	}
+	return a.hasValidContext() && b.hasValidContext()
 }
 
 // Free the value.
@@ -171,7 +184,7 @@ func (v *Value) ByteLen() int64 {
 
 // Set sets the value of the property with the given name.
 func (v *Value) Set(name string, val *Value) {
-	if !v.hasValidContext() || !sameContextRef(v, val) {
+	if !v.isAlive() || !val.belongsTo(v.ctx) {
 		return
 	}
 	var namePtr *C.char
@@ -183,7 +196,7 @@ func (v *Value) Set(name string, val *Value) {
 
 // SetIdx sets the value of the property with the given index.
 func (v *Value) SetIdx(idx int64, val *Value) {
-	if !v.hasValidContext() || !sameContextRef(v, val) {
+	if !v.isAlive() || !val.belongsTo(v.ctx) {
 		return
 	}
 	C.JS_SetPropertyUint32(v.ctx.ref, v.ref, C.uint32_t(idx), val.ref)
@@ -211,7 +224,7 @@ func (v *Value) GetIdx(idx int64) *Value {
 
 // Call calls the function with the given arguments.
 func (v *Value) Call(fname string, args ...*Value) *Value {
-	if !v.hasValidContext() {
+	if !v.isAlive() {
 		return nil
 	}
 	var fnamePtr *C.char
@@ -220,7 +233,7 @@ func (v *Value) Call(fname string, args ...*Value) *Value {
 	}
 	cargs := []C.JSValue{}
 	for _, x := range args {
-		if !sameContextRef(v, x) {
+		if !x.belongsTo(v.ctx) {
 			return nil
 		}
 		cargs = append(cargs, x.ref)
@@ -237,12 +250,12 @@ func (v *Value) Call(fname string, args ...*Value) *Value {
 
 // Execute the function with the given arguments.
 func (v *Value) Execute(this *Value, args ...*Value) *Value {
-	if !v.hasValidContext() || !sameContextRef(v, this) {
+	if !v.isAlive() || !this.belongsTo(v.ctx) {
 		return nil
 	}
 	cargs := []C.JSValue{}
 	for _, x := range args {
-		if !sameContextRef(v, x) {
+		if !x.belongsTo(v.ctx) {
 			return nil
 		}
 		cargs = append(cargs, x.ref)
@@ -275,12 +288,12 @@ func (v *Value) New(args ...*Value) *Value {
 // This replaces the previous NewInstance method and provides automatic property binding
 // and simplified constructor semantics where constructors work with pre-created instances.
 func (v *Value) CallConstructor(args ...*Value) *Value {
-	if !v.hasValidContext() {
+	if !v.isAlive() {
 		return nil
 	}
 	cargs := []C.JSValue{}
 	for _, x := range args {
-		if !sameContextRef(v, x) {
+		if !x.belongsTo(v.ctx) {
 			return nil
 		}
 		cargs = append(cargs, x.ref)

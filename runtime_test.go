@@ -1474,7 +1474,9 @@ func TestRuntimeOwnerCheckGatesRuntimeContextAndValuePaths(t *testing.T) {
 	require.Nil(t, adderObj.Call("add", val1, val2))
 	require.Nil(t, incFn.Execute(obj))
 	require.Nil(t, adderFn.Execute(thisVal, val1, val2))
+	require.Nil(t, ctx.Invoke(adderFn, thisVal, val1, val2))
 	require.Nil(t, adderFn.Execute(thisVal, otherVal))
+	require.Nil(t, ctx.Invoke(adderFn, thisVal, otherVal))
 	require.Nil(t, ctor.CallConstructor())
 	require.Nil(t, ctorWithArg.CallConstructor(val1))
 	_, err = obj.GetGoObject()
@@ -1525,8 +1527,17 @@ func TestRuntimeOwnerCheckGatesRuntimeContextAndValuePaths(t *testing.T) {
 	require.False(t, execResult.IsException())
 	require.EqualValues(t, 3, execResult.ToInt32())
 	execResult.Free()
+
+	invokeResult := ctx.Invoke(adderFn, thisVal, val1, val2)
+	require.NotNil(t, invokeResult)
+	require.False(t, invokeResult.IsException())
+	require.EqualValues(t, 3, invokeResult.ToInt32())
+	invokeResult.Free()
+
 	require.Nil(t, adderFn.Execute(thisVal, otherVal))
+	require.Nil(t, ctx.Invoke(adderFn, thisVal, otherVal))
 	require.Nil(t, adderFn.Execute(otherVal, val1))
+	require.Nil(t, ctx.Invoke(adderFn, otherVal, val1))
 
 	execZeroArg := incFn.Execute(obj)
 	require.NotNil(t, execZeroArg)

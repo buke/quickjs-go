@@ -52,6 +52,8 @@ The runtime sources under deps/quickjs are no longer updated via git submodule. 
 - In `Runtime.NewContextWithOptions(...)`, enabling `WithBootstrapTimers(true)` implicitly enables std/os registration, because timer injection imports `setTimeout`/`clearTimeout` from the `os` module.
 - Call `value.Free()` for `*Value` objects you create or receive. Runtime and Context objects must be cleaned up via `Close()`.
 - `Value.Free()` is fail-closed when its context pointer is no longer valid, avoiding unsafe cgo calls after close.
+- Value boundary APIs are fail-closed under foreign-context or closed/orphan context inputs: `Set`/`SetIdx` become no-ops, and `Call`/`Execute`/`CallConstructor`/deprecated `Context.Invoke` return `nil`.
+- `Marshal`/`Unmarshal` are fail-closed on invalid context/value inputs: they return controlled errors for nil/closed contexts, nil source values, or cross-context values, and do not pass invalid refs into C.
 - After `Context.Close()`, boundary queries are fail-closed: `Runtime()` returns `nil`, `HasException()` returns `false`, `Exception()` returns `nil`, `Loop()` becomes a no-op, and `Schedule()` returns `false`.
 - Bridge mapping and handle-store reads are fail-closed under corrupted entries (wrong types), preventing panic-based crashes.
 - Class instance opaque data is resolved via runtime-scoped object identity (`contextID` + `handleID`), so finalizer and `Value.GetGoObject()` use deterministic ownership lookup.
