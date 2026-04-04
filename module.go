@@ -17,8 +17,8 @@ import "C"
 
 // ModuleExportEntry represents a single module export
 type ModuleExportEntry struct {
-	Name  string // Export name ("default" for default export)
-	Value *Value // Export value - changed to pointer type
+	Name string    // Export name ("default" for default export)
+	Spec ValueSpec // Export definition for Build-time materialization
 }
 
 // ModuleBuilder provides a fluent API for building JavaScript modules
@@ -45,11 +45,21 @@ func NewModuleBuilder(name string) *ModuleBuilder {
 // This is the core method that handles all types of exports including default
 // For default export, use name="default"
 func (mb *ModuleBuilder) Export(name string, value *Value) *ModuleBuilder {
+	return mb.ExportValue(name, contextValueSpec{value: value})
+}
+
+// ExportValue adds an export ValueSpec to the module.
+func (mb *ModuleBuilder) ExportValue(name string, spec ValueSpec) *ModuleBuilder {
 	mb.exports = append(mb.exports, ModuleExportEntry{
-		Name:  name,
-		Value: value, // Now expects *Value
+		Name: name,
+		Spec: spec,
 	})
 	return mb
+}
+
+// ExportLiteral adds a literal export definition to the module.
+func (mb *ModuleBuilder) ExportLiteral(name string, value interface{}) *ModuleBuilder {
+	return mb.ExportValue(name, LiteralSpec{Value: value})
 }
 
 // Build creates and registers the JavaScript module in the given context

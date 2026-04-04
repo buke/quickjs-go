@@ -69,6 +69,92 @@ func TestModuleBuilder_Basic(t *testing.T) {
 	})
 }
 
+func TestModuleBuilder_ValueSpec(t *testing.T) {
+	useStableOwnerHooksForLegacySubtests(t)
+
+	rt := NewRuntime(WithModuleImport(true))
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	t.Run("ExportLiteralAndMarshalSpec", func(t *testing.T) {
+		module := NewModuleBuilder("value-spec-literal").
+			ExportLiteral("num", int64(42)).
+			ExportLiteral("none", nil).
+			ExportValue("cfg", MarshalSpec{Value: map[string]interface{}{"name": "cfg"}})
+
+		err := module.Build(ctx)
+		require.NoError(t, err)
+
+		result := ctx.Eval(`
+			(async function() {
+				const { num, none, cfg } = await import('value-spec-literal');
+				return num + ':' + (none === null) + ':' + cfg.name;
+			})()
+		`, EvalAwait(true))
+		defer result.Free()
+		require.False(t, result.IsException())
+		require.Equal(t, "42:true:cfg", result.ToString())
+	})
+
+	t.Run("FactorySpec", func(t *testing.T) {
+		module := NewModuleBuilder("value-spec-factory").
+			ExportValue("msg", FactorySpec{Factory: func(ctx *Context) (*Value, error) {
+				return ctx.NewString("hello-factory"), nil
+			}})
+
+		err := module.Build(ctx)
+		require.NoError(t, err)
+
+		result := ctx.Eval(`
+			(async function() {
+				const { msg } = await import('value-spec-factory');
+				return msg;
+			})()
+		`, EvalAwait(true))
+		defer result.Free()
+		require.False(t, result.IsException())
+		require.Equal(t, "hello-factory", result.ToString())
+	})
+
+	t.Run("InvalidSpecsFailClosed", func(t *testing.T) {
+		other := rt.NewContext()
+		require.NotNil(t, other)
+		defer other.Close()
+
+		foreign := other.NewString("foreign")
+		defer foreign.Free()
+
+		tests := []struct {
+			name string
+			spec ValueSpec
+		}{
+			{name: "NilSpec", spec: nil},
+			{name: "NilFactory", spec: FactorySpec{}},
+			{name: "FactoryError", spec: FactorySpec{Factory: func(ctx *Context) (*Value, error) {
+				return nil, fmt.Errorf("factory failed")
+			}}},
+			{name: "ForeignContext", spec: FactorySpec{Factory: func(ctx *Context) (*Value, error) {
+				return foreign, nil
+			}}},
+		}
+
+		for i, tt := range tests {
+			moduleName := fmt.Sprintf("value-spec-invalid-%d", i)
+			module := NewModuleBuilder(moduleName).ExportValue("bad", tt.spec)
+			err := module.Build(ctx)
+			require.NoError(t, err)
+
+			result := ctx.Eval(fmt.Sprintf(`import('%s')`, moduleName), EvalAwait(true))
+			defer result.Free()
+			require.True(t, result.IsException(), tt.name)
+			ex := ctx.Exception()
+			require.Error(t, ex)
+			require.Contains(t, ex.Error(), "invalid module export value")
+		}
+	})
+}
+
 // =============================================================================
 // MODULE IMPORT TESTS
 // =============================================================================

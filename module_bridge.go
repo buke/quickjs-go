@@ -55,14 +55,19 @@ func goModuleInitProxy(ctx *C.JSContext, m *C.JSModuleDef) C.int {
 	}
 
 	for _, export := range builder.exports {
-		if export.Value == nil || !export.Value.hasValidContext() || export.Value.ctx != goCtx {
+		if export.Spec == nil {
+			return throwModuleError(ctx, fmt.Errorf("invalid module export value: %s", export.Name))
+		}
+
+		value, matErr := export.Spec.Materialize(goCtx)
+		if matErr != nil || value == nil || !value.belongsTo(goCtx) {
 			return throwModuleError(ctx, fmt.Errorf("invalid module export value: %s", export.Name))
 		}
 
 		exportName := C.CString(export.Name)
-		val := export.Value.ref
+		val := value.ref
 		rc := C.JS_SetModuleExport(ctx, m, exportName, val)
-		export.Value.ref = C.JS_NewUndefined()
+		value.ref = C.JS_NewUndefined()
 		C.free(unsafe.Pointer(exportName))
 		if rc < 0 {
 			return throwModuleError(ctx, fmt.Errorf("failed to set module export: %s", export.Name))
