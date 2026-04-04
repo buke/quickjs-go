@@ -240,6 +240,9 @@ func TestModuleBuilder_ValueSpec(t *testing.T) {
 		ex := ctx.Exception()
 		require.Error(t, ex)
 		require.Contains(t, ex.Error(), "invalid module export value")
+
+		_, stillExists := findModuleBuilderSnapshot(moduleName)
+		require.False(t, stillExists)
 	})
 
 	t.Run("SnapshotMutationMaterializeReturnsNil", func(t *testing.T) {

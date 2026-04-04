@@ -499,6 +499,9 @@ func createClass(ctx *Context, builder *ClassBuilder) (*Value, uint32) {
 				cleanupStoredHandlers()
 				return ctx.ThrowError(fmt.Errorf("invalid property value: %s (materialize error: %v)", property.Name, err)), 0
 			}
+			if propertyValue != nil && propertyValue.ctx == ctx {
+				materializedStatic = append(materializedStatic, materializedStaticProperty{spec: property.Spec, value: propertyValue})
+			}
 			if propertyValue == nil {
 				cleanupStoredHandlers()
 				return ctx.ThrowError(fmt.Errorf("invalid property value: %s (materialize returned nil)", property.Name)), 0
@@ -507,7 +510,6 @@ func createClass(ctx *Context, builder *ClassBuilder) (*Value, uint32) {
 				cleanupStoredHandlers()
 				return ctx.ThrowError(fmt.Errorf("invalid property value: %s (materialized in a different context)", property.Name)), 0
 			}
-			materializedStatic = append(materializedStatic, materializedStaticProperty{spec: property.Spec, value: propertyValue})
 
 			// Convert property name to C string
 			propertyName := C.CString(property.Name)
