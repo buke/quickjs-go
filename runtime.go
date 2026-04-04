@@ -115,7 +115,9 @@ func (r *Runtime) ensureOwnerAccess() bool {
 func (r *Runtime) claimOrVerifyOwnerGoroutine(current uint64) bool {
 	owner := r.ownerGoroutineID.Load()
 	if owner == 0 {
-		r.ownerGoroutineID.CompareAndSwap(0, current)
+		if r.ownerGoroutineID.CompareAndSwap(0, current) {
+			return true
+		}
 		owner = r.ownerGoroutineID.Load()
 	}
 	return owner == current

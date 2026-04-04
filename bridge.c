@@ -2,9 +2,19 @@
 #include "quickjs.h"
 #include "quickjs-libc.h"
 #include "cutils.h" 
-#include <pthread.h>
 #include <stdint.h>
 #include <time.h>
+
+#ifdef _WIN32
+#include <windows.h>
+#elif defined(__APPLE__)
+#include <pthread.h>
+#elif defined(__linux__)
+#include <sys/syscall.h>
+#include <unistd.h>
+#else
+#include <pthread.h>
+#endif
 
 // ============================================================================
 // MACRO WRAPPER FUNCTIONS
@@ -55,7 +65,17 @@ int GetAwaitPollSliceMs(void) {
 }
 
 uint64_t CurrentThreadID(void) {
+#ifdef _WIN32
+    return (uint64_t)GetCurrentThreadId();
+#elif defined(__APPLE__)
+    uint64_t tid = 0;
+    (void)pthread_threadid_np(NULL, &tid);
+    return tid;
+#elif defined(__linux__)
+    return (uint64_t)syscall(SYS_gettid);
+#else
     return (uint64_t)(uintptr_t)pthread_self();
+#endif
 }
 
 void SetAwaitPollSliceMs(int timeout_ms) {
