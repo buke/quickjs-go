@@ -25,9 +25,13 @@ func (v *Value) hasValidContext() bool {
 	return v != nil && v.ctx != nil && v.ctx.hasValidRef()
 }
 
+func sameContextRef(a *Value, b *Value) bool {
+	return a != nil && b != nil && a.ctx != nil && b.ctx != nil && a.ctx == b.ctx
+}
+
 // sameContext reports whether two values belong to the same live context.
 func sameContext(a *Value, b *Value) bool {
-	return a != nil && b != nil && a.ctx != nil && b.ctx != nil && a.ctx == b.ctx && a.hasValidContext() && b.hasValidContext()
+	return sameContextRef(a, b) && a.ctx.hasValidRef()
 }
 
 // Free the value.
@@ -167,7 +171,7 @@ func (v *Value) ByteLen() int64 {
 
 // Set sets the value of the property with the given name.
 func (v *Value) Set(name string, val *Value) {
-	if !v.hasValidContext() || !sameContext(v, val) {
+	if !v.hasValidContext() || !sameContextRef(v, val) {
 		return
 	}
 	var namePtr *C.char
@@ -179,7 +183,7 @@ func (v *Value) Set(name string, val *Value) {
 
 // SetIdx sets the value of the property with the given index.
 func (v *Value) SetIdx(idx int64, val *Value) {
-	if !v.hasValidContext() || !sameContext(v, val) {
+	if !v.hasValidContext() || !sameContextRef(v, val) {
 		return
 	}
 	C.JS_SetPropertyUint32(v.ctx.ref, v.ref, C.uint32_t(idx), val.ref)
@@ -216,7 +220,7 @@ func (v *Value) Call(fname string, args ...*Value) *Value {
 	}
 	cargs := []C.JSValue{}
 	for _, x := range args {
-		if !sameContext(v, x) {
+		if !sameContextRef(v, x) {
 			return nil
 		}
 		cargs = append(cargs, x.ref)
@@ -233,12 +237,12 @@ func (v *Value) Call(fname string, args ...*Value) *Value {
 
 // Execute the function with the given arguments.
 func (v *Value) Execute(this *Value, args ...*Value) *Value {
-	if !v.hasValidContext() || !sameContext(v, this) {
+	if !v.hasValidContext() || !sameContextRef(v, this) {
 		return nil
 	}
 	cargs := []C.JSValue{}
 	for _, x := range args {
-		if !sameContext(v, x) {
+		if !sameContextRef(v, x) {
 			return nil
 		}
 		cargs = append(cargs, x.ref)
@@ -276,7 +280,7 @@ func (v *Value) CallConstructor(args ...*Value) *Value {
 	}
 	cargs := []C.JSValue{}
 	for _, x := range args {
-		if !sameContext(v, x) {
+		if !sameContextRef(v, x) {
 			return nil
 		}
 		cargs = append(cargs, x.ref)

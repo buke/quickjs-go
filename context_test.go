@@ -649,6 +649,7 @@ func TestContextErrorHandling(t *testing.T) {
 			throwFn  func() *Value // Changed to return pointer
 			errorStr string
 		}{
+			{"Throw", func() *Value { return ctx.Throw(ctx.NewError(errors.New("custom throw"))) }, "custom throw"},
 			{"ThrowError", func() *Value { return ctx.ThrowError(errors.New("custom error")) }, "custom error"},
 			{"ThrowSyntax", func() *Value { return ctx.ThrowSyntaxError("syntax: %s", "invalid") }, "SyntaxError"},
 			{"ThrowType", func() *Value { return ctx.ThrowTypeError("type error") }, "TypeError"},

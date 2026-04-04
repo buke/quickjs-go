@@ -1106,6 +1106,34 @@ func TestRuntimeOwnerCheckHooksAndStrictThreadAffinity(t *testing.T) {
 	rtNoCheck.Close()
 }
 
+func TestCurrentGoroutineIDFailClosedParser(t *testing.T) {
+	oldStack := goroutineStack
+	defer func() {
+		goroutineStack = oldStack
+	}()
+
+	goroutineStack = func(buf []byte, all bool) int {
+		const s = "goroutine "
+		copy(buf, s)
+		return len(s)
+	}
+	require.Zero(t, currentGoroutineID())
+
+	goroutineStack = func(buf []byte, all bool) int {
+		const s = "goroutine x [running]:\n"
+		copy(buf, s)
+		return len(s)
+	}
+	require.Zero(t, currentGoroutineID())
+
+	goroutineStack = func(buf []byte, all bool) int {
+		const s = "goroutine 424242 [running]:\n"
+		copy(buf, s)
+		return len(s)
+	}
+	require.Equal(t, uint64(424242), currentGoroutineID())
+}
+
 func TestRuntimeOwnerCheckGatesRuntimeContextAndValuePaths(t *testing.T) {
 	oldGIDHook := ownerCheckCurrentGoroutineID
 	oldThreadHook := ownerCheckCurrentThreadID

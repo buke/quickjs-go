@@ -8,8 +8,6 @@ import "C"
 import (
 	"errors"
 	goruntime "runtime"
-	"strconv"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"unsafe"
@@ -39,6 +37,7 @@ var errOwnerAccessDenied = errors.New("quickjs: owner access denied; if strict O
 
 var ownerCheckCurrentGoroutineID = currentGoroutineID
 var ownerCheckCurrentThreadID = currentThreadID
+var goroutineStack = goruntime.Stack
 
 type classObjectIdentity struct {
 	contextID uint64
@@ -129,10 +128,30 @@ func (r *Runtime) claimOrVerifyOwnerThread(current uint64) bool {
 }
 
 func currentGoroutineID() uint64 {
-	var buf [64]byte
-	n := goruntime.Stack(buf[:], false)
-	fields := strings.Fields(string(buf[:n]))
-	id, _ := strconv.ParseUint(fields[1], 10, 64)
+	const prefix = "goroutine "
+
+	var buf [128]byte
+	n := goroutineStack(buf[:], false)
+	if n <= len(prefix) {
+		return 0
+	}
+
+	idx := len(prefix)
+	var id uint64
+	hasDigit := false
+	for idx < n {
+		c := buf[idx]
+		if c < '0' || c > '9' {
+			break
+		}
+		hasDigit = true
+		id = id*10 + uint64(c-'0')
+		idx++
+	}
+
+	if !hasDigit {
+		return 0
+	}
 	return id
 }
 

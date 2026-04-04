@@ -1039,7 +1039,7 @@ func (ctx *Context) Globals() *Value {
 
 // Throw returns a context's exception value.
 func (ctx *Context) Throw(v *Value) *Value {
-	if !ctx.hasValidRef() || v == nil || !v.hasValidContext() {
+	if !ctx.hasValidRef() || v == nil || v.ctx != ctx {
 		return nil
 	}
 	return &Value{ctx: ctx, ref: C.JS_Throw(ctx.ref, v.ref)}
@@ -1050,7 +1050,8 @@ func (ctx *Context) ThrowError(err error) *Value {
 	if !ctx.hasValidRef() {
 		return nil
 	}
-	return ctx.Throw(ctx.NewError(err))
+	v := ctx.NewError(err)
+	return &Value{ctx: ctx, ref: C.JS_Throw(ctx.ref, v.ref)}
 }
 
 // ThrowSyntaxError returns a context's exception value with given error message.
