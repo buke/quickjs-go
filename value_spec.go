@@ -1,6 +1,9 @@
 package quickjs
 
-import "errors"
+import (
+	"errors"
+	"fmt"
+)
 
 var errValueSpecFactoryRequired = errors.New("value spec factory is required")
 
@@ -11,6 +14,16 @@ var errValueSpecFactoryRequired = errors.New("value spec factory is required")
 // Build can change later module initialization or class construction behavior.
 type ValueSpec interface {
 	Materialize(ctx *Context) (*Value, error)
+}
+
+func materializeValueSpecSafely(ctx *Context, spec ValueSpec) (value *Value, err error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			err = fmt.Errorf("panic during materialize: %v", recovered)
+		}
+	}()
+
+	return spec.Materialize(ctx)
 }
 
 // MarshalSpec materializes a value via Context.Marshal.

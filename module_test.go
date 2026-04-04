@@ -135,6 +135,24 @@ func TestModuleBuilder_ValueSpec(t *testing.T) {
 		require.Equal(t, "hello-factory", result.ToString())
 	})
 
+	t.Run("FactorySpecPanicRecovered", func(t *testing.T) {
+		moduleName := "value-spec-factory-panic"
+		module := NewModuleBuilder(moduleName).
+			ExportValue("msg", FactorySpec{Factory: func(ctx *Context) (*Value, error) {
+				panic("factory panic")
+			}})
+
+		err := module.Build(ctx)
+		require.NoError(t, err)
+
+		result := ctx.Eval(fmt.Sprintf(`import('%s')`, moduleName), EvalAwait(true))
+		defer result.Free()
+		require.True(t, result.IsException())
+		ex := ctx.Exception()
+		require.Error(t, ex)
+		require.Contains(t, ex.Error(), "panic during materialize")
+	})
+
 	t.Run("InvalidSpecsFailClosed", func(t *testing.T) {
 		other := rt.NewContext()
 		require.NotNil(t, other)

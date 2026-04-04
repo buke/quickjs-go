@@ -89,7 +89,7 @@ func goClassConstructorProxy(ctx *C.JSContext, newTarget C.JSValueConst,
 			if property.Spec == nil {
 				return throwProxyError(ctx, proxyError{"InternalError", fmt.Sprintf("property value is required: %s", property.Name)})
 			}
-			propertyValue, err := property.Spec.Materialize(goCtx)
+			propertyValue, err := materializeValueSpecSafely(goCtx, property.Spec)
 			if err != nil {
 				return throwProxyError(ctx, proxyError{"InternalError", fmt.Sprintf("invalid property value: %s (materialize error: %v)", property.Name, err)})
 			}

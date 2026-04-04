@@ -1195,6 +1195,26 @@ func TestClassBuilder_ValueSpecProperties(t *testing.T) {
 		require.Contains(t, err.Error(), "invalid property value")
 	})
 
+	t.Run("InstancePropertyMaterializePanicRecovered", func(t *testing.T) {
+		constructor, _ := NewClassBuilder("SpecInstancePanicClass").
+			Constructor(func(ctx *Context, instance *Value, args []*Value) (interface{}, error) {
+				return &Point{X: 0, Y: 0}, nil
+			}).
+			PropertyValue("bad", FactorySpec{Factory: func(ctx *Context) (*Value, error) {
+				panic("instance materialize panic")
+			}}).
+			Build(ctx)
+		require.False(t, constructor.IsException())
+
+		ctx.Globals().Set("SpecInstancePanicClass", constructor)
+		result := ctx.Eval(`new SpecInstancePanicClass()`)
+		defer result.Free()
+		require.True(t, result.IsException())
+		err := ctx.Exception()
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "panic during materialize")
+	})
+
 	t.Run("InvalidStaticPropertySpec", func(t *testing.T) {
 		builder := NewClassBuilder("SpecInvalidStaticClass").
 			Constructor(func(ctx *Context, instance *Value, args []*Value) (interface{}, error) {
@@ -1212,6 +1232,21 @@ func TestClassBuilder_ValueSpecProperties(t *testing.T) {
 		err := ctx.Exception()
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "invalid property value")
+	})
+
+	t.Run("StaticPropertyMaterializePanicRecovered", func(t *testing.T) {
+		constructor, _ := NewClassBuilder("SpecStaticPanicClass").
+			Constructor(func(ctx *Context, instance *Value, args []*Value) (interface{}, error) {
+				return &Point{X: 0, Y: 0}, nil
+			}).
+			StaticPropertyValue("bad", FactorySpec{Factory: func(ctx *Context) (*Value, error) {
+				panic("static materialize panic")
+			}}).
+			Build(ctx)
+		require.True(t, constructor.IsException())
+		err := ctx.Exception()
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "panic during materialize")
 	})
 
 	t.Run("StaticPropertyNilConvenience", func(t *testing.T) {

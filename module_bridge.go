@@ -59,7 +59,7 @@ func goModuleInitProxy(ctx *C.JSContext, m *C.JSModuleDef) C.int {
 			return throwModuleError(ctx, fmt.Errorf("invalid module export value: %s", export.Name))
 		}
 
-		value, matErr := export.Spec.Materialize(goCtx)
+		value, matErr := materializeValueSpecSafely(goCtx, export.Spec)
 		if matErr != nil {
 			return throwModuleError(ctx, fmt.Errorf("invalid module export value: %s (materialize error: %v)", export.Name, matErr))
 		}

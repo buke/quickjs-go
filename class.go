@@ -494,7 +494,7 @@ func createClass(ctx *Context, builder *ClassBuilder) (*Value, uint32) {
 		// SCHEME C: Only include static properties for CreateClass call
 		// Instance properties will be handled by constructor proxy during instance creation
 		if property.Static {
-			propertyValue, err := property.Spec.Materialize(ctx)
+			propertyValue, err := materializeValueSpecSafely(ctx, property.Spec)
 			if err != nil {
 				cleanupStoredHandlers()
 				return ctx.ThrowError(fmt.Errorf("invalid property value: %s (materialize error: %v)", property.Name, err)), 0
