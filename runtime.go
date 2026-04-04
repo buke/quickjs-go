@@ -643,8 +643,9 @@ func BootstrapStdOS(ctx *Context) bool {
 	defer C.free(unsafe.Pointer(stdModuleName))
 	osModuleName := C.CString("os")
 	defer C.free(unsafe.Pointer(osModuleName))
-	C.js_init_module_std(ctx.ref, stdModuleName)
-	C.js_init_module_os(ctx.ref, osModuleName)
+	if C.js_init_module_std(ctx.ref, stdModuleName) == nil || C.js_init_module_os(ctx.ref, osModuleName) == nil {
+		return false
+	}
 	return true
 }
 
