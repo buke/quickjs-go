@@ -273,6 +273,38 @@ func TestModuleBuilder_ValueSpec(t *testing.T) {
 		require.Contains(t, ex.Error(), "failed to set module export")
 	})
 
+	t.Run("SnapshotMutationSetModuleExportErrorInvalidatesFactoryValue", func(t *testing.T) {
+		factoryValue := ctx.NewString("factory-value")
+		defer factoryValue.Free()
+
+		moduleName := "value-spec-snapshot-set-export-error-factory"
+		module := NewModuleBuilder(moduleName).
+			ExportValue("foo", FactorySpec{Factory: func(_ *Context) (*Value, error) {
+				return factoryValue, nil
+			}})
+
+		err := module.Build(ctx)
+		require.NoError(t, err)
+
+		snapshot, ok := findModuleBuilderSnapshot(moduleName)
+		require.True(t, ok)
+		require.NotEmpty(t, snapshot.exports)
+		snapshot.exports[0].Name = "bar"
+
+		result := ctx.Eval(fmt.Sprintf(`import('%s')`, moduleName), EvalAwait(true))
+		defer result.Free()
+		require.True(t, result.IsException())
+		ex := ctx.Exception()
+		require.Error(t, ex)
+		require.Contains(t, ex.Error(), "failed to set module export")
+
+		require.True(t, factoryValue.IsUndefined())
+		require.NotPanics(t, func() {
+			factoryValue.Free()
+			factoryValue.Free()
+		})
+	})
+
 	t.Run("CloneBuilderNil", func(t *testing.T) {
 		require.Nil(t, cloneModuleBuilder(nil))
 	})

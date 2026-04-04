@@ -65,6 +65,8 @@ func (mb *ModuleBuilder) ExportLiteral(name string, value interface{}) *ModuleBu
 
 // Build creates and registers the JavaScript module in the given context
 // The module will be available for import in JavaScript code
+// ValueSpec entries are captured by shallow snapshot. Do not mutate pointer-based
+// ValueSpec implementations after Build, or module initialization may observe changes.
 func (mb *ModuleBuilder) Build(ctx *Context) error {
 	return createModule(ctx, mb)
 }

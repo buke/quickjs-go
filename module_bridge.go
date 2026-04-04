@@ -75,12 +75,10 @@ func goModuleInitProxy(ctx *C.JSContext, m *C.JSModuleDef) C.int {
 		rc := C.JS_SetModuleExport(ctx, m, exportName, value.ref)
 		C.free(unsafe.Pointer(exportName))
 		if rc < 0 {
-			if legacySpec {
-				// JS_SetModuleExport frees val on failure, so legacy source handles
-				// must be invalidated to avoid a later double free.
-				value.ref = C.JS_NewUndefined()
-				value.borrowed = false
-			}
+			// JS_SetModuleExport frees val on failure, so source handles
+			// must be invalidated to avoid a later double free.
+			value.ref = C.JS_NewUndefined()
+			value.borrowed = false
 			return throwModuleError(ctx, fmt.Errorf("failed to set module export: %s", export.Name))
 		}
 		if legacySpec {

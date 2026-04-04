@@ -6,6 +6,9 @@ var errValueSpecFactoryRequired = errors.New("value spec factory is required")
 
 // ValueSpec describes how to materialize a JavaScript value for a target Context.
 // Module/Class builders use ValueSpec to store definitions instead of long-lived JSValue pointers.
+// ValueSpec implementations are expected to be immutable after being added to a builder.
+// Builder snapshots only shallow-copy entries, so mutating pointer-backed specs after
+// Build can change later module initialization or class construction behavior.
 type ValueSpec interface {
 	Materialize(ctx *Context) (*Value, error)
 }

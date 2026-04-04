@@ -285,6 +285,8 @@ func (cb *ClassBuilder) StaticPropertyLiteral(name string, value interface{}, fl
 
 // Build creates and registers the JavaScript class in the given context
 // Returns the constructor function and classID for NewInstance
+// ValueSpec entries are captured by shallow snapshot. Do not mutate pointer-based
+// ValueSpec implementations after Build, or later constructor calls may observe changes.
 func (cb *ClassBuilder) Build(ctx *Context) (*Value, uint32) {
 	return createClass(ctx, cb)
 }
