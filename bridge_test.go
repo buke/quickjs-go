@@ -339,7 +339,6 @@ func TestBridgeModuleInitFailClosedInvalidExportAndBuilderHandle(t *testing.T) {
 		require.NoError(t, mb.Build(ctx))
 
 		var builderID int32
-		var originalHandle cgo.Handle
 		ctx.handleStore.handles.Range(func(key, value interface{}) bool {
 			id, ok := key.(int32)
 			if !ok {
@@ -352,19 +351,15 @@ func TestBridgeModuleInitFailClosedInvalidExportAndBuilderHandle(t *testing.T) {
 			stored, ok := h.Value().(*ModuleBuilder)
 			if ok && stored != nil && stored.name == "invalid-builder-module" {
 				builderID = id
-				originalHandle = h
 				return false
 			}
 			return true
 		})
 		require.Greater(t, builderID, int32(0))
+		ctx.handleStore.Delete(builderID)
 
 		tempHandle := cgo.NewHandle("not-a-module-builder")
 		ctx.handleStore.handles.Store(builderID, tempHandle)
-		defer func() {
-			ctx.handleStore.handles.Store(builderID, originalHandle)
-			tempHandle.Delete()
-		}()
 
 		result := ctx.Eval(`import('invalid-builder-module')`, EvalAwait(true))
 		defer result.Free()
@@ -372,6 +367,9 @@ func TestBridgeModuleInitFailClosedInvalidExportAndBuilderHandle(t *testing.T) {
 		err := ctx.Exception()
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "invalid module builder handle")
+
+		_, exists := ctx.handleStore.Load(builderID)
+		require.False(t, exists)
 	})
 
 	t.Run("InvalidModuleBuilderIDPrivateValue", func(t *testing.T) {

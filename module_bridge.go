@@ -35,6 +35,9 @@ func getContextAndModuleBuilder(ctx *C.JSContext, m *C.JSModuleDef) (*Context, *
 
 	builder, ok := builderInterface.(*ModuleBuilder)
 	if !ok || builder == nil {
+		if goCtx != nil && goCtx.handleStore != nil {
+			goCtx.handleStore.Delete(int32(builderID))
+		}
 		return nil, nil, fmt.Errorf("failed to get context and module builder: invalid module builder handle")
 	}
 
