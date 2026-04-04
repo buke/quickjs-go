@@ -1,3 +1,6 @@
+#ifndef QUICKJS_GO_BRIDGE_H
+#define QUICKJS_GO_BRIDGE_H
+
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -147,3 +150,5 @@ extern int CreateModule(JSContext *ctx, const char *module_name,
 // This function is called by QuickJS when a module is being initialized
 // It bridges between C QuickJS API and Go ModuleBuilder functionality
 extern int GoModuleInitProxy(JSContext *ctx, JSModuleDef *m);
+
+#endif /* QUICKJS_GO_BRIDGE_H */

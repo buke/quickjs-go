@@ -265,8 +265,26 @@ func (cb *ClassBuilder) Build(ctx *Context) (*Value, uint32) {
 
 // validateClassBuilder validates ClassBuilder configuration - unchanged
 func validateClassBuilder(builder *ClassBuilder) error {
+	if builder == nil {
+		return errors.New("class builder is required")
+	}
 	if builder.constructor == nil {
 		return errors.New("constructor function is required")
+	}
+	for _, method := range builder.methods {
+		if method.Func == nil {
+			return fmt.Errorf("method function is required: %s", method.Name)
+		}
+	}
+	for _, accessor := range builder.accessors {
+		if accessor.Getter == nil && accessor.Setter == nil {
+			return fmt.Errorf("accessor requires getter or setter: %s", accessor.Name)
+		}
+	}
+	for _, property := range builder.properties {
+		if property.Value == nil {
+			return fmt.Errorf("property value is required: %s", property.Name)
+		}
 	}
 	return nil
 }

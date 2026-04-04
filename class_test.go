@@ -978,6 +978,50 @@ func TestErrorHandling(t *testing.T) {
 		require.Contains(t, err.Error(), "constructor function is required")
 	}
 
+	var nilBuilder *ClassBuilder
+	ctorNilBuilder, _ := nilBuilder.Build(context)
+	defer ctorNilBuilder.Free()
+	if ctorNilBuilder.IsException() {
+		err := context.Exception()
+		require.Contains(t, err.Error(), "class builder is required")
+	}
+
+	ctor3, _ := NewClassBuilder("TestClassWithNilMethod").
+		Constructor(func(ctx *Context, instance *Value, args []*Value) (interface{}, error) {
+			return nil, nil
+		}).
+		Method("broken", nil).
+		Build(context)
+	defer ctor3.Free()
+	if ctor3.IsException() {
+		err := context.Exception()
+		require.Contains(t, err.Error(), "method function is required")
+	}
+
+	ctor4, _ := NewClassBuilder("TestClassWithBrokenAccessor").
+		Constructor(func(ctx *Context, instance *Value, args []*Value) (interface{}, error) {
+			return nil, nil
+		}).
+		Accessor("broken", nil, nil).
+		Build(context)
+	defer ctor4.Free()
+	if ctor4.IsException() {
+		err := context.Exception()
+		require.Contains(t, err.Error(), "accessor requires getter or setter")
+	}
+
+	ctor5, _ := NewClassBuilder("TestClassWithNilProperty").
+		Constructor(func(ctx *Context, instance *Value, args []*Value) (interface{}, error) {
+			return nil, nil
+		}).
+		Property("broken", nil).
+		Build(context)
+	defer ctor5.Free()
+	if ctor5.IsException() {
+		err := context.Exception()
+		require.Contains(t, err.Error(), "property value is required")
+	}
+
 	// Test GetGoObject on non-class object
 	regularObj := context.Eval(`({})`)
 	defer regularObj.Free()

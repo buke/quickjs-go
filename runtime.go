@@ -38,6 +38,11 @@ var runtimeEvalFunctionHook func(ctx *C.JSContext, compiled C.JSValue) C.JSValue
 var runtimeBootstrapStdOSHook func(ctx *Context) bool
 var runtimeBootstrapTimersHook func(ctx *Context) bool
 
+// runtimeBootstrapStdOSInitHook is used in tests to force std/os init
+// outcomes while keeping BootstrapStdOS owner/liveness checks active.
+// Return (handled=true, ok=<result>) to override default C initialization.
+var runtimeBootstrapStdOSInitHook func(ctx *Context) (handled bool, ok bool)
+
 var errOwnerAccessDenied = errors.New("quickjs: owner access denied; runtime/context/value APIs must be called from the owner goroutine; if strict OS thread mode is enabled, also bind that goroutine with runtime.LockOSThread()")
 
 var ownerCheckCurrentGoroutineID = currentGoroutineID
@@ -650,10 +655,20 @@ func BootstrapStdOS(ctx *Context) bool {
 	defer C.free(unsafe.Pointer(stdModuleName))
 	osModuleName := C.CString("os")
 	defer C.free(unsafe.Pointer(osModuleName))
-	if C.js_init_module_std(ctx.ref, stdModuleName) == nil || C.js_init_module_os(ctx.ref, osModuleName) == nil {
+	if !initStdOSModules(ctx, stdModuleName, osModuleName) {
 		return false
 	}
 	return true
+}
+
+func initStdOSModules(ctx *Context, stdModuleName *C.char, osModuleName *C.char) bool {
+	if runtimeBootstrapStdOSInitHook != nil {
+		handled, ok := runtimeBootstrapStdOSInitHook(ctx)
+		if handled {
+			return ok
+		}
+	}
+	return C.js_init_module_std(ctx.ref, stdModuleName) != nil && C.js_init_module_os(ctx.ref, osModuleName) != nil
 }
 
 // BootstrapTimers injects setTimeout/clearTimeout into globalThis.
