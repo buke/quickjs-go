@@ -223,10 +223,11 @@ func (cb *ClassBuilder) StaticAccessor(name string, getter ClassGetterFunc, sett
 // SCHEME C: Instance properties will be bound during instance creation
 // Deprecated: Use PropertyValue or PropertyLiteral for declarative, reusable class definitions.
 func (cb *ClassBuilder) Property(name string, value *Value, flags ...int) *ClassBuilder {
-	if value == nil {
-		return cb.PropertyValue(name, nil, flags...)
+	var spec ValueSpec
+	if value != nil {
+		spec = contextValueSpec{value: value}
 	}
-	return cb.PropertyValue(name, contextValueSpec{value: value}, flags...)
+	return cb.PropertyValue(name, spec, flags...)
 }
 
 // PropertyValue adds a data property spec to the class instance.
@@ -254,10 +255,11 @@ func (cb *ClassBuilder) PropertyLiteral(name string, value interface{}, flags ..
 // Default flags: writable, enumerable, configurable
 // Deprecated: Use StaticPropertyValue or StaticPropertyLiteral for declarative, reusable class definitions.
 func (cb *ClassBuilder) StaticProperty(name string, value *Value, flags ...int) *ClassBuilder {
-	if value == nil {
-		return cb.StaticPropertyValue(name, nil, flags...)
+	var spec ValueSpec
+	if value != nil {
+		spec = contextValueSpec{value: value}
 	}
-	return cb.StaticPropertyValue(name, contextValueSpec{value: value}, flags...)
+	return cb.StaticPropertyValue(name, spec, flags...)
 }
 
 // StaticPropertyValue adds a data property spec to the class constructor.
