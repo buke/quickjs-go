@@ -15,6 +15,8 @@ type Point struct {
 
 // TestValueBasics tests basic value creation and type checking
 func TestValueBasics(t *testing.T) {
+	useStableOwnerHooksForLegacySubtests(t)
+
 	rt := NewRuntime()
 	defer rt.Close()
 	ctx := rt.NewContext()
@@ -60,6 +62,8 @@ func TestValueBasics(t *testing.T) {
 
 // TestValueConversions tests type conversions including deprecated methods
 func TestValueConversions(t *testing.T) {
+	useStableOwnerHooksForLegacySubtests(t)
+
 	rt := NewRuntime()
 	defer rt.Close()
 	ctx := rt.NewContext()
@@ -138,6 +142,8 @@ func TestValueConversions(t *testing.T) {
 
 // TestValueJSON tests JSON operations
 func TestValueJSON(t *testing.T) {
+	useStableOwnerHooksForLegacySubtests(t)
+
 	rt := NewRuntime()
 	defer rt.Close()
 	ctx := rt.NewContext()
@@ -178,6 +184,8 @@ func TestValueJSON(t *testing.T) {
 
 // TestValueArrayBuffer tests ArrayBuffer operations
 func TestValueArrayBuffer(t *testing.T) {
+	useStableOwnerHooksForLegacySubtests(t)
+
 	rt := NewRuntime()
 	defer rt.Close()
 	ctx := rt.NewContext()
@@ -232,6 +240,8 @@ func TestValueArrayBuffer(t *testing.T) {
 
 // TestValueTypedArrays tests TypedArray detection and conversion
 func TestValueTypedArrays(t *testing.T) {
+	useStableOwnerHooksForLegacySubtests(t)
+
 	rt := NewRuntime()
 	defer rt.Close()
 	ctx := rt.NewContext()
@@ -394,6 +404,8 @@ func TestValueTypedArrays(t *testing.T) {
 
 // TestValueProperties tests property operations
 func TestValueProperties(t *testing.T) {
+	useStableOwnerHooksForLegacySubtests(t)
+
 	rt := NewRuntime()
 	defer rt.Close()
 	ctx := rt.NewContext()
@@ -448,6 +460,8 @@ func TestValueProperties(t *testing.T) {
 
 // TestValueFunctionCalls tests function calls and constructors
 func TestValueFunctionCalls(t *testing.T) {
+	useStableOwnerHooksForLegacySubtests(t)
+
 	rt := NewRuntime()
 	defer rt.Close()
 	ctx := rt.NewContext()
@@ -509,6 +523,8 @@ func TestValueFunctionCalls(t *testing.T) {
 
 // TestValueError tests error handling
 func TestValueError(t *testing.T) {
+	useStableOwnerHooksForLegacySubtests(t)
+
 	rt := NewRuntime()
 	defer rt.Close()
 	ctx := rt.NewContext()
@@ -559,6 +575,8 @@ func TestValueError(t *testing.T) {
 
 // TestValueInstanceof tests instanceof operations
 func TestValueInstanceof(t *testing.T) {
+	useStableOwnerHooksForLegacySubtests(t)
+
 	rt := NewRuntime()
 	defer rt.Close()
 	ctx := rt.NewContext()
@@ -601,6 +619,8 @@ func TestValueInstanceof(t *testing.T) {
 
 // TestValueSpecialTypes tests special types and edge cases
 func TestValueSpecialTypes(t *testing.T) {
+	useStableOwnerHooksForLegacySubtests(t)
+
 	rt := NewRuntime()
 	defer rt.Close()
 	ctx := rt.NewContext()
@@ -687,6 +707,8 @@ func TestValueSpecialTypes(t *testing.T) {
 
 // TestPromiseState tests promise state handling
 func TestPromiseState(t *testing.T) {
+	useStableOwnerHooksForLegacySubtests(t)
+
 	rt := NewRuntime()
 	defer rt.Close()
 	ctx := rt.NewContext()
@@ -723,6 +745,8 @@ func TestPromiseState(t *testing.T) {
 
 // TestValueAwait tests promise await functionality
 func TestValueAwait(t *testing.T) {
+	useStableOwnerHooksForLegacySubtests(t)
+
 	rt := NewRuntime()
 	defer rt.Close()
 	ctx := rt.NewContext()
@@ -766,6 +790,8 @@ func TestValueAwait(t *testing.T) {
 
 // TestValueClassInstanceEdgeCases tests uncovered branches in class instance methods
 func TestValueClassInstanceEdgeCases(t *testing.T) {
+	useStableOwnerHooksForLegacySubtests(t)
+
 	rt := NewRuntime()
 	defer rt.Close()
 	ctx := rt.NewContext()
@@ -1024,6 +1050,8 @@ func TestValueHasInstanceDataFailClosedOnMissingOwnerContext(t *testing.T) {
 // TestValueCallConstructorEdgeCases tests edge cases and error conditions in CallConstructor
 // MODIFIED FOR SCHEME C: Removed all NewInstance tests, enhanced CallConstructor coverage
 func TestValueCallConstructorEdgeCases(t *testing.T) {
+	useStableOwnerHooksForLegacySubtests(t)
+
 	rt := NewRuntime()
 	defer rt.Close()
 	ctx := rt.NewContext()
@@ -1291,6 +1319,8 @@ func TestValueCallConstructorEdgeCases(t *testing.T) {
 // TestValueCallConstructorComprehensive tests comprehensive CallConstructor scenarios
 // NEW TEST: Comprehensive coverage for CallConstructor API
 func TestValueCallConstructorComprehensive(t *testing.T) {
+	useStableOwnerHooksForLegacySubtests(t)
+
 	rt := NewRuntime()
 	defer rt.Close()
 	ctx := rt.NewContext()

@@ -314,12 +314,19 @@ func TestBridgeNilCallbackResultsNormalizeToUndefined(t *testing.T) {
 }
 
 func TestBridgeModuleInitFailClosedInvalidExportAndBuilderHandle(t *testing.T) {
-	rt := NewRuntime(WithModuleImport(true))
-	defer rt.Close()
-	ctx := rt.NewContext()
-	defer ctx.Close()
+	newModuleContext := func(t *testing.T) *Context {
+		rt := NewRuntime(WithModuleImport(true))
+		ctx := rt.NewContext()
+		require.NotNil(t, ctx)
+		t.Cleanup(func() {
+			ctx.Close()
+			rt.Close()
+		})
+		return ctx
+	}
 
 	t.Run("InvalidExportValue", func(t *testing.T) {
+		ctx := newModuleContext(t)
 		mb := NewModuleBuilder("invalid-export-module").
 			Export("bad", nil)
 		require.NoError(t, mb.Build(ctx))
@@ -333,6 +340,7 @@ func TestBridgeModuleInitFailClosedInvalidExportAndBuilderHandle(t *testing.T) {
 	})
 
 	t.Run("InvalidModuleBuilderHandle", func(t *testing.T) {
+		ctx := newModuleContext(t)
 		mb := NewModuleBuilder("invalid-builder-module").
 			Export("ok", ctx.NewString("value"))
 		require.NoError(t, mb.Build(ctx))

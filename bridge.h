@@ -120,6 +120,7 @@ extern JSValue LoadModuleBytecode(JSContext *ctx, const uint8_t *buf, size_t buf
 extern int GetAwaitPollSliceMs(void);
 extern void SetAwaitPollSliceMs(int timeout_ms);
 extern int QuickjsGoPollInterrupt(JSContext *ctx);
+extern uint64_t CurrentThreadID(void);
 
 // Simplified interrupt handler interface (no handlerArgs complexity)
 extern void SetInterruptHandler(JSRuntime *rt);

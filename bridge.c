@@ -2,8 +2,32 @@
 #include "quickjs.h"
 #include "quickjs-libc.h"
 #include "cutils.h" 
-#include <pthread.h>
+#include <stdint.h>
 #include <time.h>
+
+#ifdef _WIN32
+#include <windows.h>
+#elif defined(__APPLE__)
+#include <pthread.h>
+#elif defined(__linux__)
+#include <pthread.h>
+#include <sys/syscall.h>
+#include <unistd.h>
+#else
+#include <pthread.h>
+#endif
+
+#ifdef _WIN32
+typedef SRWLOCK qjsgo_mutex_t;
+#define QJSGO_MUTEX_INITIALIZER SRWLOCK_INIT
+#define qjsgo_mutex_lock(mu) AcquireSRWLockExclusive((mu))
+#define qjsgo_mutex_unlock(mu) ReleaseSRWLockExclusive((mu))
+#else
+typedef pthread_mutex_t qjsgo_mutex_t;
+#define QJSGO_MUTEX_INITIALIZER PTHREAD_MUTEX_INITIALIZER
+#define qjsgo_mutex_lock(mu) pthread_mutex_lock((mu))
+#define qjsgo_mutex_unlock(mu) pthread_mutex_unlock((mu))
+#endif
 
 // ============================================================================
 // MACRO WRAPPER FUNCTIONS
@@ -43,14 +67,28 @@ static int isExecuteTimeoutExceeded(JSRuntime *rt);
 static int ThrowUnhandledPromiseRejectionIfAny(JSContext *ctx);
 
 static int g_await_poll_slice_ms = 10;
-static pthread_mutex_t g_await_poll_slice_mu = PTHREAD_MUTEX_INITIALIZER;
+static qjsgo_mutex_t g_await_poll_slice_mu = QJSGO_MUTEX_INITIALIZER;
 
 int GetAwaitPollSliceMs(void) {
     int value;
-    pthread_mutex_lock(&g_await_poll_slice_mu);
+    qjsgo_mutex_lock(&g_await_poll_slice_mu);
     value = g_await_poll_slice_ms;
-    pthread_mutex_unlock(&g_await_poll_slice_mu);
+    qjsgo_mutex_unlock(&g_await_poll_slice_mu);
     return value;
+}
+
+uint64_t CurrentThreadID(void) {
+#ifdef _WIN32
+    return (uint64_t)GetCurrentThreadId();
+#elif defined(__APPLE__)
+    uint64_t tid = 0;
+    (void)pthread_threadid_np(NULL, &tid);
+    return tid;
+#elif defined(__linux__)
+    return (uint64_t)syscall(SYS_gettid);
+#else
+    return (uint64_t)(uintptr_t)pthread_self();
+#endif
 }
 
 void SetAwaitPollSliceMs(int timeout_ms) {
@@ -58,9 +96,9 @@ void SetAwaitPollSliceMs(int timeout_ms) {
         return;
     }
 
-    pthread_mutex_lock(&g_await_poll_slice_mu);
+    qjsgo_mutex_lock(&g_await_poll_slice_mu);
     g_await_poll_slice_ms = timeout_ms;
-    pthread_mutex_unlock(&g_await_poll_slice_mu);
+    qjsgo_mutex_unlock(&g_await_poll_slice_mu);
 }
 
 typedef struct RejectionEntry {
@@ -77,7 +115,7 @@ typedef struct RejectionStateEntry {
 } RejectionStateEntry;
 
 static RejectionStateEntry *g_rejection_states = NULL;
-static pthread_mutex_t g_rejection_states_mu = PTHREAD_MUTEX_INITIALIZER;
+static qjsgo_mutex_t g_rejection_states_mu = QJSGO_MUTEX_INITIALIZER;
 
 static void freeRejectionEntry(JSRuntime *rt, RejectionEntry *entry) {
     if (!entry) {
@@ -115,7 +153,7 @@ static RejectionStateEntry *getRejectionState(JSRuntime *rt, int create) {
 }
 
 static void clearRejectionState(JSRuntime *rt) {
-    pthread_mutex_lock(&g_rejection_states_mu);
+    qjsgo_mutex_lock(&g_rejection_states_mu);
 
     RejectionStateEntry *prev = NULL;
     RejectionStateEntry *current = g_rejection_states;
@@ -140,7 +178,7 @@ static void clearRejectionState(JSRuntime *rt) {
         current = current->next;
     }
 
-    pthread_mutex_unlock(&g_rejection_states_mu);
+    qjsgo_mutex_unlock(&g_rejection_states_mu);
 }
 
 static void QuickjsGoPromiseRejectionTracker(JSContext *ctx,
@@ -151,10 +189,10 @@ static void QuickjsGoPromiseRejectionTracker(JSContext *ctx,
     JSRuntime *rt = JS_GetRuntime(ctx);
     (void)opaque;
 
-    pthread_mutex_lock(&g_rejection_states_mu);
+    qjsgo_mutex_lock(&g_rejection_states_mu);
     RejectionStateEntry *state = getRejectionState(rt, 1);
     if (!state) {
-        pthread_mutex_unlock(&g_rejection_states_mu);
+        qjsgo_mutex_unlock(&g_rejection_states_mu);
         return;
     }
 
@@ -180,20 +218,20 @@ static void QuickjsGoPromiseRejectionTracker(JSContext *ctx,
             }
             freeRejectionEntry(rt, current);
         }
-        pthread_mutex_unlock(&g_rejection_states_mu);
+        qjsgo_mutex_unlock(&g_rejection_states_mu);
         return;
     }
 
     if (current) {
         JS_FreeValueRT(rt, current->reason);
         current->reason = JS_DupValueRT(rt, reason);
-        pthread_mutex_unlock(&g_rejection_states_mu);
+        qjsgo_mutex_unlock(&g_rejection_states_mu);
         return;
     }
 
     RejectionEntry *entry = malloc(sizeof(RejectionEntry));
     if (!entry) {
-        pthread_mutex_unlock(&g_rejection_states_mu);
+        qjsgo_mutex_unlock(&g_rejection_states_mu);
         return;
     }
 
@@ -208,7 +246,7 @@ static void QuickjsGoPromiseRejectionTracker(JSContext *ctx,
     }
     state->tail = entry;
 
-    pthread_mutex_unlock(&g_rejection_states_mu);
+    qjsgo_mutex_unlock(&g_rejection_states_mu);
 }
 
 void SetPromiseRejectionTracker(JSRuntime *rt, int enabled) {
@@ -228,10 +266,10 @@ void SetPromiseRejectionTracker(JSRuntime *rt, int enabled) {
 static int popUnhandledPromiseRejection(JSContext *ctx, JSValue *reason_out) {
     JSRuntime *rt = JS_GetRuntime(ctx);
 
-    pthread_mutex_lock(&g_rejection_states_mu);
+    qjsgo_mutex_lock(&g_rejection_states_mu);
     RejectionStateEntry *state = getRejectionState(rt, 0);
     if (!state || !state->head) {
-        pthread_mutex_unlock(&g_rejection_states_mu);
+        qjsgo_mutex_unlock(&g_rejection_states_mu);
         return 0;
     }
 
@@ -245,7 +283,7 @@ static int popUnhandledPromiseRejection(JSContext *ctx, JSValue *reason_out) {
     JS_FreeValueRT(rt, entry->promise);
     free(entry);
 
-    pthread_mutex_unlock(&g_rejection_states_mu);
+    qjsgo_mutex_unlock(&g_rejection_states_mu);
     return 1;
 }
 
@@ -852,14 +890,14 @@ typedef struct TimeoutStateEntry {
 } TimeoutStateEntry;
 
 static TimeoutStateEntry *g_timeout_states = NULL;
-static pthread_mutex_t g_timeout_states_mu = PTHREAD_MUTEX_INITIALIZER;
+static qjsgo_mutex_t g_timeout_states_mu = QJSGO_MUTEX_INITIALIZER;
 
 static int isExecuteTimeoutExceeded(JSRuntime *rt) {
     time_t start = 0;
     time_t timeout = 0;
     int found = 0;
 
-    pthread_mutex_lock(&g_timeout_states_mu);
+    qjsgo_mutex_lock(&g_timeout_states_mu);
     TimeoutStateEntry *current = g_timeout_states;
     while (current) {
         if (current->rt == rt && current->state != NULL) {
@@ -870,7 +908,7 @@ static int isExecuteTimeoutExceeded(JSRuntime *rt) {
         }
         current = current->next;
     }
-    pthread_mutex_unlock(&g_timeout_states_mu);
+    qjsgo_mutex_unlock(&g_timeout_states_mu);
 
     if (!found || timeout <= 0) {
         return 0;
@@ -879,7 +917,7 @@ static int isExecuteTimeoutExceeded(JSRuntime *rt) {
     return (time(NULL) - start) > timeout;
 }
 static TimeoutStruct *takeTimeoutState(JSRuntime *rt) {
-    pthread_mutex_lock(&g_timeout_states_mu);
+    qjsgo_mutex_lock(&g_timeout_states_mu);
 
     TimeoutStateEntry *prev = NULL;
     TimeoutStateEntry *current = g_timeout_states;
@@ -892,19 +930,19 @@ static TimeoutStruct *takeTimeoutState(JSRuntime *rt) {
                 g_timeout_states = current->next;
             }
             free(current);
-            pthread_mutex_unlock(&g_timeout_states_mu);
+            qjsgo_mutex_unlock(&g_timeout_states_mu);
             return state;
         }
         prev = current;
         current = current->next;
     }
 
-    pthread_mutex_unlock(&g_timeout_states_mu);
+    qjsgo_mutex_unlock(&g_timeout_states_mu);
     return NULL;
 }
 
 static int setTimeoutState(JSRuntime *rt, TimeoutStruct *state) {
-    pthread_mutex_lock(&g_timeout_states_mu);
+    qjsgo_mutex_lock(&g_timeout_states_mu);
 
     TimeoutStateEntry *current = g_timeout_states;
     while (current) {
@@ -913,7 +951,7 @@ static int setTimeoutState(JSRuntime *rt, TimeoutStruct *state) {
                 free(current->state);
             }
             current->state = state;
-            pthread_mutex_unlock(&g_timeout_states_mu);
+            qjsgo_mutex_unlock(&g_timeout_states_mu);
             return 0;
         }
         current = current->next;
@@ -921,7 +959,7 @@ static int setTimeoutState(JSRuntime *rt, TimeoutStruct *state) {
 
     TimeoutStateEntry *entry = malloc(sizeof(TimeoutStateEntry));
     if (!entry) {
-        pthread_mutex_unlock(&g_timeout_states_mu);
+        qjsgo_mutex_unlock(&g_timeout_states_mu);
         return -1;
     }
     entry->rt = rt;
@@ -929,7 +967,7 @@ static int setTimeoutState(JSRuntime *rt, TimeoutStruct *state) {
     entry->next = g_timeout_states;
     g_timeout_states = entry;
 
-    pthread_mutex_unlock(&g_timeout_states_mu);
+    qjsgo_mutex_unlock(&g_timeout_states_mu);
     return 0;
 }
 
@@ -943,7 +981,7 @@ static void clearTimeoutState(JSRuntime *rt) {
 int GetTimeoutOpaqueCount(void) {
     int count = 0;
 
-    pthread_mutex_lock(&g_timeout_states_mu);
+    qjsgo_mutex_lock(&g_timeout_states_mu);
     TimeoutStateEntry *current = g_timeout_states;
     while (current) {
         if (current->state != NULL) {
@@ -951,7 +989,7 @@ int GetTimeoutOpaqueCount(void) {
         }
         current = current->next;
     }
-    pthread_mutex_unlock(&g_timeout_states_mu);
+    qjsgo_mutex_unlock(&g_timeout_states_mu);
 
     return count;
 }

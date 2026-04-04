@@ -6,6 +6,7 @@ package quickjs
 */
 import "C"
 import (
+	"errors"
 	goruntime "runtime"
 	"sync"
 	"sync/atomic"
@@ -32,6 +33,12 @@ var runtimeInitContextHook func(ctx *C.JSContext) C.JSValue
 // It must remain nil in production.
 var runtimeEvalFunctionHook func(ctx *C.JSContext, compiled C.JSValue) C.JSValue
 
+var errOwnerAccessDenied = errors.New("quickjs: owner access denied; runtime/context/value APIs must be called from the owner goroutine; if strict OS thread mode is enabled, also bind that goroutine with runtime.LockOSThread()")
+
+var ownerCheckCurrentGoroutineID = currentGoroutineID
+var ownerCheckCurrentThreadID = currentThreadID
+var goroutineStack = goruntime.Stack
+
 type classObjectIdentity struct {
 	contextID uint64
 	handleID  int32
@@ -42,6 +49,8 @@ type Runtime struct {
 	mu                     sync.RWMutex
 	ref                    *C.JSRuntime
 	options                *Options
+	ownerGoroutineID       atomic.Uint64
+	ownerThreadID          atomic.Uint64
 	interruptHandlerState  atomic.Pointer[interruptHandlerHolder]
 	contexts               sync.Map
 	contextsByID           sync.Map
@@ -62,16 +71,97 @@ func (r *Runtime) isAlive() bool {
 }
 
 type Options struct {
-	timeout      uint64
-	memoryLimit  uint64
-	gcThreshold  int64
-	maxStackSize uint64
-	canBlock     bool
-	moduleImport bool
-	strip        int
+	timeout              uint64
+	memoryLimit          uint64
+	gcThreshold          int64
+	maxStackSize         uint64
+	canBlock             bool
+	moduleImport         bool
+	strip                int
+	ownerGoroutineCheck  bool
+	strictThreadAffinity bool
 }
 
 type Option func(*Options)
+
+func (r *Runtime) ensureOwnerAccess() bool {
+	if r == nil {
+		return false
+	}
+
+	if r.options == nil || r.options.ownerGoroutineCheck {
+		gid := ownerCheckCurrentGoroutineID()
+		if gid == 0 {
+			return false
+		}
+		if !r.claimOrVerifyOwnerGoroutine(gid) {
+			return false
+		}
+	}
+
+	if r.options != nil && r.options.strictThreadAffinity {
+		tid := ownerCheckCurrentThreadID()
+		if tid == 0 {
+			return false
+		}
+		if !r.claimOrVerifyOwnerThread(tid) {
+			return false
+		}
+	}
+
+	return true
+}
+
+func (r *Runtime) claimOrVerifyOwnerGoroutine(current uint64) bool {
+	owner := r.ownerGoroutineID.Load()
+	if owner == 0 {
+		if r.ownerGoroutineID.CompareAndSwap(0, current) {
+			return true
+		}
+		owner = r.ownerGoroutineID.Load()
+	}
+	return owner == current
+}
+
+func (r *Runtime) claimOrVerifyOwnerThread(current uint64) bool {
+	owner := r.ownerThreadID.Load()
+	if owner == 0 {
+		return r.ownerThreadID.CompareAndSwap(0, current) || r.ownerThreadID.Load() == current
+	}
+	return owner == current
+}
+
+func currentGoroutineID() uint64 {
+	const prefix = "goroutine "
+
+	var buf [128]byte
+	n := goroutineStack(buf[:], false)
+	if n <= len(prefix) {
+		return 0
+	}
+
+	idx := len(prefix)
+	var id uint64
+	hasDigit := false
+	for idx < n {
+		c := buf[idx]
+		if c < '0' || c > '9' {
+			break
+		}
+		hasDigit = true
+		id = id*10 + uint64(c-'0')
+		idx++
+	}
+
+	if !hasDigit {
+		return 0
+	}
+	return id
+}
+
+func currentThreadID() uint64 {
+	return uint64(C.CurrentThreadID())
+}
 
 // WithExecuteTimeout will set the runtime's execute timeout; default is 0
 func WithExecuteTimeout(timeout uint64) Option {
@@ -120,16 +210,33 @@ func WithStripInfo(strip int) Option {
 	}
 }
 
+// WithOwnerGoroutineCheck enables/disables owner-goroutine checks.
+// WARNING: disabling this check is unsafe and may cause data races or memory corruption.
+func WithOwnerGoroutineCheck(enabled bool) Option {
+	return func(o *Options) {
+		o.ownerGoroutineCheck = enabled
+	}
+}
+
+// WithStrictOSThread enables strict OS-thread affinity checks.
+func WithStrictOSThread(enabled bool) Option {
+	return func(o *Options) {
+		o.strictThreadAffinity = enabled
+	}
+}
+
 // NewRuntime creates a new quickjs runtime with simplified interrupt handling.
 func NewRuntime(opts ...Option) *Runtime {
 	options := &Options{
-		timeout:      0,
-		memoryLimit:  0,
-		gcThreshold:  -1,
-		maxStackSize: 0,
-		canBlock:     true,
-		moduleImport: false,
-		strip:        1,
+		timeout:              0,
+		memoryLimit:          0,
+		gcThreshold:          -1,
+		maxStackSize:         0,
+		canBlock:             true,
+		moduleImport:         false,
+		strip:                1,
+		ownerGoroutineCheck:  true,
+		strictThreadAffinity: false,
 	}
 	for _, opt := range opts {
 		opt(options)
@@ -178,6 +285,9 @@ func (r *Runtime) RunGC() {
 	if r == nil {
 		return
 	}
+	if !r.ensureOwnerAccess() {
+		return
+	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	if r.closed.Load() || r.ref == nil {
@@ -203,6 +313,9 @@ func GetAwaitPollSliceMs() int {
 // Close will free the runtime pointer with proper cleanup.
 func (r *Runtime) Close() {
 	if r == nil {
+		return
+	}
+	if !r.ensureOwnerAccess() {
 		return
 	}
 
@@ -265,6 +378,9 @@ func (r *Runtime) SetCanBlock(canBlock bool) {
 	if r == nil {
 		return
 	}
+	if !r.ensureOwnerAccess() {
+		return
+	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	if r.closed.Load() || r.ref == nil {
@@ -277,6 +393,9 @@ func (r *Runtime) SetCanBlock(canBlock bool) {
 // SetMemoryLimit the runtime memory limit; if not set, it will be unlimit.
 func (r *Runtime) SetMemoryLimit(limit uint64) {
 	if r == nil {
+		return
+	}
+	if !r.ensureOwnerAccess() {
 		return
 	}
 	r.mu.RLock()
@@ -292,6 +411,9 @@ func (r *Runtime) SetGCThreshold(threshold int64) {
 	if r == nil {
 		return
 	}
+	if !r.ensureOwnerAccess() {
+		return
+	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	if r.closed.Load() || r.ref == nil {
@@ -303,6 +425,9 @@ func (r *Runtime) SetGCThreshold(threshold int64) {
 // SetMaxStackSize will set max runtime's stack size;
 func (r *Runtime) SetMaxStackSize(stack_size uint64) {
 	if r == nil {
+		return
+	}
+	if !r.ensureOwnerAccess() {
 		return
 	}
 	r.mu.RLock()
@@ -317,6 +442,9 @@ func (r *Runtime) SetMaxStackSize(stack_size uint64) {
 // This will override any user interrupt handler (expected behavior)
 func (r *Runtime) SetExecuteTimeout(timeout uint64) {
 	if r == nil {
+		return
+	}
+	if !r.ensureOwnerAccess() {
 		return
 	}
 	r.mu.Lock()
@@ -334,6 +462,9 @@ func (r *Runtime) SetStripInfo(strip int) {
 	if r == nil {
 		return
 	}
+	if !r.ensureOwnerAccess() {
+		return
+	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	if r.closed.Load() || r.ref == nil {
@@ -348,6 +479,9 @@ func (r *Runtime) SetModuleImport(moduleImport bool) {
 	if r == nil {
 		return
 	}
+	if !r.ensureOwnerAccess() {
+		return
+	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	if r.closed.Load() || r.ref == nil {
@@ -360,6 +494,9 @@ func (r *Runtime) SetModuleImport(moduleImport bool) {
 // This will override any timeout handler (expected behavior)
 func (r *Runtime) SetInterruptHandler(handler InterruptHandler) {
 	if r == nil {
+		return
+	}
+	if !r.ensureOwnerAccess() {
 		return
 	}
 	r.mu.Lock()
@@ -386,6 +523,9 @@ func (r *Runtime) ClearInterruptHandler() {
 	if r == nil {
 		return
 	}
+	if !r.ensureOwnerAccess() {
+		return
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.ref == nil {
@@ -410,6 +550,9 @@ func (r *Runtime) callInterruptHandler() int {
 // NewContext creates a new JavaScript context.
 func (r *Runtime) NewContext() *Context {
 	if r == nil {
+		return nil
+	}
+	if !r.ensureOwnerAccess() {
 		return nil
 	}
 
