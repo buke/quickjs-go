@@ -126,8 +126,7 @@ func (r *Runtime) claimOrVerifyOwnerGoroutine(current uint64) bool {
 func (r *Runtime) claimOrVerifyOwnerThread(current uint64) bool {
 	owner := r.ownerThreadID.Load()
 	if owner == 0 {
-		r.ownerThreadID.CompareAndSwap(0, current)
-		owner = r.ownerThreadID.Load()
+		return r.ownerThreadID.CompareAndSwap(0, current) || r.ownerThreadID.Load() == current
 	}
 	return owner == current
 }
