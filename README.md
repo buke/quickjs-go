@@ -46,7 +46,7 @@ The runtime sources under deps/quickjs are no longer updated via git submodule. 
 
 ### Lifecycle, Memory, and Concurrency
 - QuickJS is not thread-safe; a Runtime and its Contexts must be created, used, and closed by the same serialized owner goroutine.
-- This library enforces owner-goroutine checks by default for APIs that touch QuickJS; non-owner calls are rejected with fail-closed behavior.
+- This library enforces owner-goroutine checks by default for APIs that touch QuickJS (non-owner calls are rejected with fail-closed behavior); you can explicitly disable this with `WithOwnerGoroutineCheck(false)`, but it is an unsafe escape hatch and should be used only when your own scheduler strictly serializes all QuickJS access externally. If that guarantee is broken, cross-goroutine calls can race QuickJS internals and may cause memory corruption.
 - If you want to additionally verify that a Runtime stays fixed to the same OS thread, enable `WithStrictOSThread(true)`; this option only enables validation and does not bind the thread automatically. If you enable this mode, call `runtime.LockOSThread()` yourself in the owner goroutine before creating the Runtime.
 - Call `value.Free()` for `*Value` objects you create or receive. Runtime and Context objects must be cleaned up via `Close()`.
 - `Value.Free()` is fail-closed when its context pointer is no longer valid, avoiding unsafe cgo calls after close.
@@ -277,6 +277,8 @@ func main() {
 // NOTE:
 // - The caller owns thread affinity. Bind the owner goroutine with runtime.LockOSThread()
 //   yourself if the Runtime must stay on one OS thread.
+// - WithOwnerGoroutineCheck(false) is unsafe and should be used only when your
+//   code guarantees serialized QuickJS access externally.
 // - Goroutines must NOT call QuickJS/Context APIs directly.
 // - Always schedule back to the Context thread via ctx.Schedule
 //   before creating values or resolving/rejecting Promises.

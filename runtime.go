@@ -78,6 +78,7 @@ type Options struct {
 	canBlock             bool
 	moduleImport         bool
 	strip                int
+	ownerGoroutineCheck  bool
 	strictThreadAffinity bool
 }
 
@@ -88,12 +89,14 @@ func (r *Runtime) ensureOwnerAccess() bool {
 		return false
 	}
 
-	gid := ownerCheckCurrentGoroutineID()
-	if gid == 0 {
-		return false
-	}
-	if !r.claimOrVerifyOwnerGoroutine(gid) {
-		return false
+	if r.options == nil || r.options.ownerGoroutineCheck {
+		gid := ownerCheckCurrentGoroutineID()
+		if gid == 0 {
+			return false
+		}
+		if !r.claimOrVerifyOwnerGoroutine(gid) {
+			return false
+		}
 	}
 
 	if r.options != nil && r.options.strictThreadAffinity {
@@ -206,6 +209,14 @@ func WithStripInfo(strip int) Option {
 	}
 }
 
+// WithOwnerGoroutineCheck enables/disables owner-goroutine checks.
+// WARNING: disabling this check is unsafe and may cause data races or memory corruption.
+func WithOwnerGoroutineCheck(enabled bool) Option {
+	return func(o *Options) {
+		o.ownerGoroutineCheck = enabled
+	}
+}
+
 // WithStrictOSThread enables strict OS-thread affinity checks.
 func WithStrictOSThread(enabled bool) Option {
 	return func(o *Options) {
@@ -223,6 +234,7 @@ func NewRuntime(opts ...Option) *Runtime {
 		canBlock:             true,
 		moduleImport:         false,
 		strip:                1,
+		ownerGoroutineCheck:  true,
 		strictThreadAffinity: false,
 	}
 	for _, opt := range opts {

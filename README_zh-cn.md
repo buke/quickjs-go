@@ -46,7 +46,7 @@ deps/quickjs 中的运行时源码不再通过 git submodule 更新，而是按 
 
 ### 生命周期、内存与并发约束
 - QuickJS 本身不是线程安全的；同一个 Runtime 及其 Context 必须由同一个串行 owner goroutine 创建、使用和关闭。
-- 库会默认对触达 QuickJS 的 API 强制执行 owner goroutine 校验；非 owner 调用会按 fail-closed 语义拒绝。
+- 库默认对触达 QuickJS 的 API 强制执行 owner goroutine 校验（非 owner 调用按 fail-closed 语义拒绝）；可以使用`WithOwnerGoroutineCheck(false)`显示关闭 owner goroutine 校验,  注意`WithOwnerGoroutineCheck(false)` 是显式不安全开关，仅适用于由你自己的调度器在外部严格串行化所有 QuickJS 访问的场景，一旦该前提被破坏，跨 goroutine 调用可能与 QuickJS 内部状态竞争并导致内存破坏。
 - 如需额外校验 Runtime 是否固定在同一个 OS 线程上，可启用 `WithStrictOSThread(true)`；该选项只负责校验，不会自动绑定线程。如果启用了该模式，请由调用方在 owner goroutine 中自行调用 `runtime.LockOSThread()`，并在创建 Runtime 之前完成绑定。
 - 对您创建或接收的 `*Value` 对象调用 `value.Free()`；Runtime 和 Context 使用完毕后通过 `Close()` 清理。
 - 当 `Value` 的上下文引用已失效时，`Value.Free()` 会 fail-closed，避免关闭后的不安全 cgo 调用。
@@ -275,6 +275,7 @@ func main() {
 
 // 注意：
 // - 线程归属由调用方负责；如果一个 Runtime 必须固定在同一个 OS 线程，请由调用方自行在 owner goroutine 中调用 runtime.LockOSThread()。
+// - WithOwnerGoroutineCheck(false) 是不安全开关，只应在你能保证外部串行化 QuickJS 访问时使用。
 // - 不要在 goroutine 中直接调用 Context 或任何 QuickJS API。
 // - 所有 QuickJS 相关操作都应该通过 ctx.Schedule 调度回 Context 线程后再执行。
 // - ctx.Await 会在内部驱动 pending jobs 和调度器，直至 Promise 解决。

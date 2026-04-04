@@ -1106,6 +1106,52 @@ func TestRuntimeOwnerCheckHooksAndStrictThreadAffinity(t *testing.T) {
 	rtNoCheck.Close()
 }
 
+func TestRuntimeOwnerGoroutineCheckOption(t *testing.T) {
+	oldGIDHook := ownerCheckCurrentGoroutineID
+	oldThreadHook := ownerCheckCurrentThreadID
+	defer func() {
+		ownerCheckCurrentGoroutineID = oldGIDHook
+		ownerCheckCurrentThreadID = oldThreadHook
+	}()
+
+	var gid atomic.Uint64
+	var tid atomic.Uint64
+	gid.Store(31)
+	tid.Store(1)
+
+	ownerCheckCurrentGoroutineID = func() uint64 { return gid.Load() }
+	ownerCheckCurrentThreadID = func() uint64 { return tid.Load() }
+
+	defaultRT := NewRuntime()
+	require.NotNil(t, defaultRT)
+	require.True(t, defaultRT.options.ownerGoroutineCheck)
+	require.True(t, defaultRT.ensureOwnerAccess())
+	gid.Store(32)
+	require.False(t, defaultRT.ensureOwnerAccess())
+	gid.Store(31)
+	defaultRT.Close()
+
+	unsafeRT := NewRuntime(WithOwnerGoroutineCheck(false))
+	require.NotNil(t, unsafeRT)
+	require.False(t, unsafeRT.options.ownerGoroutineCheck)
+	require.True(t, unsafeRT.ensureOwnerAccess())
+	gid.Store(33)
+	require.True(t, unsafeRT.ensureOwnerAccess())
+	ctx := unsafeRT.NewContext()
+	require.NotNil(t, ctx)
+	ctx.Close()
+	unsafeRT.Close()
+
+	unsafeStrictRT := NewRuntime(WithOwnerGoroutineCheck(false), WithStrictOSThread(true))
+	require.NotNil(t, unsafeStrictRT)
+	require.True(t, unsafeStrictRT.ensureOwnerAccess())
+	tid.Store(2)
+	require.False(t, unsafeStrictRT.ensureOwnerAccess())
+	tid.Store(1)
+	require.True(t, unsafeStrictRT.ensureOwnerAccess())
+	unsafeStrictRT.Close()
+}
+
 func TestCurrentGoroutineIDFailClosedParser(t *testing.T) {
 	oldStack := goroutineStack
 	defer func() {
