@@ -268,6 +268,9 @@ func validateClassBuilder(builder *ClassBuilder) error {
 	if builder == nil {
 		return errors.New("class builder is required")
 	}
+	if builder.name == "" {
+		return errors.New("class name is required")
+	}
 	if builder.constructor == nil {
 		return errors.New("constructor function is required")
 	}

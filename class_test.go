@@ -967,6 +967,19 @@ func TestErrorHandling(t *testing.T) {
 
 	if ctor.IsException() {
 		err := context.Exception()
+		require.Contains(t, err.Error(), "class name is required")
+	}
+
+	// Keep C-layer empty-name failure path covered: "\x00" passes Go non-empty check
+	// but becomes empty after C string conversion.
+	ctorCEmptyName, _ := NewClassBuilder("\x00").
+		Constructor(func(ctx *Context, instance *Value, args []*Value) (interface{}, error) {
+			return &Point{X: 0, Y: 0}, nil
+		}).
+		Build(context)
+	defer ctorCEmptyName.Free()
+	if ctorCEmptyName.IsException() {
+		err := context.Exception()
 		require.Contains(t, err.Error(), "class_name cannot be empty")
 	}
 
