@@ -902,6 +902,9 @@ When unmarshaling into `interface{}`, the following types are used:
 
 The ModuleBuilder API allows you to create JavaScript modules from Go code, making Go functions, values, and objects available for standard ES6 import syntax in JavaScript applications.
 
+For new code, prefer declarative ValueSpec exports (`ExportValue` / `ExportLiteral`).
+`Export(name, *Value)` is still supported as a context-bound convenience API for values that are already created in the same `Context`.
+
 #### Basic Module Creation
 
 ```go
@@ -1033,6 +1036,54 @@ func main() {
 }
 ```
 
+    #### Declarative ValueSpec Exports (Recommended)
+
+    ```go
+    package main
+
+    import (
+        "fmt"
+        "github.com/buke/quickjs-go"
+    )
+
+    func main() {
+        rt := quickjs.NewRuntime()
+        defer rt.Close()
+        ctx := rt.NewContext()
+        defer ctx.Close()
+
+        module := quickjs.NewModuleBuilder("app-config").
+            ExportLiteral("version", "2.1.0").
+            ExportLiteral("featureFlags", map[string]bool{"beta": true}).
+            ExportValue("now", quickjs.FactorySpec{Factory: func(ctx *quickjs.Context) (*quickjs.Value, error) {
+                return ctx.NewInt64(1700000000), nil
+            }}).
+            ExportValue("meta", quickjs.MarshalSpec{Value: map[string]interface{}{
+                "name":  "quickjs-go",
+                "typed": true,
+            }})
+
+        if err := module.Build(ctx); err != nil {
+            panic(err)
+        }
+
+        result := ctx.Eval(`
+            (async function() {
+                const { version, featureFlags, now, meta } = await import('app-config');
+                return [version, featureFlags.beta, now > 0, meta.name].join(':');
+            })()
+        `, quickjs.EvalAwait(true))
+        defer result.Free()
+
+        if result.IsException() {
+            panic(ctx.Exception())
+        }
+
+        fmt.Println("Declarative module result:", result.ToString())
+        // Output: Declarative module result: 2.1.0:true:true:quickjs-go
+    }
+    ```
+
 #### Multiple Module Integration
 
 ```go
@@ -1117,12 +1168,17 @@ func main() {
 
 **Core Methods:**
 - `NewModuleBuilder(name)` - Create a new module builder with the specified name
-- `Export(name, value)` - Add a named export to the module (chainable method)
+- `ExportValue(name, spec)` - Add a declarative export spec (recommended)
+- `ExportLiteral(name, value)` - Add a literal export without pre-creating JS values (recommended)
+- `Export(name, value)` - Add a named export from an existing JS value (context-bound convenience API)
 - `Build(ctx)` - Register the module in the JavaScript context
 
 ### Create JavaScript Classes from Go with ClassBuilder
 
 The ClassBuilder API allows you to create JavaScript classes from Go code.
+
+For new code, prefer declarative property specs (`PropertyValue` / `PropertyLiteral` / `StaticPropertyValue` / `StaticPropertyLiteral`).
+`Property(name, *Value)` and `StaticProperty(name, *Value)` remain available as context-bound convenience APIs.
 
 #### Manual Class Creation
 
@@ -1192,6 +1248,7 @@ func main() {
                 return ctx.NewUndefined()
             }).
         // Properties are bound directly to each instance
+        // Context-bound convenience API: Property(name, *Value)
         Property("version", ctx.NewString("1.0.0")).
         Property("type", ctx.NewString("Point")).
         // Read-only property
@@ -1284,6 +1341,53 @@ func main() {
     }
     
     fmt.Println("Property vs Accessor:", propertyTest.JSONStringify())
+}
+```
+
+#### Declarative Property Specs (Recommended)
+
+```go
+package main
+
+import (
+    "github.com/buke/quickjs-go"
+)
+
+type Point struct {
+    X, Y float64
+}
+
+func main() {
+    rt := quickjs.NewRuntime()
+    defer rt.Close()
+    ctx := rt.NewContext()
+    defer ctx.Close()
+
+    pointConstructor, _ := quickjs.NewClassBuilder("Point").
+        Constructor(func(ctx *quickjs.Context, instance *quickjs.Value, args []*quickjs.Value) (interface{}, error) {
+            return &Point{X: 0, Y: 0}, nil
+        }).
+        PropertyLiteral("label", "point-instance").
+        PropertyValue("meta", quickjs.MarshalSpec{Value: map[string]interface{}{"kind": "2d"}}).
+        StaticPropertyLiteral("kind", "PointClass").
+        StaticPropertyValue("version", quickjs.FactorySpec{Factory: func(ctx *quickjs.Context) (*quickjs.Value, error) {
+            return ctx.NewInt32(1), nil
+        }}).
+        Build(ctx)
+
+    ctx.Globals().Set("Point", pointConstructor)
+
+    result := ctx.Eval(`
+        (() => {
+            const p = new Point();
+            return [p.label, p.meta.kind, Point.kind, Point.version].join(':');
+        })()
+    `)
+    defer result.Free()
+
+    if result.IsException() {
+        panic(ctx.Exception())
+    }
 }
 ```
 
