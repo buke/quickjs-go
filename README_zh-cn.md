@@ -1345,6 +1345,7 @@ func main() {
 package main
 
 import (
+    "fmt"
     "github.com/buke/quickjs-go"
 )
 
@@ -1383,6 +1384,9 @@ func main() {
     if result.IsException() {
         panic(ctx.Exception())
     }
+
+    fmt.Println("声明式属性结果:", result.ToString())
+    // 输出: 声明式属性结果: point-instance:2d:PointClass:1
 }
 ```
 

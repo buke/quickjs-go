@@ -1350,6 +1350,7 @@ func main() {
 package main
 
 import (
+    "fmt"
     "github.com/buke/quickjs-go"
 )
 
@@ -1388,6 +1389,9 @@ func main() {
     if result.IsException() {
         panic(ctx.Exception())
     }
+
+    fmt.Println("Declarative class result:", result.ToString())
+    // Output: Declarative class result: point-instance:2d:PointClass:1
 }
 ```
 

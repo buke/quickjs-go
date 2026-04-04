@@ -38,7 +38,7 @@ type contextValueSpec struct {
 
 func (s contextValueSpec) Materialize(_ *Context) (*Value, error) {
 	if s.value == nil {
-		return nil, errors.New("module export value is nil")
+		return nil, errors.New("context-bound value is nil")
 	}
 	return s.value, nil
 }
