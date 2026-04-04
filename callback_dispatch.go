@@ -33,7 +33,7 @@ func getContextAndObject(ctx *C.JSContext, magic C.int, notFoundErr proxyError) 
 	funcID := int32(magic)
 	fn := goCtx.loadFunctionFromHandleID(funcID)
 	if fn == nil {
-		return nil, nil, &notFoundErr
+		return goCtx, nil, &notFoundErr
 	}
 
 	return goCtx, fn, nil
