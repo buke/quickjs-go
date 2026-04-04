@@ -166,6 +166,11 @@ func TestModuleBuilder_ValueSpec(t *testing.T) {
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "export value is required")
 
+		legacyNilModule := NewModuleBuilder("value-spec-invalid-legacy-nil").Export("bad", nil)
+		err = legacyNilModule.Build(ctx)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "export value is required")
+
 		tests := []struct {
 			name string
 			spec ValueSpec

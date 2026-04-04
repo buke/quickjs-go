@@ -46,7 +46,11 @@ func NewModuleBuilder(name string) *ModuleBuilder {
 // For default export, use name="default"
 // Deprecated: Use ExportValue or ExportLiteral for declarative, reusable module definitions.
 func (mb *ModuleBuilder) Export(name string, value *Value) *ModuleBuilder {
-	return mb.ExportValue(name, contextValueSpec{value: value})
+	var spec ValueSpec
+	if value != nil {
+		spec = contextValueSpec{value: value}
+	}
+	return mb.ExportValue(name, spec)
 }
 
 // ExportValue adds an export ValueSpec to the module.
