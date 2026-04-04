@@ -403,7 +403,42 @@ func TestBridgeModuleInitFailClosedInvalidExportAndBuilderHandle(t *testing.T) {
 			}
 			return true
 		})
-		require.False(t, hasBuilderHandle)
+		require.True(t, hasBuilderHandle)
+	})
+
+	t.Run("MissingModuleBuilderHandle", func(t *testing.T) {
+		ctx := newModuleContext(t)
+		mb := NewModuleBuilder("missing-builder-id-module").
+			Export("ok", ctx.NewString("value"))
+		require.NoError(t, mb.Build(ctx))
+
+		var builderID int32
+		ctx.handleStore.handles.Range(func(key, value interface{}) bool {
+			id, ok := key.(int32)
+			if !ok {
+				return true
+			}
+			h, ok := value.(cgo.Handle)
+			if !ok {
+				return true
+			}
+			stored, ok := h.Value().(*ModuleBuilder)
+			if ok && stored != nil && stored.name == "missing-builder-id-module" {
+				builderID = id
+				return false
+			}
+			return true
+		})
+		require.Greater(t, builderID, int32(0))
+
+		ctx.handleStore.Delete(builderID)
+
+		result := ctx.Eval(`import('missing-builder-id-module')`, EvalAwait(true))
+		defer result.Free()
+		require.True(t, result.IsException())
+		err := ctx.Exception()
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "failed to get context and module builder")
 	})
 }
 
@@ -433,49 +468,6 @@ func TestBridgeClassConstructorHandleStoreUnavailable(t *testing.T) {
 	err := ctx.Exception()
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "Handle store not available")
-}
-
-func TestBestEffortCleanupModuleBuilderHandlesContracts(t *testing.T) {
-	require.NotPanics(t, func() {
-		bestEffortCleanupModuleBuilderHandles(nil)
-	})
-
-	require.NotPanics(t, func() {
-		bestEffortCleanupModuleBuilderHandles(&Context{})
-	})
-
-	rt := NewRuntime()
-	defer rt.Close()
-	ctx := rt.NewContext()
-	defer ctx.Close()
-
-	badKeyHandle := cgo.NewHandle("bad-key")
-	ctx.handleStore.handles.Store("bad-key", badKeyHandle)
-
-	zeroIDHandle := cgo.NewHandle("zero-id")
-	ctx.handleStore.handles.Store(int32(0), zeroIDHandle)
-
-	ctx.handleStore.handles.Store(int32(9999), "bad-value")
-	defer ctx.handleStore.handles.Delete(int32(9999))
-
-	keepID := ctx.handleStore.Store("keep-non-module")
-	defer ctx.handleStore.Delete(keepID)
-
-	moduleID := ctx.handleStore.Store(&ModuleBuilder{name: "cleanup-target"})
-
-	bestEffortCleanupModuleBuilderHandles(ctx)
-
-	_, exists := ctx.handleStore.Load(moduleID)
-	require.False(t, exists)
-
-	kept, exists := ctx.handleStore.Load(keepID)
-	require.True(t, exists)
-	require.Equal(t, "keep-non-module", kept)
-
-	ctx.handleStore.handles.Delete("bad-key")
-	badKeyHandle.Delete()
-	ctx.handleStore.handles.Delete(int32(0))
-	zeroIDHandle.Delete()
 }
 
 func TestBridgeClassConstructorRuntimeUnavailable(t *testing.T) {

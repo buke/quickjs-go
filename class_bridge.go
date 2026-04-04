@@ -35,8 +35,8 @@ func resolveClassObjectFromOpaque(ctx *Context, opaque unsafe.Pointer) (*Context
 }
 
 //export goClassConstructorProxy
-func goClassConstructorProxy(ctx *C.JSContext, newTarget C.JSValue,
-	argc C.int, argv *C.JSValue, magic C.int) C.JSValue {
+func goClassConstructorProxy(ctx *C.JSContext, newTarget C.JSValueConst,
+	argc C.int, argv *C.JSValueConst, magic C.int) C.JSValue {
 
 	goCtx, fn, perr := getContextAndObject(ctx, magic, errConstructorNotFound)
 	if perr != nil {
@@ -48,9 +48,9 @@ func goClassConstructorProxy(ctx *C.JSContext, newTarget C.JSValue,
 		return throwProxyError(ctx, errInvalidConstructorType)
 	}
 
-	classID, exists := getConstructorClassID(goCtx, newTarget)
+	classID, exists := getConstructorClassID(goCtx, C.JSValue(newTarget))
 	if !exists {
-		v := &Value{ctx: goCtx, ref: newTarget}
+		v := &Value{ctx: goCtx, ref: C.JSValue(newTarget)}
 		classID, exists = v.resolveClassIDFromInheritance()
 	}
 	if !exists {
@@ -79,7 +79,7 @@ func goClassConstructorProxy(ctx *C.JSContext, newTarget C.JSValue,
 
 	instance := C.CreateClassInstance(
 		ctx,
-		newTarget,
+		C.JSValue(newTarget),
 		C.JSClassID(classID),
 		instancePropertiesPtr,
 		C.int(len(instanceProperties)),

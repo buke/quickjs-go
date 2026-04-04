@@ -2,7 +2,6 @@ package quickjs
 
 import (
 	"fmt"
-	"runtime/cgo"
 	"sync/atomic"
 	"unsafe"
 )
@@ -22,13 +21,15 @@ func getContextAndModuleBuilder(ctx *C.JSContext, m *C.JSModuleDef) (*Context, *
 	var builderID C.int32_t
 	if moduleBuilderIDForceParseFailure.Load() || C.JS_ToInt32(ctx, &builderID, privateValue) < 0 {
 		C.JS_FreeValue(ctx, privateValue)
-		bestEffortCleanupModuleBuilderHandles(getContextFromJS(ctx))
 		return nil, nil, fmt.Errorf("failed to parse module builder id from module private value")
 	}
 	C.JS_FreeValue(ctx, privateValue)
 
 	goCtx, builderInterface, err := getContextAndObject(ctx, C.int(builderID), errFunctionNotFound)
 	if err != nil {
+		if goCtx != nil && goCtx.handleStore != nil {
+			goCtx.handleStore.Delete(int32(builderID))
+		}
 		return nil, nil, fmt.Errorf("failed to get context and module builder: %v", err.message)
 	}
 
@@ -71,33 +72,6 @@ func goModuleInitProxy(ctx *C.JSContext, m *C.JSModuleDef) C.int {
 
 	return C.int(0)
 }
-
-func bestEffortCleanupModuleBuilderHandles(ctx *Context) {
-	if ctx == nil || ctx.handleStore == nil {
-		return
-	}
-
-	var ids []int32
-	ctx.handleStore.handles.Range(func(key, value interface{}) bool {
-		id, ok := key.(int32)
-		if !ok || id <= 0 {
-			return true
-		}
-		h, ok := value.(cgo.Handle)
-		if !ok {
-			return true
-		}
-		if mb, ok := h.Value().(*ModuleBuilder); ok && mb != nil {
-			ids = append(ids, id)
-		}
-		return true
-	})
-
-	for _, id := range ids {
-		ctx.handleStore.Delete(id)
-	}
-}
-
 func forceModuleBuilderIDParseFailureForTest(enable bool) func() {
 	old := moduleBuilderIDForceParseFailure.Swap(enable)
 	return func() {
