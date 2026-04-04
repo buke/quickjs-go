@@ -300,6 +300,44 @@ func TestModuleBuilder_ValueSpec(t *testing.T) {
 
 		require.Equal(t, "legacy-stable", legacyValue.ToString())
 	})
+
+	t.Run("LegacyExportAliasReadableAfterGCAndFree", func(t *testing.T) {
+		legacyValue := ctx.NewString("legacy-alias")
+
+		moduleName := "value-spec-legacy-export-alias-gc"
+		module := NewModuleBuilder(moduleName).
+			Export("msg", legacyValue)
+
+		err := module.Build(ctx)
+		require.NoError(t, err)
+
+		readMsg := func() string {
+			result := ctx.Eval(fmt.Sprintf(`
+				(async function() {
+					const { msg } = await import('%s');
+					return msg;
+				})()
+			`, moduleName), EvalAwait(true))
+			defer result.Free()
+			require.False(t, result.IsException())
+			return result.ToString()
+		}
+
+		require.Equal(t, "legacy-alias", readMsg())
+		require.Equal(t, "legacy-alias", legacyValue.ToString())
+
+		rt.RunGC()
+		require.Equal(t, "legacy-alias", legacyValue.ToString())
+		require.Equal(t, "legacy-alias", readMsg())
+
+		require.NotPanics(t, func() {
+			legacyValue.Free()
+			legacyValue.Free()
+		})
+
+		rt.RunGC()
+		require.Equal(t, "legacy-alias", readMsg())
+	})
 }
 
 // =============================================================================

@@ -86,7 +86,8 @@ func goModuleInitProxy(ctx *C.JSContext, m *C.JSModuleDef) C.int {
 		if legacySpec {
 			// Legacy Export(name, *Value) now keeps source values readable after Build.
 			// JS_SetModuleExport consumes the original ref, so mark this Go value as a
-			// borrowed alias to avoid decref on Free while still allowing reads.
+			// borrowed non-owning alias. Lifetime is held by the module export slot,
+			// and Free only invalidates the Go wrapper without decref.
 			value.borrowed = true
 		} else {
 			value.ref = C.JS_NewUndefined()
