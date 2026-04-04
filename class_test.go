@@ -976,12 +976,21 @@ func TestErrorHandling(t *testing.T) {
 		Constructor(func(ctx *Context, instance *Value, args []*Value) (interface{}, error) {
 			return &Point{X: 0, Y: 0}, nil
 		}).
+		Method("noop", func(ctx *Context, this *Value, args []*Value) *Value {
+			return ctx.NewUndefined()
+		}).
+		Accessor("x",
+			func(ctx *Context, this *Value) *Value {
+				return ctx.NewInt32(0)
+			},
+			func(ctx *Context, this *Value, value *Value) *Value {
+				return ctx.NewUndefined()
+			}).
 		Build(context)
 	defer ctorCEmptyName.Free()
-	if ctorCEmptyName.IsException() {
-		err := context.Exception()
-		require.Contains(t, err.Error(), "class_name cannot be empty")
-	}
+	require.True(t, ctorCEmptyName.IsException())
+	cErr := context.Exception()
+	require.Contains(t, cErr.Error(), "class_name cannot be empty")
 
 	// Test creating class without constructor
 	ctor2, _ := NewClassBuilder("TestClass").Build(context)
