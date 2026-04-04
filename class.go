@@ -365,6 +365,8 @@ func createClass(ctx *Context, builder *ClassBuilder) (*Value, uint32) {
 	var classID C.JSClassID
 	var methodIDs []int32
 	var accessorIDs []int32
+	var methodNames []*C.char
+	var accessorNames []*C.char
 
 	// SCHEME C STEP 4: Store entire ClassBuilder in HandleStore (not just constructor)
 	// This allows constructor proxy to access both constructor function and instance properties
@@ -389,6 +391,7 @@ func createClass(ctx *Context, builder *ClassBuilder) (*Value, uint32) {
 
 		// Convert method name to C string
 		methodName := C.CString(method.Name)
+		methodNames = append(methodNames, methodName)
 		// Note: Don't defer free as C layer needs these strings during binding
 
 		// Determine length parameter
@@ -415,6 +418,7 @@ func createClass(ctx *Context, builder *ClassBuilder) (*Value, uint32) {
 	for _, accessor := range snapshot.accessors {
 		// Convert accessor name to C string
 		accessorName := C.CString(accessor.Name)
+		accessorNames = append(accessorNames, accessorName)
 		// Note: Don't defer free as C layer needs these strings during binding
 
 		var getterID, setterID C.int32_t = 0, 0
@@ -458,11 +462,22 @@ func createClass(ctx *Context, builder *ClassBuilder) (*Value, uint32) {
 	}
 	var materializedStatic []materializedStaticProperty
 	defer func() {
+		// bridge.c/BindPropertyToObject duplicates property values with JS_DupValue
+		// before defining properties, so the original Go-held reference remains ours.
+		// Free only non-legacy materialized values allocated for this Build call.
 		for _, p := range materializedStatic {
 			if p.value == nil || isContextValueSpec(p.spec) {
 				continue
 			}
 			p.value.Free()
+		}
+	}()
+	defer func() {
+		for _, name := range methodNames {
+			C.free(unsafe.Pointer(name))
+		}
+		for _, name := range accessorNames {
+			C.free(unsafe.Pointer(name))
 		}
 	}()
 	defer func() {
@@ -538,7 +553,6 @@ func createClass(ctx *Context, builder *ClassBuilder) (*Value, uint32) {
 
 	// Step 10: Error handling - clean up all stored handlers on failure - unchanged logic
 	if bool(C.JS_IsException(constructor)) {
-		fmt.Printf("Failed to create class '%s'\n", snapshot.name)
 		cleanupStoredHandlers()
 
 		// Note: Don't clean up className and classDef - let Go GC handle them

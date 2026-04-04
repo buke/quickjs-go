@@ -71,12 +71,26 @@ func goModuleInitProxy(ctx *C.JSContext, m *C.JSModuleDef) C.int {
 		}
 
 		exportName := C.CString(export.Name)
-		val := value.ref
-		rc := C.JS_SetModuleExport(ctx, m, exportName, val)
-		value.ref = C.JS_NewUndefined()
+		legacySpec := isContextValueSpec(export.Spec)
+		rc := C.JS_SetModuleExport(ctx, m, exportName, value.ref)
 		C.free(unsafe.Pointer(exportName))
 		if rc < 0 {
+			if legacySpec {
+				// JS_SetModuleExport frees val on failure, so legacy source handles
+				// must be invalidated to avoid a later double free.
+				value.ref = C.JS_NewUndefined()
+				value.borrowed = false
+			}
 			return throwModuleError(ctx, fmt.Errorf("failed to set module export: %s", export.Name))
+		}
+		if legacySpec {
+			// Legacy Export(name, *Value) now keeps source values readable after Build.
+			// JS_SetModuleExport consumes the original ref, so mark this Go value as a
+			// borrowed alias to avoid decref on Free while still allowing reads.
+			value.borrowed = true
+		} else {
+			value.ref = C.JS_NewUndefined()
+			value.borrowed = false
 		}
 	}
 

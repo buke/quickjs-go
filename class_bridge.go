@@ -68,6 +68,9 @@ func goClassConstructorProxy(ctx *C.JSContext, newTarget C.JSValueConst,
 	}
 	var materializedProperties []materializedInstanceProperty
 	defer func() {
+		// bridge.c/BindPropertyToObject duplicates property values with JS_DupValue
+		// before defining properties on the instance. Free only non-legacy values
+		// that were materialized for this constructor invocation.
 		for _, p := range materializedProperties {
 			if p.value == nil || isContextValueSpec(p.spec) {
 				continue

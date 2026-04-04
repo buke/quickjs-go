@@ -276,6 +276,30 @@ func TestModuleBuilder_ValueSpec(t *testing.T) {
 	t.Run("CloneBuilderNil", func(t *testing.T) {
 		require.Nil(t, cloneModuleBuilder(nil))
 	})
+
+	t.Run("LegacyExportKeepsSourceValue", func(t *testing.T) {
+		legacyValue := ctx.NewString("legacy-stable")
+		defer legacyValue.Free()
+
+		moduleName := "value-spec-legacy-export-preserve"
+		module := NewModuleBuilder(moduleName).
+			Export("msg", legacyValue)
+
+		err := module.Build(ctx)
+		require.NoError(t, err)
+
+		result := ctx.Eval(fmt.Sprintf(`
+			(async function() {
+				const { msg } = await import('%s');
+				return msg;
+			})()
+		`, moduleName), EvalAwait(true))
+		defer result.Free()
+		require.False(t, result.IsException())
+		require.Equal(t, "legacy-stable", result.ToString())
+
+		require.Equal(t, "legacy-stable", legacyValue.ToString())
+	})
 }
 
 // =============================================================================
