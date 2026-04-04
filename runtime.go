@@ -89,6 +89,7 @@ type Options struct {
 
 type Option func(*Options)
 
+// ContextBootstrapOptions controls host bootstrap for new contexts.
 type ContextBootstrapOptions struct {
 	loadStdOS    bool
 	injectTimers bool
@@ -129,6 +130,10 @@ func WithBootstrapStdOS(enabled bool) ContextBootstrapOption {
 }
 
 // WithBootstrapTimers toggles timer injection in bootstrap.
+//
+// Timer injection imports setTimeout/clearTimeout from the "os" module, so
+// enabling timers implicitly requires std/os registration. During option
+// normalization, injectTimers=true forces loadStdOS=true.
 func WithBootstrapTimers(enabled bool) ContextBootstrapOption {
 	return func(o *ContextBootstrapOptions) {
 		o.injectTimers = enabled
@@ -145,6 +150,8 @@ func newContextBootstrapOptions(opts ...ContextBootstrapOption) ContextBootstrap
 			opt(&cfg)
 		}
 	}
+	// Timer bootstrap imports from "os", so keep std/os enabled when timers
+	// are requested even if options were applied in a conflicting order.
 	if cfg.injectTimers && !cfg.loadStdOS {
 		cfg.loadStdOS = true
 	}
