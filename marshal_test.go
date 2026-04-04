@@ -6,6 +6,7 @@ import (
 	"math"
 	"math/big"
 	"reflect"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -1416,4 +1417,40 @@ func TestMarshalUnmarshalFailClosedContracts(t *testing.T) {
 	afterClose.Free()
 
 	other.Close()
+}
+
+func TestMarshalUnmarshalOwnerDeniedFailClosed(t *testing.T) {
+	oldGIDHook := ownerCheckCurrentGoroutineID
+	oldThreadHook := ownerCheckCurrentThreadID
+	defer func() {
+		ownerCheckCurrentGoroutineID = oldGIDHook
+		ownerCheckCurrentThreadID = oldThreadHook
+	}()
+
+	var gid atomic.Uint64
+	gid.Store(101)
+	ownerCheckCurrentGoroutineID = func() uint64 { return gid.Load() }
+	ownerCheckCurrentThreadID = func() uint64 { return 1 }
+
+	rt := NewRuntime()
+	require.NotNil(t, rt)
+	ctx := rt.NewContext()
+	require.NotNil(t, ctx)
+
+	source := ctx.NewInt32(1)
+	require.NotNil(t, source)
+
+	gid.Store(202)
+	val, err := ctx.Marshal(1)
+	require.ErrorIs(t, err, errOwnerAccessDenied)
+	require.Nil(t, val)
+
+	var out int32
+	err = ctx.Unmarshal(source, &out)
+	require.ErrorIs(t, err, errOwnerAccessDenied)
+
+	gid.Store(101)
+	source.Free()
+	ctx.Close()
+	rt.Close()
 }
