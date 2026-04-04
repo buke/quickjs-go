@@ -1218,6 +1218,29 @@ func TestClassBuilder_ValueSpecProperties(t *testing.T) {
 		require.Equal(t, int32(99), result.ToInt32())
 	})
 
+	t.Run("StaticPropertyValueAndLiteral", func(t *testing.T) {
+		constructor, _ := NewClassBuilder("SpecStaticPropertyApisClass").
+			Constructor(func(ctx *Context, instance *Value, args []*Value) (interface{}, error) {
+				return &Point{X: 0, Y: 0}, nil
+			}).
+			StaticPropertyLiteral("kind", "literal-static").
+			StaticPropertyValue("num", FactorySpec{Factory: func(ctx *Context) (*Value, error) {
+				return ctx.NewInt32(8), nil
+			}}).
+			Build(ctx)
+		require.False(t, constructor.IsException())
+
+		ctx.Globals().Set("SpecStaticPropertyApisClass", constructor)
+		result := ctx.Eval(`
+			(() => {
+				return [SpecStaticPropertyApisClass.kind, SpecStaticPropertyApisClass.num].join(':');
+			})()
+		`)
+		defer result.Free()
+		require.False(t, result.IsException())
+		require.Equal(t, "literal-static:8", result.ToString())
+	})
+
 	t.Run("NilInstanceSpecAfterBuild", func(t *testing.T) {
 		builder := NewClassBuilder("SpecNilAfterBuildClass").
 			Constructor(func(ctx *Context, instance *Value, args []*Value) (interface{}, error) {
