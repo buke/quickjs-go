@@ -1036,53 +1036,53 @@ func main() {
 }
 ```
 
-    #### Declarative ValueSpec Exports (Recommended)
+#### Declarative ValueSpec Exports (Recommended)
 
-    ```go
-    package main
+```go
+package main
 
-    import (
-        "fmt"
-        "github.com/buke/quickjs-go"
-    )
+import (
+	"fmt"
+	"github.com/buke/quickjs-go"
+)
 
-    func main() {
-        rt := quickjs.NewRuntime()
-        defer rt.Close()
-        ctx := rt.NewContext()
-        defer ctx.Close()
+func main() {
+	rt := quickjs.NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
 
-        module := quickjs.NewModuleBuilder("app-config").
-            ExportLiteral("version", "2.1.0").
-            ExportLiteral("featureFlags", map[string]bool{"beta": true}).
-            ExportValue("now", quickjs.FactorySpec{Factory: func(ctx *quickjs.Context) (*quickjs.Value, error) {
-                return ctx.NewInt64(1700000000), nil
-            }}).
-            ExportValue("meta", quickjs.MarshalSpec{Value: map[string]interface{}{
-                "name":  "quickjs-go",
-                "typed": true,
-            }})
+	module := quickjs.NewModuleBuilder("app-config").
+		ExportLiteral("version", "2.1.0").
+		ExportLiteral("featureFlags", map[string]bool{"beta": true}).
+		ExportValue("now", quickjs.FactorySpec{Factory: func(ctx *quickjs.Context) (*quickjs.Value, error) {
+			return ctx.NewInt64(1700000000), nil
+		}}).
+		ExportValue("meta", quickjs.MarshalSpec{Value: map[string]interface{}{
+			"name":  "quickjs-go",
+			"typed": true,
+		}})
 
-        if err := module.Build(ctx); err != nil {
-            panic(err)
-        }
+	if err := module.Build(ctx); err != nil {
+		panic(err)
+	}
 
-        result := ctx.Eval(`
-            (async function() {
-                const { version, featureFlags, now, meta } = await import('app-config');
-                return [version, featureFlags.beta, now > 0, meta.name].join(':');
-            })()
-        `, quickjs.EvalAwait(true))
-        defer result.Free()
+	result := ctx.Eval(`
+		(async function() {
+			const { version, featureFlags, now, meta } = await import('app-config');
+			return [version, featureFlags.beta, now > 0, meta.name].join(':');
+		})()
+	`, quickjs.EvalAwait(true))
+	defer result.Free()
 
-        if result.IsException() {
-            panic(ctx.Exception())
-        }
+	if result.IsException() {
+		panic(ctx.Exception())
+	}
 
-        fmt.Println("Declarative module result:", result.ToString())
-        // Output: Declarative module result: 2.1.0:true:true:quickjs-go
-    }
-    ```
+	fmt.Println("Declarative module result:", result.ToString())
+	// Output: Declarative module result: 2.1.0:true:true:quickjs-go
+}
+```
 
 #### Multiple Module Integration
 

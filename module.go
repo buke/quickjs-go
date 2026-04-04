@@ -84,6 +84,9 @@ func validateModuleBuilder(builder *ModuleBuilder) error {
 		if export.Name == "" {
 			return errors.New("export name cannot be empty")
 		}
+		if export.Spec == nil {
+			return fmt.Errorf("export value is required: %s", export.Name)
+		}
 		if nameSet[export.Name] {
 			return fmt.Errorf("duplicate export name: %s", export.Name)
 		}

@@ -125,11 +125,15 @@ func TestModuleBuilder_ValueSpec(t *testing.T) {
 		foreign := other.NewString("foreign")
 		defer foreign.Free()
 
+		nilSpecModule := NewModuleBuilder("value-spec-invalid-nilspec").ExportValue("bad", nil)
+		err := nilSpecModule.Build(ctx)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "export value is required")
+
 		tests := []struct {
 			name string
 			spec ValueSpec
 		}{
-			{name: "NilSpec", spec: nil},
 			{name: "NilFactory", spec: FactorySpec{}},
 			{name: "FactoryError", spec: FactorySpec{Factory: func(ctx *Context) (*Value, error) {
 				return nil, fmt.Errorf("factory failed")
