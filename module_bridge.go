@@ -60,8 +60,14 @@ func goModuleInitProxy(ctx *C.JSContext, m *C.JSModuleDef) C.int {
 		}
 
 		value, matErr := export.Spec.Materialize(goCtx)
-		if matErr != nil || value == nil || !value.belongsTo(goCtx) {
-			return throwModuleError(ctx, fmt.Errorf("invalid module export value: %s", export.Name))
+		if matErr != nil {
+			return throwModuleError(ctx, fmt.Errorf("invalid module export value: %s (materialize error: %v)", export.Name, matErr))
+		}
+		if value == nil {
+			return throwModuleError(ctx, fmt.Errorf("invalid module export value: %s (materialize returned nil)", export.Name))
+		}
+		if !value.belongsTo(goCtx) {
+			return throwModuleError(ctx, fmt.Errorf("invalid module export value: %s (materialized in a different context)", export.Name))
 		}
 
 		exportName := C.CString(export.Name)

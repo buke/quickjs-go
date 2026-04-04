@@ -44,6 +44,7 @@ func NewModuleBuilder(name string) *ModuleBuilder {
 // Export adds an export to the module
 // This is the core method that handles all types of exports including default
 // For default export, use name="default"
+// Deprecated: Use ExportValue or ExportLiteral for declarative, reusable module definitions.
 func (mb *ModuleBuilder) Export(name string, value *Value) *ModuleBuilder {
 	return mb.ExportValue(name, contextValueSpec{value: value})
 }
@@ -96,6 +97,20 @@ func validateModuleBuilder(builder *ModuleBuilder) error {
 	return nil
 }
 
+func cloneModuleBuilder(builder *ModuleBuilder) *ModuleBuilder {
+	if builder == nil {
+		return nil
+	}
+
+	clonedExports := make([]ModuleExportEntry, len(builder.exports))
+	copy(clonedExports, builder.exports)
+
+	return &ModuleBuilder{
+		name:    builder.name,
+		exports: clonedExports,
+	}
+}
+
 // createModule implements the core module creation logic
 // This function handles the QuickJS module creation and registration:
 // 1. Module creation phase: create C module and declare exports
@@ -106,21 +121,22 @@ func createModule(ctx *Context, builder *ModuleBuilder) error {
 	if err := validateModuleBuilder(builder); err != nil {
 		return fmt.Errorf("module validation failed: %v", err)
 	}
+	snapshot := cloneModuleBuilder(builder)
 
-	// Step 2: Store ModuleBuilder in HandleStore for initialization function access
-	builderID := ctx.handleStore.Store(builder)
+	// Step 2: Store a build snapshot in HandleStore for initialization access.
+	builderID := ctx.handleStore.Store(snapshot)
 
 	// Step 3: Prepare export names for C function
-	exportNames := make([]*C.char, len(builder.exports))
-	exportCount := len(builder.exports)
+	exportNames := make([]*C.char, len(snapshot.exports))
+	exportCount := len(snapshot.exports)
 
 	// Convert Go strings to C strings
-	for i, export := range builder.exports {
+	for i, export := range snapshot.exports {
 		exportNames[i] = C.CString(export.Name)
 	}
 
 	// Prepare parameters for C function call
-	moduleName := C.CString(builder.name)
+	moduleName := C.CString(snapshot.name)
 	var exportNamesPtr **C.char
 	if exportCount > 0 {
 		exportNamesPtr = &exportNames[0]

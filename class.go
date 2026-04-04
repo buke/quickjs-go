@@ -221,6 +221,7 @@ func (cb *ClassBuilder) StaticAccessor(name string, getter ClassGetterFunc, sett
 // Property adds a data property to the class instance - changed to use pointer
 // Default flags: writable, enumerable, configurable
 // SCHEME C: Instance properties will be bound during instance creation
+// Deprecated: Use PropertyValue or PropertyLiteral for declarative, reusable class definitions.
 func (cb *ClassBuilder) Property(name string, value *Value, flags ...int) *ClassBuilder {
 	if value == nil {
 		return cb.PropertyValue(name, nil, flags...)
@@ -251,6 +252,7 @@ func (cb *ClassBuilder) PropertyLiteral(name string, value interface{}, flags ..
 
 // StaticProperty adds a data property to the class constructor - changed to use pointer
 // Default flags: writable, enumerable, configurable
+// Deprecated: Use StaticPropertyValue or StaticPropertyLiteral for declarative, reusable class definitions.
 func (cb *ClassBuilder) StaticProperty(name string, value *Value, flags ...int) *ClassBuilder {
 	if value == nil {
 		return cb.StaticPropertyValue(name, nil, flags...)
@@ -318,6 +320,29 @@ func validateClassBuilder(builder *ClassBuilder) error {
 	return nil
 }
 
+func cloneClassBuilder(builder *ClassBuilder) *ClassBuilder {
+	if builder == nil {
+		return nil
+	}
+
+	clonedMethods := make([]MethodEntry, len(builder.methods))
+	copy(clonedMethods, builder.methods)
+
+	clonedAccessors := make([]AccessorEntry, len(builder.accessors))
+	copy(clonedAccessors, builder.accessors)
+
+	clonedProperties := make([]PropertyEntry, len(builder.properties))
+	copy(clonedProperties, builder.properties)
+
+	return &ClassBuilder{
+		name:        builder.name,
+		constructor: builder.constructor,
+		methods:     clonedMethods,
+		accessors:   clonedAccessors,
+		properties:  clonedProperties,
+	}
+}
+
 // createClass implements the core class creation logic using C layer optimization
 // MODIFIED FOR SCHEME C: Now stores entire ClassBuilder and separates static/instance properties
 func createClass(ctx *Context, builder *ClassBuilder) (*Value, uint32) {
@@ -325,9 +350,10 @@ func createClass(ctx *Context, builder *ClassBuilder) (*Value, uint32) {
 	if err := validateClassBuilder(builder); err != nil {
 		return ctx.ThrowError(err), 0
 	}
+	snapshot := cloneClassBuilder(builder)
 
 	// Step 2: Go layer manages class name and JSClassDef memory - unchanged
-	className := C.CString(builder.name)
+	className := C.CString(snapshot.name)
 	defer C.free(unsafe.Pointer(className))
 
 	classDef := &C.JSClassDef{
@@ -342,7 +368,7 @@ func createClass(ctx *Context, builder *ClassBuilder) (*Value, uint32) {
 
 	// SCHEME C STEP 4: Store entire ClassBuilder in HandleStore (not just constructor)
 	// This allows constructor proxy to access both constructor function and instance properties
-	constructorID := ctx.handleStore.Store(builder)
+	constructorID := ctx.handleStore.Store(snapshot)
 	cleanupStoredHandlers := func() {
 		ctx.handleStore.Delete(constructorID)
 		for _, id := range methodIDs {
@@ -356,7 +382,7 @@ func createClass(ctx *Context, builder *ClassBuilder) (*Value, uint32) {
 	// Step 5: Prepare method entries for C layer - unchanged logic, same implementation
 	var cMethods []C.MethodEntry
 
-	for _, method := range builder.methods {
+	for _, method := range snapshot.methods {
 		// Store method function in handleStore
 		handlerID := ctx.handleStore.Store(method.Func)
 		methodIDs = append(methodIDs, handlerID)
@@ -386,7 +412,7 @@ func createClass(ctx *Context, builder *ClassBuilder) (*Value, uint32) {
 	// Step 6: Prepare accessor entries for C layer - unchanged logic, same implementation
 	var cAccessors []C.AccessorEntry
 
-	for _, accessor := range builder.accessors {
+	for _, accessor := range snapshot.accessors {
 		// Convert accessor name to C string
 		accessorName := C.CString(accessor.Name)
 		// Note: Don't defer free as C layer needs these strings during binding
@@ -445,14 +471,22 @@ func createClass(ctx *Context, builder *ClassBuilder) (*Value, uint32) {
 		}
 	}()
 
-	for _, property := range builder.properties {
+	for _, property := range snapshot.properties {
 		// SCHEME C: Only include static properties for CreateClass call
 		// Instance properties will be handled by constructor proxy during instance creation
 		if property.Static {
 			propertyValue, err := property.Spec.Materialize(ctx)
-			if err != nil || propertyValue == nil || !propertyValue.belongsTo(ctx) {
+			if err != nil {
 				cleanupStoredHandlers()
-				return ctx.ThrowError(fmt.Errorf("invalid property value: %s", property.Name)), 0
+				return ctx.ThrowError(fmt.Errorf("invalid property value: %s (materialize error: %v)", property.Name, err)), 0
+			}
+			if propertyValue == nil {
+				cleanupStoredHandlers()
+				return ctx.ThrowError(fmt.Errorf("invalid property value: %s (materialize returned nil)", property.Name)), 0
+			}
+			if !propertyValue.belongsTo(ctx) {
+				cleanupStoredHandlers()
+				return ctx.ThrowError(fmt.Errorf("invalid property value: %s (materialized in a different context)", property.Name)), 0
 			}
 			materializedStatic = append(materializedStatic, materializedStaticProperty{spec: property.Spec, value: propertyValue})
 
@@ -504,7 +538,7 @@ func createClass(ctx *Context, builder *ClassBuilder) (*Value, uint32) {
 
 	// Step 10: Error handling - clean up all stored handlers on failure - unchanged logic
 	if bool(C.JS_IsException(constructor)) {
-		fmt.Printf("Failed to create class '%s'\n", builder.name)
+		fmt.Printf("Failed to create class '%s'\n", snapshot.name)
 		cleanupStoredHandlers()
 
 		// Note: Don't clean up className and classDef - let Go GC handle them

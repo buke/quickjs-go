@@ -87,8 +87,14 @@ func goClassConstructorProxy(ctx *C.JSContext, newTarget C.JSValueConst,
 				return throwProxyError(ctx, proxyError{"InternalError", fmt.Sprintf("property value is required: %s", property.Name)})
 			}
 			propertyValue, err := property.Spec.Materialize(goCtx)
-			if err != nil || propertyValue == nil || !propertyValue.belongsTo(goCtx) {
-				return throwProxyError(ctx, proxyError{"InternalError", fmt.Sprintf("invalid property value: %s", property.Name)})
+			if err != nil {
+				return throwProxyError(ctx, proxyError{"InternalError", fmt.Sprintf("invalid property value: %s (materialize error: %v)", property.Name, err)})
+			}
+			if propertyValue == nil {
+				return throwProxyError(ctx, proxyError{"InternalError", fmt.Sprintf("invalid property value: %s (materialize returned nil)", property.Name)})
+			}
+			if !propertyValue.belongsTo(goCtx) {
+				return throwProxyError(ctx, proxyError{"InternalError", fmt.Sprintf("invalid property value: %s (materialized in a different context)", property.Name)})
 			}
 			materializedProperties = append(materializedProperties, materializedInstanceProperty{spec: property.Spec, value: propertyValue})
 

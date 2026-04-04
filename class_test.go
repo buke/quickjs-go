@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"runtime"
+	"runtime/cgo"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -1133,6 +1134,23 @@ func TestClassBuilder_ValueSpecProperties(t *testing.T) {
 	ctx := rt.NewContext()
 	defer ctx.Close()
 
+	findClassBuilderSnapshot := func(className string) (*ClassBuilder, bool) {
+		var snapshot *ClassBuilder
+		ctx.handleStore.handles.Range(func(_, value interface{}) bool {
+			h, ok := value.(cgo.Handle)
+			if !ok {
+				return true
+			}
+			cb, ok := h.Value().(*ClassBuilder)
+			if ok && cb != nil && cb.name == className {
+				snapshot = cb
+				return false
+			}
+			return true
+		})
+		return snapshot, snapshot != nil
+	}
+
 	t.Run("PropertyValueAndLiteral", func(t *testing.T) {
 		constructor, _ := NewClassBuilder("SpecPropertyClass").
 			Constructor(func(ctx *Context, instance *Value, args []*Value) (interface{}, error) {
@@ -1196,6 +1214,19 @@ func TestClassBuilder_ValueSpecProperties(t *testing.T) {
 		require.Contains(t, err.Error(), "invalid property value")
 	})
 
+	t.Run("StaticPropertyNilConvenience", func(t *testing.T) {
+		constructor, _ := NewClassBuilder("SpecStaticNilConvenienceClass").
+			Constructor(func(ctx *Context, instance *Value, args []*Value) (interface{}, error) {
+				return &Point{X: 0, Y: 0}, nil
+			}).
+			StaticProperty("bad", nil).
+			Build(ctx)
+		require.True(t, constructor.IsException())
+		err := ctx.Exception()
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "property value is required")
+	})
+
 	t.Run("StaticNonLegacySpec", func(t *testing.T) {
 		builder := NewClassBuilder("SpecStaticNonLegacyClass").
 			Constructor(func(ctx *Context, instance *Value, args []*Value) (interface{}, error) {
@@ -1216,6 +1247,43 @@ func TestClassBuilder_ValueSpecProperties(t *testing.T) {
 		defer result.Free()
 		require.False(t, result.IsException())
 		require.Equal(t, int32(99), result.ToInt32())
+	})
+
+	t.Run("StaticSpecMaterializeReturnsNil", func(t *testing.T) {
+		constructor, _ := NewClassBuilder("SpecStaticNilMaterializeClass").
+			Constructor(func(ctx *Context, instance *Value, args []*Value) (interface{}, error) {
+				return &Point{X: 0, Y: 0}, nil
+			}).
+			StaticPropertyValue("bad", FactorySpec{Factory: func(ctx *Context) (*Value, error) {
+				return nil, nil
+			}}).
+			Build(ctx)
+		require.True(t, constructor.IsException())
+		err := ctx.Exception()
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "materialize returned nil")
+	})
+
+	t.Run("StaticSpecForeignContext", func(t *testing.T) {
+		other := rt.NewContext()
+		require.NotNil(t, other)
+		defer other.Close()
+
+		foreign := other.NewString("foreign")
+		defer foreign.Free()
+
+		constructor, _ := NewClassBuilder("SpecStaticForeignContextClass").
+			Constructor(func(ctx *Context, instance *Value, args []*Value) (interface{}, error) {
+				return &Point{X: 0, Y: 0}, nil
+			}).
+			StaticPropertyValue("bad", FactorySpec{Factory: func(ctx *Context) (*Value, error) {
+				return foreign, nil
+			}}).
+			Build(ctx)
+		require.True(t, constructor.IsException())
+		err := ctx.Exception()
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "materialized in a different context")
 	})
 
 	t.Run("StaticPropertyValueAndLiteral", func(t *testing.T) {
@@ -1241,7 +1309,7 @@ func TestClassBuilder_ValueSpecProperties(t *testing.T) {
 		require.Equal(t, "literal-static:8", result.ToString())
 	})
 
-	t.Run("NilInstanceSpecAfterBuild", func(t *testing.T) {
+	t.Run("PostBuildMutationIgnored", func(t *testing.T) {
 		builder := NewClassBuilder("SpecNilAfterBuildClass").
 			Constructor(func(ctx *Context, instance *Value, args []*Value) (interface{}, error) {
 				return &Point{X: 0, Y: 0}, nil
@@ -1260,10 +1328,103 @@ func TestClassBuilder_ValueSpecProperties(t *testing.T) {
 		ctx.Globals().Set("SpecNilAfterBuildClass", constructor)
 		result := ctx.Eval(`new SpecNilAfterBuildClass()`)
 		defer result.Free()
+		require.False(t, result.IsException())
+	})
+
+	t.Run("ConstructorSnapshotMutationNilSpec", func(t *testing.T) {
+		className := "SpecCtorSnapshotNilSpecClass"
+		constructor, _ := NewClassBuilder(className).
+			Constructor(func(ctx *Context, instance *Value, args []*Value) (interface{}, error) {
+				return &Point{X: 0, Y: 0}, nil
+			}).
+			Build(ctx)
+		require.False(t, constructor.IsException())
+
+		snapshot, ok := findClassBuilderSnapshot(className)
+		require.True(t, ok)
+		snapshot.properties = append(snapshot.properties, PropertyEntry{
+			Name:   "lateBad",
+			Spec:   nil,
+			Static: false,
+			Flags:  PropertyDefault,
+		})
+
+		ctx.Globals().Set(className, constructor)
+		result := ctx.Eval(`new SpecCtorSnapshotNilSpecClass()`)
+		defer result.Free()
 		require.True(t, result.IsException())
 		err := ctx.Exception()
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "property value is required")
+	})
+
+	t.Run("ConstructorSnapshotMutationMaterializeNil", func(t *testing.T) {
+		className := "SpecCtorSnapshotNilValueClass"
+		constructor, _ := NewClassBuilder(className).
+			Constructor(func(ctx *Context, instance *Value, args []*Value) (interface{}, error) {
+				return &Point{X: 0, Y: 0}, nil
+			}).
+			Build(ctx)
+		require.False(t, constructor.IsException())
+
+		snapshot, ok := findClassBuilderSnapshot(className)
+		require.True(t, ok)
+		snapshot.properties = append(snapshot.properties, PropertyEntry{
+			Name: "lateBad",
+			Spec: FactorySpec{Factory: func(ctx *Context) (*Value, error) {
+				return nil, nil
+			}},
+			Static: false,
+			Flags:  PropertyDefault,
+		})
+
+		ctx.Globals().Set(className, constructor)
+		result := ctx.Eval(`new SpecCtorSnapshotNilValueClass()`)
+		defer result.Free()
+		require.True(t, result.IsException())
+		err := ctx.Exception()
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "materialize returned nil")
+	})
+
+	t.Run("ConstructorSnapshotMutationForeignContext", func(t *testing.T) {
+		other := rt.NewContext()
+		require.NotNil(t, other)
+		defer other.Close()
+
+		foreign := other.NewString("foreign")
+		defer foreign.Free()
+
+		className := "SpecCtorSnapshotForeignContextClass"
+		constructor, _ := NewClassBuilder(className).
+			Constructor(func(ctx *Context, instance *Value, args []*Value) (interface{}, error) {
+				return &Point{X: 0, Y: 0}, nil
+			}).
+			Build(ctx)
+		require.False(t, constructor.IsException())
+
+		snapshot, ok := findClassBuilderSnapshot(className)
+		require.True(t, ok)
+		snapshot.properties = append(snapshot.properties, PropertyEntry{
+			Name: "lateBad",
+			Spec: FactorySpec{Factory: func(ctx *Context) (*Value, error) {
+				return foreign, nil
+			}},
+			Static: false,
+			Flags:  PropertyDefault,
+		})
+
+		ctx.Globals().Set(className, constructor)
+		result := ctx.Eval(`new SpecCtorSnapshotForeignContextClass()`)
+		defer result.Free()
+		require.True(t, result.IsException())
+		err := ctx.Exception()
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "materialized in a different context")
+	})
+
+	t.Run("CloneBuilderNil", func(t *testing.T) {
+		require.Nil(t, cloneClassBuilder(nil))
 	})
 
 	require.False(t, isContextValueSpec(nil))

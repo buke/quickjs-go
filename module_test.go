@@ -2,6 +2,7 @@ package quickjs
 
 import (
 	"fmt"
+	"runtime/cgo"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -76,6 +77,23 @@ func TestModuleBuilder_ValueSpec(t *testing.T) {
 	defer rt.Close()
 	ctx := rt.NewContext()
 	defer ctx.Close()
+
+	findModuleBuilderSnapshot := func(moduleName string) (*ModuleBuilder, bool) {
+		var snapshot *ModuleBuilder
+		ctx.handleStore.handles.Range(func(_, value interface{}) bool {
+			h, ok := value.(cgo.Handle)
+			if !ok {
+				return true
+			}
+			mb, ok := h.Value().(*ModuleBuilder)
+			if ok && mb != nil && mb.name == moduleName {
+				snapshot = mb
+				return false
+			}
+			return true
+		})
+		return snapshot, snapshot != nil
+	}
 
 	t.Run("ExportLiteralAndMarshalSpec", func(t *testing.T) {
 		module := NewModuleBuilder("value-spec-literal").
@@ -156,6 +174,107 @@ func TestModuleBuilder_ValueSpec(t *testing.T) {
 			require.Error(t, ex)
 			require.Contains(t, ex.Error(), "invalid module export value")
 		}
+	})
+
+	t.Run("PostBuildMutationIgnored", func(t *testing.T) {
+		module := NewModuleBuilder("value-spec-post-build").
+			ExportLiteral("msg", "stable")
+
+		err := module.Build(ctx)
+		require.NoError(t, err)
+
+		module.exports[0] = ModuleExportEntry{
+			Name: "msg",
+			Spec: FactorySpec{},
+		}
+		module.exports = append(module.exports, ModuleExportEntry{
+			Name: "lateBad",
+			Spec: nil,
+		})
+
+		result := ctx.Eval(`
+			(async function() {
+				const { msg } = await import('value-spec-post-build');
+				return msg;
+			})()
+		`, EvalAwait(true))
+		defer result.Free()
+		require.False(t, result.IsException())
+		require.Equal(t, "stable", result.ToString())
+	})
+
+	t.Run("SnapshotMutationNilSpecFailClosed", func(t *testing.T) {
+		moduleName := "value-spec-snapshot-nilspec"
+		module := NewModuleBuilder(moduleName).
+			ExportLiteral("msg", "ok")
+
+		err := module.Build(ctx)
+		require.NoError(t, err)
+
+		snapshot, ok := findModuleBuilderSnapshot(moduleName)
+		require.True(t, ok)
+		require.NotEmpty(t, snapshot.exports)
+		snapshot.exports[0].Spec = nil
+
+		result := ctx.Eval(fmt.Sprintf(`import('%s')`, moduleName), EvalAwait(true))
+		defer result.Free()
+		require.True(t, result.IsException())
+		ex := ctx.Exception()
+		require.Error(t, ex)
+		require.Contains(t, ex.Error(), "invalid module export value")
+	})
+
+	t.Run("SnapshotMutationMaterializeReturnsNil", func(t *testing.T) {
+		moduleName := "value-spec-snapshot-nilvalue"
+		module := NewModuleBuilder(moduleName).
+			ExportLiteral("msg", "ok")
+
+		err := module.Build(ctx)
+		require.NoError(t, err)
+
+		snapshot, ok := findModuleBuilderSnapshot(moduleName)
+		require.True(t, ok)
+		require.NotEmpty(t, snapshot.exports)
+		snapshot.exports[0].Spec = FactorySpec{Factory: func(ctx *Context) (*Value, error) {
+			return nil, nil
+		}}
+
+		result := ctx.Eval(fmt.Sprintf(`import('%s')`, moduleName), EvalAwait(true))
+		defer result.Free()
+		require.True(t, result.IsException())
+		ex := ctx.Exception()
+		require.Error(t, ex)
+		require.Contains(t, ex.Error(), "materialize returned nil")
+	})
+
+	t.Run("SnapshotMutationSetModuleExportError", func(t *testing.T) {
+		fooFunc := ctx.NewFunction(func(ctx *Context, this *Value, args []*Value) *Value {
+			return ctx.NewUndefined()
+		})
+		defer fooFunc.Free()
+
+		moduleName := "value-spec-snapshot-set-export-error"
+		module := NewModuleBuilder(moduleName).
+			Export("foo", fooFunc)
+
+		err := module.Build(ctx)
+		require.NoError(t, err)
+
+		snapshot, ok := findModuleBuilderSnapshot(moduleName)
+		require.True(t, ok)
+		require.NotEmpty(t, snapshot.exports)
+		snapshot.exports[0].Name = "bar"
+
+		result := ctx.Eval(fmt.Sprintf(`import('%s')`, moduleName), EvalAwait(true))
+		defer result.Free()
+		require.True(t, result.IsException())
+		ex := ctx.Exception()
+		require.Error(t, ex)
+		require.Contains(t, ex.Error(), "failed to set module export")
+	})
+
+	t.Run("CloneBuilderNil", func(t *testing.T) {
+		require.Nil(t, cloneModuleBuilder(nil))
 	})
 }
 
@@ -451,7 +570,7 @@ func TestModuleBuilder_ErrorBranches(t *testing.T) {
 		require.Contains(t, err.Error(), "Function not found")
 	})
 
-	t.Run("ModuleInitSetModuleExportError", func(t *testing.T) {
+	t.Run("ModuleInitUsesBuildSnapshot", func(t *testing.T) {
 		fooFunc := ctx.NewFunction(func(ctx *Context, this *Value, args []*Value) *Value {
 			return ctx.NewUndefined()
 		})
@@ -461,18 +580,21 @@ func TestModuleBuilder_ErrorBranches(t *testing.T) {
 		err := module.Build(ctx)
 		require.NoError(t, err)
 
-		// Force a mismatch between declared exports ("foo") and init-time exports.
-		// Build() declares exports based on the current builder.exports. Module init happens
-		// later during import; by mutating the builder, JS_SetModuleExport will fail.
+		// Build() now snapshots module definitions; post-build mutations should not
+		// affect module initialization behavior.
 		require.GreaterOrEqual(t, len(module.exports), 1)
 		module.exports[0].Name = "bar"
 
-		result := ctx.Eval(`import('error-test-3')`, EvalAwait(true))
+		result := ctx.Eval(`
+			(async function() {
+				const mod = await import('error-test-3');
+				return typeof mod.foo;
+			})()
+		`, EvalAwait(true))
 		defer result.Free()
 
-		require.True(t, result.IsException())
-		err = ctx.Exception()
-		require.Contains(t, err.Error(), "failed to set module export")
+		require.False(t, result.IsException())
+		require.Equal(t, "function", result.ToString())
 	})
 }
 
