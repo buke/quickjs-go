@@ -50,6 +50,38 @@ func sameContext(a *Value, b *Value) bool {
 	return a.hasValidContext() && b.hasValidContext()
 }
 
+// Equal returns true if two values are abstractly equal (JS == semantics).
+func (v *Value) Equal(other *Value) bool {
+	if !sameContext(v, other) {
+		return false
+	}
+	return C.JS_IsEqual(v.ctx.ref, v.ref, other.ref) == 1
+}
+
+// StrictEqual returns true if two values are strictly equal (JS === semantics).
+func (v *Value) StrictEqual(other *Value) bool {
+	if !sameContext(v, other) {
+		return false
+	}
+	return bool(C.JS_IsStrictEqual(v.ctx.ref, v.ref, other.ref))
+}
+
+// SameValue returns true if two values are the same according to JS SameValue.
+func (v *Value) SameValue(other *Value) bool {
+	if !sameContext(v, other) {
+		return false
+	}
+	return bool(C.JS_IsSameValue(v.ctx.ref, v.ref, other.ref))
+}
+
+// SameValueZero returns true if two values are the same according to JS SameValueZero.
+func (v *Value) SameValueZero(other *Value) bool {
+	if !sameContext(v, other) {
+		return false
+	}
+	return bool(C.JS_IsSameValueZero(v.ctx.ref, v.ref, other.ref))
+}
+
 // Free the value.
 func (v *Value) Free() {
 	if !v.hasValidContext() || bool(C.JS_IsUndefined(v.ref)) {
@@ -428,6 +460,70 @@ func (v *Value) DeleteIdx(idx uint32) bool {
 		return false // Property does not exist, nothing to delete
 	}
 	return C.JS_DeletePropertyInt64(v.ctx.ref, v.ref, C.int64_t(idx), C.int(1)) == 1
+}
+
+// Prototype returns the object's prototype value.
+func (v *Value) Prototype() *Value {
+	if !v.isAlive() {
+		return nil
+	}
+	return &Value{ctx: v.ctx, ref: C.JS_GetPrototype(v.ctx.ref, v.ref)}
+}
+
+// SetPrototype sets the object's prototype.
+func (v *Value) SetPrototype(proto *Value) bool {
+	if !v.isAlive() || !proto.belongsTo(v.ctx) {
+		return false
+	}
+	return C.JS_SetPrototype(v.ctx.ref, v.ref, proto.ref) == 1
+}
+
+// IsExtensible returns true if new properties can still be added.
+func (v *Value) IsExtensible() bool {
+	if !v.isAlive() {
+		return false
+	}
+	ret := C.JS_IsExtensible(v.ctx.ref, v.ref)
+	if ret < 0 {
+		return false
+	}
+	return ret == 1
+}
+
+// PreventExtensions marks object as non-extensible.
+func (v *Value) PreventExtensions() bool {
+	if !v.isAlive() {
+		return false
+	}
+	ret := C.JS_PreventExtensions(v.ctx.ref, v.ref)
+	if ret < 0 {
+		return false
+	}
+	return ret == 1
+}
+
+// Seal seals object properties and prevents extensions.
+func (v *Value) Seal() bool {
+	if !v.isAlive() {
+		return false
+	}
+	ret := C.JS_SealObject(v.ctx.ref, v.ref)
+	if ret < 0 {
+		return false
+	}
+	return ret == 1
+}
+
+// Freeze freezes object properties and prevents extensions.
+func (v *Value) Freeze() bool {
+	if !v.isAlive() {
+		return false
+	}
+	ret := C.JS_FreezeObject(v.ctx.ref, v.ref)
+	if ret < 0 {
+		return false
+	}
+	return ret == 1
 }
 
 // GlobalInstanceof checks if the value is an instance of the given global constructor
