@@ -726,8 +726,8 @@ func (r *Runtime) SetInfo(info string) {
 	if !r.ensureOwnerAccess() {
 		return
 	}
-	r.mu.RLock()
-	defer r.mu.RUnlock()
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	if r.closed.Load() || r.ref == nil {
 		return
 	}
