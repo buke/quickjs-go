@@ -512,14 +512,17 @@ func (v *Value) DefinePropertyAtom(atom *Atom, desc PropertyDescriptor) bool {
 
 	value := C.JS_NewUndefined()
 	if desc.Value != nil {
+		// JS_DefineProperty borrows descriptor values; do not transfer caller ownership.
 		value = desc.Value.ref
 	}
 	getter := C.JS_NewUndefined()
 	if desc.Getter != nil {
+		// Borrowed argument: keep caller-managed getter handle valid after the call.
 		getter = desc.Getter.ref
 	}
 	setter := C.JS_NewUndefined()
 	if desc.Setter != nil {
+		// Borrowed argument: keep caller-managed setter handle valid after the call.
 		setter = desc.Setter.ref
 	}
 
@@ -538,6 +541,7 @@ func (v *Value) DefinePropertyValue(name string, value *Value, flags int) bool {
 	atom := v.ctx.NewAtom(name)
 	defer atom.Free()
 
+	// JS_DefinePropertyValue consumes `dup` but does not consume `atom`.
 	dup := C.JS_DupValue(v.ctx.ref, value.ref)
 	ret := C.JS_DefinePropertyValue(v.ctx.ref, v.ref, atom.ref, dup, C.int(flags))
 	if ret < 0 {
@@ -563,9 +567,11 @@ func (v *Value) DefinePropertyGetSet(name string, getter *Value, setter *Value, 
 	getterRef := C.JS_NewUndefined()
 	setterRef := C.JS_NewUndefined()
 	if getter != nil {
+		// JS_DefinePropertyGetSet consumes getter/setter values.
 		getterRef = C.JS_DupValue(v.ctx.ref, getter.ref)
 	}
 	if setter != nil {
+		// JS_DefinePropertyGetSet consumes getter/setter values.
 		setterRef = C.JS_DupValue(v.ctx.ref, setter.ref)
 	}
 
@@ -604,6 +610,7 @@ func (v *Value) GetAtom(atom *Atom) *Value {
 	if !v.isAlive() || atom == nil || atom.ctx == nil || atom.ctx != v.ctx || !atom.ctx.hasValidRef() {
 		return nil
 	}
+	// JS_GetProperty borrows atom; caller retains atom ownership.
 	return &Value{ctx: v.ctx, ref: C.JS_GetProperty(v.ctx.ref, v.ref, atom.ref)}
 }
 
@@ -612,6 +619,7 @@ func (v *Value) SetAtom(atom *Atom, val *Value) bool {
 	if !v.isAlive() || atom == nil || atom.ctx == nil || atom.ctx != v.ctx || !atom.ctx.hasValidRef() || !val.belongsTo(v.ctx) {
 		return false
 	}
+	// JS_SetProperty consumes `dup` but borrows `atom`.
 	dup := C.JS_DupValue(v.ctx.ref, val.ref)
 	ret := C.JS_SetProperty(v.ctx.ref, v.ref, atom.ref, dup)
 	if ret < 0 {
