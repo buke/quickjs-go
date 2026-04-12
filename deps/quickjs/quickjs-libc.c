@@ -227,10 +227,11 @@ static void js_set_thread_state(JSRuntime *rt, JSThreadState *ts)
     js_std_cmd(/*SetOpaque*/1, rt, ts);
 }
 
-#ifdef __GNUC__
+// Non-CL Clang on Windows does not define __GNUC__
+#if defined(__GNUC__) || defined(__clang__)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wformat-nonliteral"
-#endif // __GNUC__
+#endif // __GNUC__ || __clang__
 static JSValue js_printf_internal(JSContext *ctx,
                                   int argc, JSValueConst *argv, FILE *fp)
 {
@@ -446,9 +447,9 @@ fail:
     dbuf_free(&dbuf);
     return JS_EXCEPTION;
 }
-#ifdef __GNUC__
+#if defined(__GNUC__) || defined(__clang__)
 #pragma GCC diagnostic pop // ignored "-Wformat-nonliteral"
-#endif // __GNUC__
+#endif // __GNUC__ || __clang__
 
 uint8_t *js_load_file(JSContext *ctx, size_t *pbuf_len, const char *filename)
 {
@@ -828,10 +829,18 @@ int js_module_check_attributes(JSContext *ctx, void *opaque,
     return ret;
 }
 
+// js_free_array_buffer to avoid a name conflict with js_array_buffer_free
+// from quickjs.c in the amalgamation build
+static void js_free_array_buffer(JSRuntime *rt, void *opaque, void *ptr)
+{
+    js_free_rt(rt, ptr);
+}
+
 enum {
     JS_IMPORT_TYPE_JS,
     JS_IMPORT_TYPE_JSON,
     JS_IMPORT_TYPE_TEXT,
+    JS_IMPORT_TYPE_BYTES,
 };
 
 /* return > 0 if the attributes indicate a JSON module, 0 otherwise, -1 on error */
@@ -859,6 +868,8 @@ static int js_module_import_type(JSContext *ctx, JSValueConst attributes)
         res = JS_IMPORT_TYPE_JSON;
     } else if (len == 4 && !memcmp(cstr, "text", len)) {
         res = JS_IMPORT_TYPE_TEXT;
+    } else if (len == 5 && !memcmp(cstr, "bytes", len)) {
+        res = JS_IMPORT_TYPE_BYTES;
     } else {
         /* unknown type - throw error */
         JS_ThrowTypeError(ctx, "unsupported module type: '%s'", cstr);
@@ -881,8 +892,9 @@ JSModuleDef *js_module_load(JSContext *ctx, const char *module_name,
     type = js_module_import_type(ctx, attributes);
     if (type < 0)
         return NULL;
-    if (js__has_suffix(module_name, ".json"))
-        type = JS_IMPORT_TYPE_JSON;
+    if (type != JS_IMPORT_TYPE_BYTES)
+        if (js__has_suffix(module_name, ".json"))
+            type = JS_IMPORT_TYPE_JSON;
     buf = (char *)load_file(ctx, &buf_len, module_name);
     if (!buf) {
         JS_ThrowReferenceError(ctx, "could not load module filename '%s'",
@@ -899,6 +911,16 @@ JSModuleDef *js_module_load(JSContext *ctx, const char *module_name,
         break;
     case JS_IMPORT_TYPE_TEXT:
         val = JS_NewStringLen(ctx, buf, buf_len);
+        break;
+    case JS_IMPORT_TYPE_BYTES:
+        val = JS_NewUint8Array(ctx, (uint8_t *)buf, buf_len,
+                               js_free_array_buffer, NULL, /*is_shared*/false);
+        if (!JS_IsException(val)) {
+            JSValue abuf = JS_GetTypedArrayBuffer(ctx, val, NULL, NULL, NULL);
+            JS_SetImmutableArrayBuffer(abuf, /*immutable*/true);
+            JS_FreeValue(ctx, abuf);
+            buf = NULL;
+        }
         break;
     default:
         val = JS_ThrowInternalError(ctx, "unhandled import type");

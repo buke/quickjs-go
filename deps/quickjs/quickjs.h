@@ -118,7 +118,8 @@ extern "C" {
 
 /* Borrowed from Folly */
 #ifndef JS_PRINTF_FORMAT
-#ifdef _MSC_VER
+/* Clang on Windows doesn't seem to support _Printf_format_string_ */
+#if defined(_MSC_VER) && !defined(__clang__)
 #include <sal.h>
 #define JS_PRINTF_FORMAT _Printf_format_string_
 #define JS_PRINTF_FORMAT_ATTR(format_param, dots_param)
@@ -925,6 +926,7 @@ JS_EXTERN JSValue JS_ToObject(JSContext *ctx, JSValueConst val);
 JS_EXTERN JSValue JS_ToObjectString(JSContext *ctx, JSValueConst val);
 
 JS_EXTERN bool JS_IsFunction(JSContext* ctx, JSValueConst val);
+JS_EXTERN bool JS_IsAsyncFunction(JSValueConst val);
 JS_EXTERN bool JS_IsConstructor(JSContext* ctx, JSValueConst val);
 JS_EXTERN bool JS_SetConstructorBit(JSContext *ctx, JSValueConst func_obj, bool val);
 
@@ -1207,6 +1209,7 @@ JS_EXTERN int JS_EnqueueJob(JSContext *ctx, JSJobFunc *job_func,
                             int argc, JSValueConst *argv);
 
 JS_EXTERN bool JS_IsJobPending(JSRuntime *rt);
+JS_EXTERN JSContext *JS_GetPendingJobContext(JSRuntime *rt);
 JS_EXTERN int JS_ExecutePendingJob(JSRuntime *rt, JSContext **pctx);
 
 /* Structure to retrieve (de)serialized SharedArrayBuffer objects. */
@@ -1407,7 +1410,7 @@ JS_EXTERN int JS_SetModuleExportList(JSContext *ctx, JSModuleDef *m,
 /* Version */
 
 #define QJS_VERSION_MAJOR 0
-#define QJS_VERSION_MINOR 13
+#define QJS_VERSION_MINOR 14
 #define QJS_VERSION_PATCH 0
 #define QJS_VERSION_SUFFIX ""
 
