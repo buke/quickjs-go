@@ -483,7 +483,11 @@ func (v *Value) IsExtensible() bool {
 	if !v.isAlive() {
 		return false
 	}
-	return C.JS_IsExtensible(v.ctx.ref, v.ref) == 1
+	ret := C.JS_IsExtensible(v.ctx.ref, v.ref)
+	if ret < 0 {
+		return false
+	}
+	return ret == 1
 }
 
 // PreventExtensions marks object as non-extensible.
@@ -491,7 +495,11 @@ func (v *Value) PreventExtensions() bool {
 	if !v.isAlive() {
 		return false
 	}
-	return C.JS_PreventExtensions(v.ctx.ref, v.ref) == 1
+	ret := C.JS_PreventExtensions(v.ctx.ref, v.ref)
+	if ret < 0 {
+		return false
+	}
+	return ret == 1
 }
 
 // Seal seals object properties and prevents extensions.
@@ -499,7 +507,11 @@ func (v *Value) Seal() bool {
 	if !v.isAlive() {
 		return false
 	}
-	return C.JS_SealObject(v.ctx.ref, v.ref) == 1
+	ret := C.JS_SealObject(v.ctx.ref, v.ref)
+	if ret < 0 {
+		return false
+	}
+	return ret == 1
 }
 
 // Freeze freezes object properties and prevents extensions.
@@ -507,7 +519,11 @@ func (v *Value) Freeze() bool {
 	if !v.isAlive() {
 		return false
 	}
-	return C.JS_FreezeObject(v.ctx.ref, v.ref) == 1
+	ret := C.JS_FreezeObject(v.ctx.ref, v.ref)
+	if ret < 0 {
+		return false
+	}
+	return ret == 1
 }
 
 // GlobalInstanceof checks if the value is an instance of the given global constructor
