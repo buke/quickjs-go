@@ -37,6 +37,14 @@ func (a *Atom) ToValue() *Value {
 	return &Value{ctx: a.ctx, ref: C.JS_AtomToValue(a.ctx.ref, a.ref)}
 }
 
+// Dup increments the atom reference count and returns a new Atom handle.
+func (a *Atom) Dup() *Atom {
+	if a == nil || a.ctx == nil || !a.ctx.hasValidRef() {
+		return nil
+	}
+	return &Atom{ctx: a.ctx, ref: C.JS_DupAtom(a.ctx.ref, a.ref)}
+}
+
 // Value returns the value representation of the atom.
 // Deprecated: Use ToValue() instead.
 func (a *Atom) Value() *Value {

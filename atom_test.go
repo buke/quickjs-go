@@ -374,3 +374,56 @@ func TestAtomEdgeCases(t *testing.T) {
 		require.Equal(t, propName, atomValue.ToString()) // Changed: String() → ToString()
 	})
 }
+
+func TestAtomDupAndContextAtomFromValue(t *testing.T) {
+	rt := NewRuntime()
+	defer rt.Close()
+
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	name := ctx.NewString("dup-key")
+	defer name.Free()
+
+	atom := ctx.AtomFromValue(name)
+	require.NotNil(t, atom)
+	defer atom.Free()
+	require.Equal(t, "dup-key", atom.ToString())
+
+	dup := atom.Dup()
+	require.NotNil(t, dup)
+	defer dup.Free()
+	require.Equal(t, atom.ToString(), dup.ToString())
+
+	ctx2 := rt.NewContext()
+	defer ctx2.Close()
+	foreignVal := ctx2.NewString("foreign")
+	defer foreignVal.Free()
+	require.Nil(t, ctx.AtomFromValue(foreignVal))
+
+	obj := ctx.NewObject()
+	defer obj.Free()
+	objAtom := ctx.AtomFromValue(obj)
+	require.NotNil(t, objAtom)
+	defer objAtom.Free()
+	require.Equal(t, "[object Object]", objAtom.ToString())
+
+	badKey := ctx.Eval(`({ toString(){ throw new Error('boom') } })`)
+	defer badKey.Free()
+	require.False(t, badKey.IsException())
+	require.Nil(t, ctx.AtomFromValue(badKey))
+	require.Error(t, ctx.Exception())
+
+	var nilAtom *Atom
+	require.Nil(t, nilAtom.Dup())
+
+	var nilCtx *Context
+	require.Nil(t, nilCtx.AtomFromValue(name))
+
+	closedRT := NewRuntime()
+	closedCtx := closedRT.NewContext()
+	closedVal := closedCtx.NewString("closed")
+	closedCtx.Close()
+	require.Nil(t, closedCtx.AtomFromValue(closedVal))
+	closedRT.Close()
+}
