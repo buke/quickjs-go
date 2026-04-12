@@ -60,6 +60,105 @@ func TestValueBasics(t *testing.T) {
 	require.True(t, sym.IsSymbol())
 }
 
+func TestValueComparisonAPIs(t *testing.T) {
+	useStableOwnerHooksForLegacySubtests(t)
+
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	one := ctx.NewInt32(1)
+	defer one.Free()
+	oneStr := ctx.NewString("1")
+	defer oneStr.Free()
+
+	require.True(t, one.Equal(oneStr))
+	require.False(t, one.StrictEqual(oneStr))
+
+	nanA := ctx.Eval("NaN")
+	defer nanA.Free()
+	nanB := ctx.Eval("NaN")
+	defer nanB.Free()
+	require.False(t, nanA.Equal(nanB))
+	require.False(t, nanA.StrictEqual(nanB))
+	require.True(t, nanA.SameValue(nanB))
+	require.True(t, nanA.SameValueZero(nanB))
+
+	plusZero := ctx.Eval("+0")
+	defer plusZero.Free()
+	minusZero := ctx.Eval("-0")
+	defer minusZero.Free()
+	require.True(t, plusZero.Equal(minusZero))
+	require.True(t, plusZero.StrictEqual(minusZero))
+	require.False(t, plusZero.SameValue(minusZero))
+	require.True(t, plusZero.SameValueZero(minusZero))
+
+	ctx2 := rt.NewContext()
+	defer ctx2.Close()
+	other := ctx2.NewInt32(1)
+	defer other.Free()
+	require.False(t, one.Equal(other))
+	require.False(t, one.StrictEqual(other))
+	require.False(t, one.SameValue(other))
+	require.False(t, one.SameValueZero(other))
+}
+
+func TestValueObjectControlAPIs(t *testing.T) {
+	useStableOwnerHooksForLegacySubtests(t)
+
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	obj := ctx.NewObject()
+	defer obj.Free()
+	proto := ctx.NewObject()
+	defer proto.Free()
+	proto.Set("kind", ctx.NewString("proto"))
+
+	require.True(t, obj.SetPrototype(proto))
+	actualProto := obj.Prototype()
+	require.NotNil(t, actualProto)
+	defer actualProto.Free()
+	kind := actualProto.Get("kind")
+	defer kind.Free()
+	require.Equal(t, "proto", kind.ToString())
+
+	require.True(t, obj.IsExtensible())
+	require.True(t, obj.PreventExtensions())
+	require.False(t, obj.IsExtensible())
+
+	sealed := ctx.Eval("({ a: 1 })")
+	defer sealed.Free()
+	require.True(t, sealed.Seal())
+	require.False(t, sealed.IsExtensible())
+
+	frozen := ctx.Eval("({ a: 1 })")
+	defer frozen.Free()
+	require.True(t, frozen.Freeze())
+	require.False(t, frozen.IsExtensible())
+
+	ctx2 := rt.NewContext()
+	defer ctx2.Close()
+	otherProto := ctx2.NewObject()
+	defer otherProto.Free()
+	require.False(t, obj.SetPrototype(otherProto))
+}
+
+func TestValueObjectControlAPIsInvalidReceiver(t *testing.T) {
+	useStableOwnerHooksForLegacySubtests(t)
+
+	var nilValue *Value
+	require.Nil(t, nilValue.Prototype())
+	require.False(t, nilValue.IsExtensible())
+	require.False(t, nilValue.PreventExtensions())
+	require.False(t, nilValue.Seal())
+	require.False(t, nilValue.Freeze())
+	require.False(t, nilValue.SetPrototype(nil))
+}
+
 // TestValueConversions tests type conversions including deprecated methods
 func TestValueConversions(t *testing.T) {
 	useStableOwnerHooksForLegacySubtests(t)
