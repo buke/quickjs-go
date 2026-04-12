@@ -23,6 +23,15 @@ type Value struct {
 	borrowed bool
 }
 
+// PropertyDescriptor mirrors QuickJS property descriptor semantics.
+// Value/Getter/Setter returned by OwnProperty are owned by caller and must be freed.
+type PropertyDescriptor struct {
+	Flags  int
+	Value  *Value
+	Getter *Value
+	Setter *Value
+}
+
 // hasValidContext reports whether a Value still has a usable context pointer.
 func (v *Value) hasValidContext() bool {
 	return v != nil && v.ctx != nil && v.ctx.hasValidRef()
@@ -460,6 +469,162 @@ func (v *Value) DeleteIdx(idx uint32) bool {
 		return false // Property does not exist, nothing to delete
 	}
 	return C.JS_DeletePropertyInt64(v.ctx.ref, v.ref, C.int64_t(idx), C.int(1)) == 1
+}
+
+// DefineProperty defines a property using a full descriptor.
+func (v *Value) DefineProperty(name string, desc PropertyDescriptor) bool {
+	if !v.isAlive() {
+		return false
+	}
+	atom := v.ctx.NewAtom(name)
+	defer atom.Free()
+	return v.DefinePropertyAtom(atom, desc)
+}
+
+// DefinePropertyAtom defines a property using a full descriptor and a pre-built atom.
+func (v *Value) DefinePropertyAtom(atom *Atom, desc PropertyDescriptor) bool {
+	if !v.isAlive() || atom == nil || atom.ctx == nil || atom.ctx != v.ctx || !atom.ctx.hasValidRef() {
+		return false
+	}
+	if desc.Value != nil && !desc.Value.belongsTo(v.ctx) {
+		return false
+	}
+	if desc.Getter != nil && !desc.Getter.belongsTo(v.ctx) {
+		return false
+	}
+	if desc.Setter != nil && !desc.Setter.belongsTo(v.ctx) {
+		return false
+	}
+
+	value := C.JS_NewUndefined()
+	if desc.Value != nil {
+		value = desc.Value.ref
+	}
+	getter := C.JS_NewUndefined()
+	if desc.Getter != nil {
+		getter = desc.Getter.ref
+	}
+	setter := C.JS_NewUndefined()
+	if desc.Setter != nil {
+		setter = desc.Setter.ref
+	}
+
+	ret := C.JS_DefineProperty(v.ctx.ref, v.ref, atom.ref, value, getter, setter, C.int(desc.Flags))
+	if ret < 0 {
+		return false
+	}
+	return ret == 1
+}
+
+// DefinePropertyValue defines a value property by name.
+func (v *Value) DefinePropertyValue(name string, value *Value, flags int) bool {
+	if !v.isAlive() || !value.belongsTo(v.ctx) {
+		return false
+	}
+	atom := v.ctx.NewAtom(name)
+	defer atom.Free()
+
+	dup := C.JS_DupValue(v.ctx.ref, value.ref)
+	ret := C.JS_DefinePropertyValue(v.ctx.ref, v.ref, atom.ref, dup, C.int(flags))
+	if ret < 0 {
+		return false
+	}
+	return ret == 1
+}
+
+// DefinePropertyGetSet defines an accessor property by name.
+func (v *Value) DefinePropertyGetSet(name string, getter *Value, setter *Value, flags int) bool {
+	if !v.isAlive() {
+		return false
+	}
+	if getter != nil && !getter.belongsTo(v.ctx) {
+		return false
+	}
+	if setter != nil && !setter.belongsTo(v.ctx) {
+		return false
+	}
+	atom := v.ctx.NewAtom(name)
+	defer atom.Free()
+
+	getterRef := C.JS_NewUndefined()
+	setterRef := C.JS_NewUndefined()
+	if getter != nil {
+		getterRef = C.JS_DupValue(v.ctx.ref, getter.ref)
+	}
+	if setter != nil {
+		setterRef = C.JS_DupValue(v.ctx.ref, setter.ref)
+	}
+
+	ret := C.JS_DefinePropertyGetSet(v.ctx.ref, v.ref, atom.ref, getterRef, setterRef, C.int(flags))
+	if ret < 0 {
+		return false
+	}
+	return ret == 1
+}
+
+// OwnProperty gets a full own property descriptor by name.
+func (v *Value) OwnProperty(name string) (*PropertyDescriptor, bool) {
+	if !v.isAlive() {
+		return nil, false
+	}
+	atom := v.ctx.NewAtom(name)
+	defer atom.Free()
+
+	var desc C.JSPropertyDescriptor
+	ret := C.JS_GetOwnProperty(v.ctx.ref, &desc, v.ref, atom.ref)
+	if ret <= 0 {
+		return nil, false
+	}
+
+	result := &PropertyDescriptor{
+		Flags:  int(desc.flags),
+		Value:  &Value{ctx: v.ctx, ref: desc.value},
+		Getter: &Value{ctx: v.ctx, ref: desc.getter},
+		Setter: &Value{ctx: v.ctx, ref: desc.setter},
+	}
+	return result, true
+}
+
+// GetAtom gets a property by atom key.
+func (v *Value) GetAtom(atom *Atom) *Value {
+	if !v.isAlive() || atom == nil || atom.ctx == nil || atom.ctx != v.ctx || !atom.ctx.hasValidRef() {
+		return nil
+	}
+	return &Value{ctx: v.ctx, ref: C.JS_GetProperty(v.ctx.ref, v.ref, atom.ref)}
+}
+
+// SetAtom sets a property by atom key.
+func (v *Value) SetAtom(atom *Atom, val *Value) bool {
+	if !v.isAlive() || atom == nil || atom.ctx == nil || atom.ctx != v.ctx || !atom.ctx.hasValidRef() || !val.belongsTo(v.ctx) {
+		return false
+	}
+	dup := C.JS_DupValue(v.ctx.ref, val.ref)
+	ret := C.JS_SetProperty(v.ctx.ref, v.ref, atom.ref, dup)
+	if ret < 0 {
+		return false
+	}
+	return ret == 1
+}
+
+// GetInt64 gets a property by int64 key.
+func (v *Value) GetInt64(idx int64) *Value {
+	if !v.hasValidContext() {
+		return nil
+	}
+	return &Value{ctx: v.ctx, ref: C.JS_GetPropertyInt64(v.ctx.ref, v.ref, C.int64_t(idx))}
+}
+
+// SetInt64 sets a property by int64 key.
+func (v *Value) SetInt64(idx int64, val *Value) bool {
+	if !v.isAlive() || !val.belongsTo(v.ctx) {
+		return false
+	}
+	dup := C.JS_DupValue(v.ctx.ref, val.ref)
+	ret := C.JS_SetPropertyInt64(v.ctx.ref, v.ref, C.int64_t(idx), dup)
+	if ret < 0 {
+		return false
+	}
+	return ret == 1
 }
 
 // Prototype returns the object's prototype value.

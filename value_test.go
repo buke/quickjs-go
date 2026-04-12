@@ -196,6 +196,193 @@ func TestValueObjectControlAPIsInvalidReceiver(t *testing.T) {
 	require.False(t, nilValue.SetPrototype(nil))
 }
 
+func TestValuePropertyDescriptorAndAtomInt64APIs(t *testing.T) {
+	useStableOwnerHooksForLegacySubtests(t)
+
+	const (
+		propConfigurable    = 1 << 0
+		propWritable        = 1 << 1
+		propHasConfigurable = 1 << 8
+		propHasWritable     = 1 << 9
+		propHasValue        = 1 << 13
+	)
+
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	obj := ctx.NewObject()
+	defer obj.Free()
+
+	v := ctx.NewInt32(7)
+	defer v.Free()
+	require.True(t, obj.DefinePropertyValue("x", v, 0))
+	x := obj.Get("x")
+	defer x.Free()
+	require.Equal(t, int32(7), x.ToInt32())
+
+	atomX := ctx.NewAtom("x2")
+	defer atomX.Free()
+	v2Local := ctx.NewInt32(8)
+	defer v2Local.Free()
+	require.True(t, obj.DefinePropertyAtom(atomX, PropertyDescriptor{
+		Flags: propHasValue | propHasWritable | propHasConfigurable | propWritable | propConfigurable,
+		Value: v2Local,
+	}))
+	x2 := obj.Get("x2")
+	defer x2.Free()
+	require.Equal(t, int32(8), x2.ToInt32())
+
+	v3Local := ctx.NewInt32(11)
+	defer v3Local.Free()
+	require.True(t, obj.DefineProperty("x3", PropertyDescriptor{
+		Flags: propHasValue | propHasWritable | propHasConfigurable | propWritable | propConfigurable,
+		Value: v3Local,
+	}))
+	x3 := obj.Get("x3")
+	defer x3.Free()
+	require.Equal(t, int32(11), x3.ToInt32())
+
+	getter := ctx.Eval(`(function(){ return 42; })`)
+	defer getter.Free()
+	setter := ctx.Eval(`(function(v){ this._s = v; })`)
+	defer setter.Free()
+	require.True(t, obj.DefinePropertyGetSet("gs", getter, setter, 0))
+
+	atomGS := ctx.NewAtom("gs2")
+	defer atomGS.Free()
+	require.True(t, obj.DefinePropertyAtom(atomGS, PropertyDescriptor{
+		Getter: getter,
+		Setter: setter,
+	}))
+
+	setVal := ctx.NewInt32(9)
+	defer setVal.Free()
+	obj.Set("gs", setVal)
+	s := obj.Get("_s")
+	defer s.Free()
+	require.Equal(t, int32(9), s.ToInt32())
+	obj.Set("gs2", setVal)
+	s2 := obj.Get("_s")
+	defer s2.Free()
+	require.Equal(t, int32(9), s2.ToInt32())
+
+	desc, ok := obj.OwnProperty("x")
+	require.True(t, ok)
+	require.NotNil(t, desc)
+	require.NotNil(t, desc.Value)
+	require.NotNil(t, desc.Getter)
+	require.NotNil(t, desc.Setter)
+	defer desc.Value.Free()
+	defer desc.Getter.Free()
+	defer desc.Setter.Free()
+	require.Equal(t, int32(7), desc.Value.ToInt32())
+
+	missing, found := obj.OwnProperty("missing")
+	require.False(t, found)
+	require.Nil(t, missing)
+
+	atomKey := ctx.NewAtom("a")
+	defer atomKey.Free()
+	atomVal := ctx.NewString("ok")
+	defer atomVal.Free()
+	require.True(t, obj.SetAtom(atomKey, atomVal))
+	gotAtomVal := obj.GetAtom(atomKey)
+	require.NotNil(t, gotAtomVal)
+	defer gotAtomVal.Free()
+	require.Equal(t, "ok", gotAtomVal.ToString())
+
+	int64Val := ctx.NewString("i64")
+	defer int64Val.Free()
+	require.True(t, obj.SetInt64(123456789, int64Val))
+	gotInt64Val := obj.GetInt64(123456789)
+	require.NotNil(t, gotInt64Val)
+	defer gotInt64Val.Free()
+	require.Equal(t, "i64", gotInt64Val.ToString())
+
+	ctx2 := rt.NewContext()
+	defer ctx2.Close()
+	v2 := ctx2.NewInt32(1)
+	defer v2.Free()
+	atom2 := ctx2.NewAtom("b")
+	defer atom2.Free()
+
+	require.False(t, obj.DefinePropertyValue("bad", v2, 0))
+	require.False(t, obj.DefinePropertyGetSet("badGetter", v2, setter, 0))
+	require.False(t, obj.DefinePropertyGetSet("bad2", getter, v2, 0))
+	require.False(t, obj.DefinePropertyAtom(atomKey, PropertyDescriptor{Getter: v2}))
+	require.False(t, obj.DefinePropertyAtom(atomKey, PropertyDescriptor{Setter: v2}))
+	require.False(t, obj.DefinePropertyAtom(atom2, PropertyDescriptor{Value: v}))
+	require.False(t, obj.DefinePropertyAtom(nil, PropertyDescriptor{Value: v}))
+
+	closedRT := NewRuntime()
+	closedCtx := closedRT.NewContext()
+	closedAtom := closedCtx.NewAtom("closed")
+	closedCtx.Close()
+	require.False(t, obj.DefinePropertyAtom(closedAtom, PropertyDescriptor{Value: v}))
+	closedRT.Close()
+
+	require.Nil(t, obj.GetAtom(atom2))
+	require.False(t, obj.SetAtom(atom2, atomVal))
+	require.False(t, obj.SetInt64(1, v2))
+
+	nilObj := (*Value)(nil)
+	require.False(t, nilObj.DefineProperty("x", PropertyDescriptor{}))
+	require.False(t, nilObj.DefinePropertyValue("x", v, 0))
+	require.False(t, nilObj.DefinePropertyGetSet("x", getter, setter, 0))
+	nilDesc, nilDescOK := nilObj.OwnProperty("x")
+	require.False(t, nilDescOK)
+	require.Nil(t, nilDesc)
+	require.Nil(t, nilObj.GetAtom(atomKey))
+	require.False(t, nilObj.SetAtom(atomKey, atomVal))
+	require.Nil(t, nilObj.GetInt64(1))
+	require.False(t, nilObj.SetInt64(1, atomVal))
+
+	require.False(t, obj.DefineProperty("bad3", PropertyDescriptor{Value: v2}))
+
+	throwDefineProxy := ctx.Eval(`
+		new Proxy({}, {
+			defineProperty() { throw new Error('define trap error') }
+		})
+	`)
+	defer throwDefineProxy.Free()
+	require.False(t, throwDefineProxy.IsException())
+	require.False(t, throwDefineProxy.DefinePropertyValue("p", v, 0))
+	require.Error(t, ctx.Exception())
+	require.False(t, throwDefineProxy.DefinePropertyGetSet("q", getter, setter, 0))
+	require.Error(t, ctx.Exception())
+	require.False(t, throwDefineProxy.DefinePropertyAtom(atomKey, PropertyDescriptor{
+		Flags: propHasValue | propHasWritable | propHasConfigurable | propWritable | propConfigurable,
+		Value: v,
+	}))
+	require.Error(t, ctx.Exception())
+
+	throwOwnPropertyProxy := ctx.Eval(`
+		new Proxy({}, {
+			getOwnPropertyDescriptor() { throw new Error('gopd trap error') }
+		})
+	`)
+	defer throwOwnPropertyProxy.Free()
+	require.False(t, throwOwnPropertyProxy.IsException())
+	badDesc, badOk := throwOwnPropertyProxy.OwnProperty("x")
+	require.False(t, badOk)
+	require.Nil(t, badDesc)
+	require.Error(t, ctx.Exception())
+
+	throwSetProxy := ctx.Eval(`
+		new Proxy({}, {
+			set() { throw new Error('set trap error') }
+		})
+	`)
+	defer throwSetProxy.Free()
+	require.False(t, throwSetProxy.IsException())
+	require.False(t, throwSetProxy.SetAtom(atomKey, atomVal))
+	require.Error(t, ctx.Exception())
+	require.False(t, throwSetProxy.SetInt64(123, atomVal))
+	require.Error(t, ctx.Exception())
+}
+
 // TestValueConversions tests type conversions including deprecated methods
 func TestValueConversions(t *testing.T) {
 	useStableOwnerHooksForLegacySubtests(t)

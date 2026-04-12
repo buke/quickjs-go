@@ -740,6 +740,15 @@ func (ctx *Context) NewAtomIdx(idx uint32) *Atom {
 	return &Atom{ctx: ctx, ref: C.JS_NewAtomUInt32(ctx.ref, C.uint32_t(idx))}
 }
 
+// AtomFromValue converts a value to an atom key.
+func (ctx *Context) AtomFromValue(v *Value) *Atom {
+	if ctx == nil || !ctx.hasValidRef() || !v.belongsTo(ctx) {
+		return nil
+	}
+	atom := C.JS_ValueToAtom(ctx.ref, v.ref)
+	return &Atom{ctx: ctx, ref: atom}
+}
+
 // AtomIdx returns a new Atom value with given idx.
 // Deprecated: Use NewAtomIdx() instead.
 func (ctx *Context) AtomIdx(idx uint32) *Atom {
