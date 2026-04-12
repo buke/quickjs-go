@@ -227,9 +227,7 @@ char *skip_prefix(const char *str, const char *prefix)
 
 char *get_basename(const char *filename)
 {
-    char *p;
-
-    p = strrchr(filename, '/');
+    const char *p = strrchr(filename, '/');
     if (!p)
         return NULL;
     return strdup_len(filename, p - filename);
@@ -1828,10 +1826,10 @@ int run_test(ThreadLocalStorage *tls, const char *filename, int *msec)
     harness = harness_dir;
 
     if (!harness) {
-        p = strstr(filename, "test/");
-        if (p) {
+        const char *p1 = strstr(filename, "test/");
+        if (p1) {
             snprintf(harnessbuf, sizeof(harnessbuf), "%.*s%s",
-                     (int)(p - filename), filename, "harness");
+                     (int)(p1 - filename), filename, "harness");
         }
         harness = harnessbuf;
     }
@@ -1990,7 +1988,7 @@ int run_test(ThreadLocalStorage *tls, const char *filename, int *msec)
 
 /* run a test when called by test262-harness+eshost */
 int run_test262_harness_test(ThreadLocalStorage *tls, const char *filename,
-                             bool is_module)
+                             bool is_module, bool can_block)
 {
     JSRuntime *rt;
     JSContext *ctx;
@@ -1998,7 +1996,6 @@ int run_test262_harness_test(ThreadLocalStorage *tls, const char *filename,
     size_t buf_len;
     int eval_flags, ret_code, ret;
     JSValue res_val;
-    bool can_block;
 
     outfile = stdout; /* for js_print_262 */
 
@@ -2015,7 +2012,6 @@ int run_test262_harness_test(ThreadLocalStorage *tls, const char *filename,
     }
     JS_SetRuntimeInfo(rt, filename);
 
-    can_block = true;
     JS_SetCanBlock(rt, can_block);
 
     /* loader for ES6 modules */
@@ -2138,7 +2134,8 @@ void help(void)
            "-d dir         run all test files in directory tree 'dir'\n"
            "-e file        load the known errors from 'file'\n"
            "-f file        execute single test from 'file'\n"
-           "-x file        exclude tests listed in 'file'\n",
+           "-x file        exclude tests listed in 'file'\n"
+           "--no-can-block set [[CanBlock]] to false (Atomics.wait will throw)\n",
            JS_GetVersion());
     exit(1);
 }
@@ -2161,6 +2158,7 @@ int main(int argc, char **argv)
     const char *ignore = "";
     bool is_test262_harness = false;
     bool is_module = false;
+    bool can_block = true;
     bool enable_progress = true;
 
     js_std_set_worker_new_context_func(JS_NewCustomContext);
@@ -2229,6 +2227,8 @@ int main(int argc, char **argv)
             is_test262_harness = true;
         } else if (str_equal(arg, "--module")) {
             is_module = true;
+        } else if (str_equal(arg, "--no-can-block")) {
+            can_block = false;
         } else {
             fatal(1, "unknown option: %s", arg);
             break;
@@ -2239,7 +2239,7 @@ int main(int argc, char **argv)
         help();
 
     if (is_test262_harness) {
-        return run_test262_harness_test(tls, argv[optind], is_module);
+        return run_test262_harness_test(tls, argv[optind], is_module, can_block);
     }
 
     nthreads = max_int(nthreads, 1);
