@@ -71,6 +71,8 @@ jobs:
         if: steps.changes.outputs.changed == 'true'
         uses: peter-evans/create-pull-request@v8
         with:
+          # Use a PAT when available so the created PR can trigger other workflows (e.g. test.yml).
+          token: ${{ secrets.QUICKJS_NG_SYNC_TOKEN || secrets.GITHUB_TOKEN }}
           branch: automation/quickjs-ng-${{ steps.changes.outputs.release_tag }}
           delete-branch: true
           commit-message: "chore: sync quickjs-ng release ${{ steps.changes.outputs.release_tag }}"
