@@ -7,7 +7,9 @@ package quickjs
 import "C"
 import (
 	"errors"
+	"fmt"
 	goruntime "runtime"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"unsafe"
@@ -37,6 +39,8 @@ var runtimeEvalFunctionHook func(ctx *C.JSContext, compiled C.JSValue) C.JSValue
 // to force bootstrap failure paths. They must remain nil in production.
 var runtimeBootstrapStdOSHook func(ctx *Context) bool
 var runtimeBootstrapTimersHook func(ctx *Context) bool
+var runtimeApplyIntrinsicsHook func(ctx *C.JSContext, set IntrinsicSet) (handled bool, ok bool)
+var runtimeApplyIntrinsicStepHook func(name string) (handled bool, ok bool)
 
 // runtimeBootstrapStdOSInitHook is used in tests to force std/os init
 // outcomes while keeping BootstrapStdOS owner/liveness checks active.
@@ -58,6 +62,7 @@ type classObjectIdentity struct {
 type Runtime struct {
 	mu                     sync.RWMutex
 	ref                    *C.JSRuntime
+	runtimeInfo            *C.char
 	options                *Options
 	ownerGoroutineID       atomic.Uint64
 	ownerThreadID          atomic.Uint64
@@ -101,6 +106,164 @@ type ContextBootstrapOptions struct {
 }
 
 type ContextBootstrapOption func(*ContextBootstrapOptions)
+
+// MemoryUsage mirrors QuickJS JSMemoryUsage fields.
+type MemoryUsage struct {
+	MallocSize         int64
+	MallocLimit        int64
+	MemoryUsedSize     int64
+	MallocCount        int64
+	MemoryUsedCount    int64
+	AtomCount          int64
+	AtomSize           int64
+	StrCount           int64
+	StrSize            int64
+	ObjCount           int64
+	ObjSize            int64
+	PropCount          int64
+	PropSize           int64
+	ShapeCount         int64
+	ShapeSize          int64
+	JSFuncCount        int64
+	JSFuncSize         int64
+	JSFuncCodeSize     int64
+	JSFuncPC2LineCount int64
+	JSFuncPC2LineSize  int64
+	CFuncCount         int64
+	ArrayCount         int64
+	FastArrayCount     int64
+	FastArrayElements  int64
+	BinaryObjectCount  int64
+	BinaryObjectSize   int64
+}
+
+// IntrinsicSet controls which QuickJS intrinsics are injected into a raw context.
+type IntrinsicSet struct {
+	BaseObjects  bool
+	Date         bool
+	Eval         bool
+	RegExp       bool
+	JSON         bool
+	Proxy        bool
+	MapSet       bool
+	TypedArrays  bool
+	Promise      bool
+	BigInt       bool
+	WeakRef      bool
+	Performance  bool
+	DOMException bool
+}
+
+// IntrinsicOption modifies IntrinsicSet.
+type IntrinsicOption func(*IntrinsicSet)
+
+// NewIntrinsicSet builds an IntrinsicSet from options.
+func NewIntrinsicSet(opts ...IntrinsicOption) IntrinsicSet {
+	set := IntrinsicSet{}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(&set)
+		}
+	}
+	return normalizeIntrinsicSet(set)
+}
+
+// AllIntrinsics enables all QuickJS intrinsics.
+func AllIntrinsics() IntrinsicSet {
+	return IntrinsicSet{
+		BaseObjects:  true,
+		Date:         true,
+		Eval:         true,
+		RegExp:       true,
+		JSON:         true,
+		Proxy:        true,
+		MapSet:       true,
+		TypedArrays:  true,
+		Promise:      true,
+		BigInt:       true,
+		WeakRef:      true,
+		Performance:  true,
+		DOMException: true,
+	}
+}
+
+// MinimalIntrinsics enables only base language objects.
+func MinimalIntrinsics() IntrinsicSet {
+	return IntrinsicSet{BaseObjects: true}
+}
+
+// WithBaseObjects toggles base object intrinsic injection.
+func WithBaseObjects(enabled bool) IntrinsicOption {
+	return func(s *IntrinsicSet) { s.BaseObjects = enabled }
+}
+
+// WithDate toggles Date intrinsic injection.
+func WithDate(enabled bool) IntrinsicOption {
+	return func(s *IntrinsicSet) { s.Date = enabled }
+}
+
+// WithEval toggles eval intrinsic injection.
+func WithEval(enabled bool) IntrinsicOption {
+	return func(s *IntrinsicSet) { s.Eval = enabled }
+}
+
+// WithRegExp toggles RegExp intrinsic injection.
+func WithRegExp(enabled bool) IntrinsicOption {
+	return func(s *IntrinsicSet) { s.RegExp = enabled }
+}
+
+// WithJSON toggles JSON intrinsic injection.
+func WithJSON(enabled bool) IntrinsicOption {
+	return func(s *IntrinsicSet) { s.JSON = enabled }
+}
+
+// WithProxy toggles Proxy intrinsic injection.
+func WithProxy(enabled bool) IntrinsicOption {
+	return func(s *IntrinsicSet) { s.Proxy = enabled }
+}
+
+// WithMapSet toggles Map/Set intrinsic injection.
+func WithMapSet(enabled bool) IntrinsicOption {
+	return func(s *IntrinsicSet) { s.MapSet = enabled }
+}
+
+// WithTypedArrays toggles typed-array intrinsic injection.
+func WithTypedArrays(enabled bool) IntrinsicOption {
+	return func(s *IntrinsicSet) { s.TypedArrays = enabled }
+}
+
+// WithPromise toggles Promise intrinsic injection.
+func WithPromise(enabled bool) IntrinsicOption {
+	return func(s *IntrinsicSet) { s.Promise = enabled }
+}
+
+// WithBigInt toggles BigInt intrinsic injection.
+func WithBigInt(enabled bool) IntrinsicOption {
+	return func(s *IntrinsicSet) { s.BigInt = enabled }
+}
+
+// WithWeakRef toggles WeakRef intrinsic injection.
+func WithWeakRef(enabled bool) IntrinsicOption {
+	return func(s *IntrinsicSet) { s.WeakRef = enabled }
+}
+
+// WithPerformance toggles performance intrinsic injection.
+func WithPerformance(enabled bool) IntrinsicOption {
+	return func(s *IntrinsicSet) { s.Performance = enabled }
+}
+
+// WithDOMException toggles DOMException intrinsic injection.
+func WithDOMException(enabled bool) IntrinsicOption {
+	return func(s *IntrinsicSet) { s.DOMException = enabled }
+}
+
+func normalizeIntrinsicSet(set IntrinsicSet) IntrinsicSet {
+	if set.Date || set.Eval || set.RegExp || set.JSON || set.Proxy || set.MapSet ||
+		set.TypedArrays || set.Promise || set.BigInt || set.WeakRef || set.Performance || set.DOMException {
+		set.BaseObjects = true
+	}
+	return set
+}
 
 // DefaultBootstrap enables the same bootstrap pipeline as Runtime.NewContext:
 // std/os module registration plus global timer injection.
@@ -451,6 +614,10 @@ func (r *Runtime) Close() {
 		}
 
 		C.JS_FreeRuntime(ref)
+		if r.runtimeInfo != nil {
+			C.free(unsafe.Pointer(r.runtimeInfo))
+			r.runtimeInfo = nil
+		}
 		r.ref = nil
 	})
 }
@@ -502,6 +669,161 @@ func (r *Runtime) SetGCThreshold(threshold int64) {
 		return
 	}
 	C.JS_SetGCThreshold(r.ref, C.size_t(threshold))
+}
+
+// GCThreshold returns the runtime GC threshold.
+func (r *Runtime) GCThreshold() uint64 {
+	if r == nil {
+		return 0
+	}
+	if !r.ensureOwnerAccess() {
+		return 0
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if r.closed.Load() || r.ref == nil {
+		return 0
+	}
+	return uint64(C.JS_GetGCThreshold(r.ref))
+}
+
+// SetDumpFlags configures runtime dump flags.
+func (r *Runtime) SetDumpFlags(flags uint64) {
+	if r == nil {
+		return
+	}
+	if !r.ensureOwnerAccess() {
+		return
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if r.closed.Load() || r.ref == nil {
+		return
+	}
+	C.JS_SetDumpFlags(r.ref, C.uint64_t(flags))
+}
+
+// DumpFlags returns runtime dump flags.
+func (r *Runtime) DumpFlags() uint64 {
+	if r == nil {
+		return 0
+	}
+	if !r.ensureOwnerAccess() {
+		return 0
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if r.closed.Load() || r.ref == nil {
+		return 0
+	}
+	return uint64(C.JS_GetDumpFlags(r.ref))
+}
+
+// SetInfo sets runtime informational string.
+func (r *Runtime) SetInfo(info string) {
+	if r == nil {
+		return
+	}
+	if !r.ensureOwnerAccess() {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.closed.Load() || r.ref == nil {
+		return
+	}
+	if r.runtimeInfo != nil {
+		C.free(unsafe.Pointer(r.runtimeInfo))
+		r.runtimeInfo = nil
+	}
+	if info == "" {
+		C.JS_SetRuntimeInfo(r.ref, nil)
+		return
+	}
+	r.runtimeInfo = C.CString(info)
+	C.JS_SetRuntimeInfo(r.ref, r.runtimeInfo)
+}
+
+// MemoryUsage returns runtime memory usage snapshot.
+func (r *Runtime) MemoryUsage() MemoryUsage {
+	if r == nil {
+		return MemoryUsage{}
+	}
+	if !r.ensureOwnerAccess() {
+		return MemoryUsage{}
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if r.closed.Load() || r.ref == nil {
+		return MemoryUsage{}
+	}
+
+	var s C.JSMemoryUsage
+	C.JS_ComputeMemoryUsage(r.ref, &s)
+
+	return MemoryUsage{
+		MallocSize:         int64(s.malloc_size),
+		MallocLimit:        int64(s.malloc_limit),
+		MemoryUsedSize:     int64(s.memory_used_size),
+		MallocCount:        int64(s.malloc_count),
+		MemoryUsedCount:    int64(s.memory_used_count),
+		AtomCount:          int64(s.atom_count),
+		AtomSize:           int64(s.atom_size),
+		StrCount:           int64(s.str_count),
+		StrSize:            int64(s.str_size),
+		ObjCount:           int64(s.obj_count),
+		ObjSize:            int64(s.obj_size),
+		PropCount:          int64(s.prop_count),
+		PropSize:           int64(s.prop_size),
+		ShapeCount:         int64(s.shape_count),
+		ShapeSize:          int64(s.shape_size),
+		JSFuncCount:        int64(s.js_func_count),
+		JSFuncSize:         int64(s.js_func_size),
+		JSFuncCodeSize:     int64(s.js_func_code_size),
+		JSFuncPC2LineCount: int64(s.js_func_pc2line_count),
+		JSFuncPC2LineSize:  int64(s.js_func_pc2line_size),
+		CFuncCount:         int64(s.c_func_count),
+		ArrayCount:         int64(s.array_count),
+		FastArrayCount:     int64(s.fast_array_count),
+		FastArrayElements:  int64(s.fast_array_elements),
+		BinaryObjectCount:  int64(s.binary_object_count),
+		BinaryObjectSize:   int64(s.binary_object_size),
+	}
+}
+
+// DumpMemoryUsage returns a human-readable memory usage summary.
+func (r *Runtime) DumpMemoryUsage() string {
+	if r == nil {
+		return ""
+	}
+	if !r.ensureOwnerAccess() {
+		return ""
+	}
+	r.mu.RLock()
+	if r.closed.Load() || r.ref == nil {
+		r.mu.RUnlock()
+		return ""
+	}
+	r.mu.RUnlock()
+
+	usage := r.MemoryUsage()
+	var b strings.Builder
+	fmt.Fprintf(&b, "malloc_size=%d\n", usage.MallocSize)
+	fmt.Fprintf(&b, "malloc_limit=%d\n", usage.MallocLimit)
+	fmt.Fprintf(&b, "memory_used_size=%d\n", usage.MemoryUsedSize)
+	fmt.Fprintf(&b, "malloc_count=%d\n", usage.MallocCount)
+	fmt.Fprintf(&b, "memory_used_count=%d\n", usage.MemoryUsedCount)
+	fmt.Fprintf(&b, "atom_count=%d atom_size=%d\n", usage.AtomCount, usage.AtomSize)
+	fmt.Fprintf(&b, "str_count=%d str_size=%d\n", usage.StrCount, usage.StrSize)
+	fmt.Fprintf(&b, "obj_count=%d obj_size=%d\n", usage.ObjCount, usage.ObjSize)
+	fmt.Fprintf(&b, "prop_count=%d prop_size=%d\n", usage.PropCount, usage.PropSize)
+	fmt.Fprintf(&b, "shape_count=%d shape_size=%d\n", usage.ShapeCount, usage.ShapeSize)
+	fmt.Fprintf(&b, "js_func_count=%d js_func_size=%d js_func_code_size=%d\n", usage.JSFuncCount, usage.JSFuncSize, usage.JSFuncCodeSize)
+	fmt.Fprintf(&b, "js_func_pc2line_count=%d js_func_pc2line_size=%d\n", usage.JSFuncPC2LineCount, usage.JSFuncPC2LineSize)
+	fmt.Fprintf(&b, "c_func_count=%d array_count=%d\n", usage.CFuncCount, usage.ArrayCount)
+	fmt.Fprintf(&b, "fast_array_count=%d fast_array_elements=%d\n", usage.FastArrayCount, usage.FastArrayElements)
+	fmt.Fprintf(&b, "binary_object_count=%d binary_object_size=%d", usage.BinaryObjectCount, usage.BinaryObjectSize)
+	return b.String()
 }
 
 // SetMaxStackSize will set max runtime's stack size;
@@ -637,6 +959,100 @@ func (r *Runtime) NewContext() *Context {
 // NewBareContext creates a JavaScript context without host bootstrap.
 func (r *Runtime) NewBareContext() *Context {
 	return r.NewContextWithOptions(NoBootstrap())
+}
+
+// NewContextRaw creates a raw QuickJS context and applies selected intrinsics.
+func (r *Runtime) NewContextRaw(intrinsics IntrinsicSet) *Context {
+	if r == nil {
+		return nil
+	}
+	if !r.ensureOwnerAccess() {
+		return nil
+	}
+
+	set := normalizeIntrinsicSet(intrinsics)
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.closed.Load() || r.ref == nil {
+		return nil
+	}
+
+	if !r.stdHandlersInitialized {
+		C.js_std_init_handlers(r.ref)
+		r.stdHandlersInitialized = true
+	}
+
+	var ctxRef *C.JSContext
+	if runtimeNewContextHook != nil {
+		ctxRef = runtimeNewContextHook(r.ref)
+	} else {
+		ctxRef = C.JS_NewContextRaw(r.ref)
+	}
+	if ctxRef == nil {
+		return nil
+	}
+
+	ctx := &Context{
+		contextID:   r.nextContextID(),
+		ref:         ctxRef,
+		runtime:     r,
+		handleStore: newHandleStore(),
+	}
+	ctx.initScheduler()
+
+	registerContext(ctxRef, ctx)
+	r.registerOwnedContext(ctx)
+
+	applyOK := false
+	if runtimeApplyIntrinsicsHook != nil {
+		handled, ok := runtimeApplyIntrinsicsHook(ctxRef, set)
+		if handled {
+			applyOK = ok
+		} else {
+			applyOK = applyIntrinsics(ctxRef, set)
+		}
+	} else {
+		applyOK = applyIntrinsics(ctxRef, set)
+	}
+
+	if !applyOK {
+		ctx.Close()
+		return nil
+	}
+
+	return ctx
+}
+
+func applyIntrinsics(ctxRef *C.JSContext, set IntrinsicSet) bool {
+	applyStep := func(name string, enabled bool, fn func() C.int) bool {
+		if !enabled {
+			return true
+		}
+		if runtimeApplyIntrinsicStepHook != nil {
+			handled, ok := runtimeApplyIntrinsicStepHook(name)
+			if handled {
+				return ok
+			}
+		}
+		return fn() >= 0
+	}
+	return applyStep("BaseObjects", set.BaseObjects, func() C.int { return C.JS_AddIntrinsicBaseObjects(ctxRef) }) &&
+		applyStep("Date", set.Date, func() C.int { return C.JS_AddIntrinsicDate(ctxRef) }) &&
+		applyStep("Eval", set.Eval, func() C.int { return C.JS_AddIntrinsicEval(ctxRef) }) &&
+		applyStep("RegExp", set.RegExp, func() C.int {
+			C.JS_AddIntrinsicRegExpCompiler(ctxRef)
+			return C.JS_AddIntrinsicRegExp(ctxRef)
+		}) &&
+		applyStep("JSON", set.JSON, func() C.int { return C.JS_AddIntrinsicJSON(ctxRef) }) &&
+		applyStep("Proxy", set.Proxy, func() C.int { return C.JS_AddIntrinsicProxy(ctxRef) }) &&
+		applyStep("MapSet", set.MapSet, func() C.int { return C.JS_AddIntrinsicMapSet(ctxRef) }) &&
+		applyStep("TypedArrays", set.TypedArrays, func() C.int { return C.JS_AddIntrinsicTypedArrays(ctxRef) }) &&
+		applyStep("Promise", set.Promise, func() C.int { return C.JS_AddIntrinsicPromise(ctxRef) }) &&
+		applyStep("BigInt", set.BigInt, func() C.int { return C.JS_AddIntrinsicBigInt(ctxRef) }) &&
+		applyStep("WeakRef", set.WeakRef, func() C.int { return C.JS_AddIntrinsicWeakRef(ctxRef) }) &&
+		applyStep("Performance", set.Performance, func() C.int { return C.JS_AddPerformance(ctxRef) }) &&
+		applyStep("DOMException", set.DOMException, func() C.int { return C.JS_AddIntrinsicDOMException(ctxRef) })
 }
 
 // BootstrapStdOS registers std/os modules for the given context.
@@ -1030,6 +1446,47 @@ func forceRuntimeInitSuccessForTest(enable bool) func() {
 	}
 	return func() {
 		runtimeInitContextHook = oldHook
+	}
+}
+
+func forceRuntimeApplyIntrinsicsFailureForTest(enable bool) func() {
+	oldHook := runtimeApplyIntrinsicsHook
+	if enable {
+		runtimeApplyIntrinsicsHook = func(ctx *C.JSContext, set IntrinsicSet) (bool, bool) {
+			return true, false
+		}
+	} else {
+		runtimeApplyIntrinsicsHook = nil
+	}
+	return func() {
+		runtimeApplyIntrinsicsHook = oldHook
+	}
+}
+
+func forceRuntimeApplyIntrinsicsPassthroughHookForTest(enable bool) func() {
+	oldHook := runtimeApplyIntrinsicsHook
+	if enable {
+		runtimeApplyIntrinsicsHook = func(ctx *C.JSContext, set IntrinsicSet) (bool, bool) {
+			return false, false
+		}
+	} else {
+		runtimeApplyIntrinsicsHook = nil
+	}
+	return func() {
+		runtimeApplyIntrinsicsHook = oldHook
+	}
+}
+
+func forceRuntimeApplyIntrinsicStepFailureForTest(step string) func() {
+	oldHook := runtimeApplyIntrinsicStepHook
+	runtimeApplyIntrinsicStepHook = func(name string) (bool, bool) {
+		if name == step {
+			return true, false
+		}
+		return false, false
+	}
+	return func() {
+		runtimeApplyIntrinsicStepHook = oldHook
 	}
 }
 
