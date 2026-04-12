@@ -408,6 +408,12 @@ func TestAtomDupAndContextAtomFromValue(t *testing.T) {
 	defer objAtom.Free()
 	require.Equal(t, "[object Object]", objAtom.ToString())
 
+	badKey := ctx.Eval(`({ toString(){ throw new Error('boom') } })`)
+	defer badKey.Free()
+	require.False(t, badKey.IsException())
+	require.Nil(t, ctx.AtomFromValue(badKey))
+	require.Error(t, ctx.Exception())
+
 	var nilAtom *Atom
 	require.Nil(t, nilAtom.Dup())
 

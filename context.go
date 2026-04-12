@@ -746,6 +746,9 @@ func (ctx *Context) AtomFromValue(v *Value) *Atom {
 		return nil
 	}
 	atom := C.JS_ValueToAtom(ctx.ref, v.ref)
+	if atom == C.JS_ATOM_NULL {
+		return nil
+	}
 	return &Atom{ctx: ctx, ref: atom}
 }
 

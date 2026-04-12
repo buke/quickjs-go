@@ -199,14 +199,6 @@ func TestValueObjectControlAPIsInvalidReceiver(t *testing.T) {
 func TestValuePropertyDescriptorAndAtomInt64APIs(t *testing.T) {
 	useStableOwnerHooksForLegacySubtests(t)
 
-	const (
-		propConfigurable    = 1 << 0
-		propWritable        = 1 << 1
-		propHasConfigurable = 1 << 8
-		propHasWritable     = 1 << 9
-		propHasValue        = 1 << 13
-	)
-
 	rt := NewRuntime()
 	defer rt.Close()
 	ctx := rt.NewContext()
@@ -227,7 +219,7 @@ func TestValuePropertyDescriptorAndAtomInt64APIs(t *testing.T) {
 	v2Local := ctx.NewInt32(8)
 	defer v2Local.Free()
 	require.True(t, obj.DefinePropertyAtom(atomX, PropertyDescriptor{
-		Flags: propHasValue | propHasWritable | propHasConfigurable | propWritable | propConfigurable,
+		Flags: PropHasValue | PropHasWritable | PropHasConfigurable | PropWritable | PropConfigurable,
 		Value: v2Local,
 	}))
 	x2 := obj.Get("x2")
@@ -237,7 +229,7 @@ func TestValuePropertyDescriptorAndAtomInt64APIs(t *testing.T) {
 	v3Local := ctx.NewInt32(11)
 	defer v3Local.Free()
 	require.True(t, obj.DefineProperty("x3", PropertyDescriptor{
-		Flags: propHasValue | propHasWritable | propHasConfigurable | propWritable | propConfigurable,
+		Flags: PropHasValue | PropHasWritable | PropHasConfigurable | PropWritable | PropConfigurable,
 		Value: v3Local,
 	}))
 	x3 := obj.Get("x3")
@@ -353,7 +345,7 @@ func TestValuePropertyDescriptorAndAtomInt64APIs(t *testing.T) {
 	require.False(t, throwDefineProxy.DefinePropertyGetSet("q", getter, setter, 0))
 	require.Error(t, ctx.Exception())
 	require.False(t, throwDefineProxy.DefinePropertyAtom(atomKey, PropertyDescriptor{
-		Flags: propHasValue | propHasWritable | propHasConfigurable | propWritable | propConfigurable,
+		Flags: PropHasValue | PropHasWritable | PropHasConfigurable | PropWritable | PropConfigurable,
 		Value: v,
 	}))
 	require.Error(t, ctx.Exception())

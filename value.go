@@ -32,6 +32,20 @@ type PropertyDescriptor struct {
 	Setter *Value
 }
 
+// Property descriptor flags matching QuickJS JS_PROP_* constants.
+const (
+	PropConfigurable = 1 << 0
+	PropWritable     = 1 << 1
+	PropEnumerable   = 1 << 2
+
+	PropHasConfigurable = 1 << 8
+	PropHasWritable     = 1 << 9
+	PropHasEnumerable   = 1 << 10
+	PropHasGet          = 1 << 11
+	PropHasSet          = 1 << 12
+	PropHasValue        = 1 << 13
+)
+
 // hasValidContext reports whether a Value still has a usable context pointer.
 func (v *Value) hasValidContext() bool {
 	return v != nil && v.ctx != nil && v.ctx.hasValidRef()
