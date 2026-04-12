@@ -145,6 +145,43 @@ func TestValueObjectControlAPIs(t *testing.T) {
 	otherProto := ctx2.NewObject()
 	defer otherProto.Free()
 	require.False(t, obj.SetPrototype(otherProto))
+
+	// Hit explicit tri-state exception branches via Proxy traps that throw.
+	extensibleThrowProxy := ctx.Eval(`
+		new Proxy({}, {
+			isExtensible() { throw new Error('isExtensible trap error') }
+		})
+	`)
+	defer extensibleThrowProxy.Free()
+	require.False(t, extensibleThrowProxy.IsException())
+	require.False(t, extensibleThrowProxy.IsExtensible())
+
+	preventThrowProxy := ctx.Eval(`
+		new Proxy({}, {
+			preventExtensions() { throw new Error('preventExtensions trap error') }
+		})
+	`)
+	defer preventThrowProxy.Free()
+	require.False(t, preventThrowProxy.IsException())
+	require.False(t, preventThrowProxy.PreventExtensions())
+
+	sealThrowProxy := ctx.Eval(`
+		new Proxy({}, {
+			preventExtensions() { throw new Error('seal preventExtensions trap error') }
+		})
+	`)
+	defer sealThrowProxy.Free()
+	require.False(t, sealThrowProxy.IsException())
+	require.False(t, sealThrowProxy.Seal())
+
+	freezeThrowProxy := ctx.Eval(`
+		new Proxy({}, {
+			preventExtensions() { throw new Error('freeze preventExtensions trap error') }
+		})
+	`)
+	defer freezeThrowProxy.Free()
+	require.False(t, freezeThrowProxy.IsException())
+	require.False(t, freezeThrowProxy.Freeze())
 }
 
 func TestValueObjectControlAPIsInvalidReceiver(t *testing.T) {
