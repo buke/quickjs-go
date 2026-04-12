@@ -134,6 +134,157 @@ func TestRuntimeConfiguration(t *testing.T) {
 	require.Equal(t, "configuration test", result.ToString())
 }
 
+func TestRuntimeDiagnosticsAndRawContext(t *testing.T) {
+	rt := NewRuntime()
+	defer rt.Close()
+
+	rt.SetGCThreshold(4096)
+	require.EqualValues(t, 4096, rt.GCThreshold())
+
+	rt.SetDumpFlags(0)
+	require.EqualValues(t, 0, rt.DumpFlags())
+
+	rt.SetInfo("quickjs-go stage3 diagnostics")
+
+	usage := rt.MemoryUsage()
+	require.GreaterOrEqual(t, usage.MallocSize, int64(0))
+	require.GreaterOrEqual(t, usage.MemoryUsedSize, int64(0))
+
+	dump := rt.DumpMemoryUsage()
+	require.NotEmpty(t, dump)
+	require.Contains(t, dump, "malloc_size=")
+
+	minimalCtx := rt.NewContextRaw(MinimalIntrinsics())
+	require.NotNil(t, minimalCtx)
+	defer minimalCtx.Close()
+
+	withEvalCtx := rt.NewContextRaw(NewIntrinsicSet(WithEval(true)))
+	require.NotNil(t, withEvalCtx)
+	defer withEvalCtx.Close()
+
+	evalResult := withEvalCtx.Eval(`1 + 1`)
+	require.NotNil(t, evalResult)
+	defer evalResult.Free()
+	require.False(t, evalResult.IsException())
+	require.EqualValues(t, 2, evalResult.ToInt32())
+
+	all := AllIntrinsics()
+	require.True(t, all.BaseObjects)
+	require.True(t, all.Date)
+	require.True(t, all.Promise)
+	require.True(t, all.JSON)
+	require.True(t, all.RegExp)
+	require.True(t, all.DOMException)
+
+	selected := NewIntrinsicSet(WithPromise(true), WithJSON(true), WithEval(true))
+	require.True(t, selected.BaseObjects)
+	require.True(t, selected.Promise)
+	require.True(t, selected.JSON)
+	require.True(t, selected.Eval)
+}
+
+func TestRuntimeStage3CoveragePaths(t *testing.T) {
+	useStableOwnerHooksForLegacySubtests(t)
+
+	rt := NewRuntime()
+
+	full := NewIntrinsicSet(
+		WithBaseObjects(true),
+		WithDate(true),
+		WithEval(true),
+		WithRegExp(true),
+		WithJSON(true),
+		WithProxy(true),
+		WithMapSet(true),
+		WithTypedArrays(true),
+		WithPromise(true),
+		WithBigInt(true),
+		WithWeakRef(true),
+		WithPerformance(true),
+		WithDOMException(true),
+	)
+	require.True(t, full.BaseObjects)
+	require.True(t, full.Date)
+	require.True(t, full.Eval)
+	require.True(t, full.RegExp)
+	require.True(t, full.JSON)
+	require.True(t, full.Proxy)
+	require.True(t, full.MapSet)
+	require.True(t, full.TypedArrays)
+	require.True(t, full.Promise)
+	require.True(t, full.BigInt)
+	require.True(t, full.WeakRef)
+	require.True(t, full.Performance)
+	require.True(t, full.DOMException)
+
+	rtIntrinsics := NewRuntime()
+	ctx := rtIntrinsics.NewContextRaw(full)
+	require.NotNil(t, ctx)
+	ctx.Close()
+
+	rt.SetInfo("stage3")
+	rt.SetInfo("stage3-updated")
+	rt.SetInfo("")
+
+	rt.SetDumpFlags(0)
+	require.EqualValues(t, 0, rt.DumpFlags())
+
+	_ = rt.GCThreshold()
+	_ = rt.MemoryUsage()
+	require.NotEmpty(t, rt.DumpMemoryUsage())
+
+	type nonOwnerSnapshot struct {
+		gc    uint64
+		dump  uint64
+		usage MemoryUsage
+		text  string
+		ctx   *Context
+	}
+	ch := make(chan nonOwnerSnapshot, 1)
+	go func() {
+		snap := nonOwnerSnapshot{
+			gc:    rt.GCThreshold(),
+			dump:  rt.DumpFlags(),
+			usage: rt.MemoryUsage(),
+			text:  rt.DumpMemoryUsage(),
+			ctx:   rt.NewContextRaw(MinimalIntrinsics()),
+		}
+		rt.SetDumpFlags(1)
+		rt.SetInfo("non-owner")
+		ch <- snap
+	}()
+	snap := <-ch
+	_ = snap.gc
+	_ = snap.dump
+	_ = snap.usage
+	_ = snap.text
+	if snap.ctx != nil {
+		snap.ctx.Close()
+	}
+
+	rt.Close()
+	require.EqualValues(t, 0, rt.GCThreshold())
+	require.EqualValues(t, 0, rt.DumpFlags())
+	require.Equal(t, MemoryUsage{}, rt.MemoryUsage())
+	require.Equal(t, "", rt.DumpMemoryUsage())
+	require.Nil(t, rt.NewContextRaw(MinimalIntrinsics()))
+	rt.SetDumpFlags(1)
+	rt.SetInfo("closed")
+
+	rtOwnerMismatch := NewRuntime()
+	rtOwnerMismatch.ownerGoroutineID.Store(^uint64(0))
+	require.EqualValues(t, 0, rtOwnerMismatch.GCThreshold())
+	require.EqualValues(t, 0, rtOwnerMismatch.DumpFlags())
+	require.Equal(t, MemoryUsage{}, rtOwnerMismatch.MemoryUsage())
+	require.Equal(t, "", rtOwnerMismatch.DumpMemoryUsage())
+	require.Nil(t, rtOwnerMismatch.NewContextRaw(MinimalIntrinsics()))
+	rtOwnerMismatch.SetDumpFlags(1)
+	rtOwnerMismatch.SetInfo("owner-mismatch")
+
+	rtOwnerMismatch.ownerGoroutineID.Store(currentGoroutineID())
+	rtOwnerMismatch.Close()
+}
+
 func TestAwaitPollSliceMsConfig(t *testing.T) {
 	original := GetAwaitPollSliceMs()
 	t.Cleanup(func() {
@@ -914,6 +1065,12 @@ func TestRuntimeNilAndZeroValueGuards(t *testing.T) {
 	require.NotPanics(t, func() {
 		nilRT.RunGC()
 		nilRT.Close()
+		require.EqualValues(t, 0, nilRT.DumpFlags())
+		require.EqualValues(t, 0, nilRT.GCThreshold())
+		require.Equal(t, MemoryUsage{}, nilRT.MemoryUsage())
+		require.Equal(t, "", nilRT.DumpMemoryUsage())
+		nilRT.SetDumpFlags(1)
+		nilRT.SetInfo("noop")
 		nilRT.SetCanBlock(true)
 		nilRT.SetMemoryLimit(1)
 		nilRT.SetGCThreshold(1)
@@ -925,6 +1082,7 @@ func TestRuntimeNilAndZeroValueGuards(t *testing.T) {
 		nilRT.ClearInterruptHandler()
 		require.Nil(t, nilRT.NewContext())
 		require.Nil(t, nilRT.NewBareContext())
+		require.Nil(t, nilRT.NewContextRaw(MinimalIntrinsics()))
 		require.Nil(t, nilRT.NewContextWithOptions(DefaultBootstrap()))
 		require.Equal(t, 0, nilRT.callInterruptHandler())
 		nilRT.registerOwnedContext(nil)
@@ -943,6 +1101,12 @@ func TestRuntimeNilAndZeroValueGuards(t *testing.T) {
 	zeroRT := &Runtime{}
 	require.NotPanics(t, func() {
 		zeroRT.RunGC()
+		require.EqualValues(t, 0, zeroRT.DumpFlags())
+		require.EqualValues(t, 0, zeroRT.GCThreshold())
+		require.Equal(t, MemoryUsage{}, zeroRT.MemoryUsage())
+		require.Equal(t, "", zeroRT.DumpMemoryUsage())
+		zeroRT.SetDumpFlags(1)
+		zeroRT.SetInfo("noop")
 		zeroRT.SetCanBlock(true)
 		zeroRT.SetMemoryLimit(1)
 		zeroRT.SetGCThreshold(1)
@@ -959,6 +1123,7 @@ func TestRuntimeNilAndZeroValueGuards(t *testing.T) {
 		require.Zero(t, zeroRT.registerClassObjectIdentity(1, 0))
 		require.Nil(t, zeroRT.NewContext())
 		require.Nil(t, zeroRT.NewBareContext())
+		require.Nil(t, zeroRT.NewContextRaw(MinimalIntrinsics()))
 		require.Nil(t, zeroRT.NewContextWithOptions(DefaultBootstrap()))
 		zeroRT.Close()
 		zeroRT.Close()
@@ -974,6 +1139,37 @@ func TestRuntimeNewContextFailureHook(t *testing.T) {
 
 	ctx := rt.NewContext()
 	require.Nil(t, ctx)
+}
+
+func TestRuntimeNewContextRawFailureHook(t *testing.T) {
+	restore := forceRuntimeNewContextFailureForTest(true)
+	defer restore()
+
+	rt := NewRuntime()
+	defer rt.Close()
+
+	ctx := rt.NewContextRaw(MinimalIntrinsics())
+	require.Nil(t, ctx)
+}
+
+func TestRuntimeNewContextRawApplyIntrinsicsFailureHook(t *testing.T) {
+	restore := forceRuntimeApplyIntrinsicsFailureForTest(true)
+	defer restore()
+
+	rt := NewRuntime()
+	defer rt.Close()
+
+	ctx := rt.NewContextRaw(MinimalIntrinsics())
+	require.Nil(t, ctx)
+
+	restorePass := forceRuntimeApplyIntrinsicsPassthroughHookForTest(true)
+	defer restorePass()
+	ctx = rt.NewContextRaw(MinimalIntrinsics())
+	require.NotNil(t, ctx)
+	ctx.Close()
+
+	restoreNoop := forceRuntimeApplyIntrinsicsFailureForTest(false)
+	defer restoreNoop()
 }
 
 func TestRuntimeNewContextFailureHookDisable(t *testing.T) {
