@@ -1168,8 +1168,20 @@ func TestRuntimeNewContextRawApplyIntrinsicsFailureHook(t *testing.T) {
 	require.NotNil(t, ctx)
 	ctx.Close()
 
+	restoreStep := forceRuntimeApplyIntrinsicStepFailureForTest("BaseObjects")
+	defer restoreStep()
+	ctx = rt.NewContextRaw(MinimalIntrinsics())
+	require.Nil(t, ctx)
+
+	restoreStepDate := forceRuntimeApplyIntrinsicStepFailureForTest("Date")
+	defer restoreStepDate()
+	ctx = rt.NewContextRaw(NewIntrinsicSet(WithDate(true)))
+	require.Nil(t, ctx)
+
 	restoreNoop := forceRuntimeApplyIntrinsicsFailureForTest(false)
 	defer restoreNoop()
+	restorePassNoop := forceRuntimeApplyIntrinsicsPassthroughHookForTest(false)
+	defer restorePassNoop()
 }
 
 func TestRuntimeNewContextFailureHookDisable(t *testing.T) {

@@ -40,6 +40,7 @@ var runtimeEvalFunctionHook func(ctx *C.JSContext, compiled C.JSValue) C.JSValue
 var runtimeBootstrapStdOSHook func(ctx *Context) bool
 var runtimeBootstrapTimersHook func(ctx *Context) bool
 var runtimeApplyIntrinsicsHook func(ctx *C.JSContext, set IntrinsicSet) (handled bool, ok bool)
+var runtimeApplyIntrinsicStepHook func(name string) (handled bool, ok bool)
 
 // runtimeBootstrapStdOSInitHook is used in tests to force std/os init
 // outcomes while keeping BootstrapStdOS owner/liveness checks active.
@@ -1024,48 +1025,34 @@ func (r *Runtime) NewContextRaw(intrinsics IntrinsicSet) *Context {
 }
 
 func applyIntrinsics(ctxRef *C.JSContext, set IntrinsicSet) bool {
-	ok := true
-	if set.BaseObjects {
-		ok = C.JS_AddIntrinsicBaseObjects(ctxRef) >= 0 && ok
+	applyStep := func(name string, enabled bool, fn func() C.int) bool {
+		if !enabled {
+			return true
+		}
+		if runtimeApplyIntrinsicStepHook != nil {
+			handled, ok := runtimeApplyIntrinsicStepHook(name)
+			if handled {
+				return ok
+			}
+		}
+		return fn() >= 0
 	}
-	if set.Date {
-		ok = C.JS_AddIntrinsicDate(ctxRef) >= 0 && ok
-	}
-	if set.Eval {
-		ok = C.JS_AddIntrinsicEval(ctxRef) >= 0 && ok
-	}
-	if set.RegExp {
-		C.JS_AddIntrinsicRegExpCompiler(ctxRef)
-		ok = C.JS_AddIntrinsicRegExp(ctxRef) >= 0 && ok
-	}
-	if set.JSON {
-		ok = C.JS_AddIntrinsicJSON(ctxRef) >= 0 && ok
-	}
-	if set.Proxy {
-		ok = C.JS_AddIntrinsicProxy(ctxRef) >= 0 && ok
-	}
-	if set.MapSet {
-		ok = C.JS_AddIntrinsicMapSet(ctxRef) >= 0 && ok
-	}
-	if set.TypedArrays {
-		ok = C.JS_AddIntrinsicTypedArrays(ctxRef) >= 0 && ok
-	}
-	if set.Promise {
-		ok = C.JS_AddIntrinsicPromise(ctxRef) >= 0 && ok
-	}
-	if set.BigInt {
-		ok = C.JS_AddIntrinsicBigInt(ctxRef) >= 0 && ok
-	}
-	if set.WeakRef {
-		ok = C.JS_AddIntrinsicWeakRef(ctxRef) >= 0 && ok
-	}
-	if set.Performance {
-		ok = C.JS_AddPerformance(ctxRef) >= 0 && ok
-	}
-	if set.DOMException {
-		ok = C.JS_AddIntrinsicDOMException(ctxRef) >= 0 && ok
-	}
-	return ok
+	return applyStep("BaseObjects", set.BaseObjects, func() C.int { return C.JS_AddIntrinsicBaseObjects(ctxRef) }) &&
+		applyStep("Date", set.Date, func() C.int { return C.JS_AddIntrinsicDate(ctxRef) }) &&
+		applyStep("Eval", set.Eval, func() C.int { return C.JS_AddIntrinsicEval(ctxRef) }) &&
+		applyStep("RegExp", set.RegExp, func() C.int {
+			C.JS_AddIntrinsicRegExpCompiler(ctxRef)
+			return C.JS_AddIntrinsicRegExp(ctxRef)
+		}) &&
+		applyStep("JSON", set.JSON, func() C.int { return C.JS_AddIntrinsicJSON(ctxRef) }) &&
+		applyStep("Proxy", set.Proxy, func() C.int { return C.JS_AddIntrinsicProxy(ctxRef) }) &&
+		applyStep("MapSet", set.MapSet, func() C.int { return C.JS_AddIntrinsicMapSet(ctxRef) }) &&
+		applyStep("TypedArrays", set.TypedArrays, func() C.int { return C.JS_AddIntrinsicTypedArrays(ctxRef) }) &&
+		applyStep("Promise", set.Promise, func() C.int { return C.JS_AddIntrinsicPromise(ctxRef) }) &&
+		applyStep("BigInt", set.BigInt, func() C.int { return C.JS_AddIntrinsicBigInt(ctxRef) }) &&
+		applyStep("WeakRef", set.WeakRef, func() C.int { return C.JS_AddIntrinsicWeakRef(ctxRef) }) &&
+		applyStep("Performance", set.Performance, func() C.int { return C.JS_AddPerformance(ctxRef) }) &&
+		applyStep("DOMException", set.DOMException, func() C.int { return C.JS_AddIntrinsicDOMException(ctxRef) })
 }
 
 // BootstrapStdOS registers std/os modules for the given context.
@@ -1487,6 +1474,19 @@ func forceRuntimeApplyIntrinsicsPassthroughHookForTest(enable bool) func() {
 	}
 	return func() {
 		runtimeApplyIntrinsicsHook = oldHook
+	}
+}
+
+func forceRuntimeApplyIntrinsicStepFailureForTest(step string) func() {
+	oldHook := runtimeApplyIntrinsicStepHook
+	runtimeApplyIntrinsicStepHook = func(name string) (bool, bool) {
+		if name == step {
+			return true, false
+		}
+		return false, false
+	}
+	return func() {
+		runtimeApplyIntrinsicStepHook = oldHook
 	}
 }
 
