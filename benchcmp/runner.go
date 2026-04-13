@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/dustin/go-humanize"
 )
 
 type Config struct {
@@ -100,22 +102,30 @@ func runFactorial(engines []engine, iterations int, loopCount int) ([]factorialR
 	results := make([]factorialResult, 0, len(engines))
 
 	for _, item := range engines {
+		session, err := item.open()
+		if err != nil {
+			return nil, fmt.Errorf("%s setup: %w", item.display, err)
+		}
+
 		result := factorialResult{
 			engine:    item,
 			durations: make([]time.Duration, 0, iterations),
 		}
 		for run := 0; run < iterations; run++ {
 			start := time.Now()
-			value, err := item.evalInt(source)
+			value, err := session.evalInt(source)
 			duration := time.Since(start)
 			if err != nil {
+				session.close()
 				return nil, fmt.Errorf("%s factorial run %d: %w", item.display, run+1, err)
 			}
 			if value != factorialExpected {
+				session.close()
 				return nil, fmt.Errorf("%s factorial run %d: expected %d, got %d", item.display, run+1, factorialExpected, value)
 			}
 			result.durations = append(result.durations, duration)
 		}
+		session.close()
 		results = append(results, result)
 	}
 
@@ -130,17 +140,23 @@ func runV8V7(engines []engine) ([]v8V7Result, error) {
 
 	results := make([]v8V7Result, 0, len(engines))
 	for _, item := range engines {
+		session, setupErr := item.open()
+		if setupErr != nil {
+			return nil, fmt.Errorf("%s setup: %w", item.display, setupErr)
+		}
+
 		start := time.Now()
 		var (
 			output string
 			err    error
 		)
-		if item.runV8V7 != nil {
-			output, err = item.runV8V7()
+		if runner, ok := session.(engineV8V7Runner); ok {
+			output, err = runner.runV8V7()
 		} else {
-			output, err = item.evalString(source)
+			output, err = session.evalString(source)
 		}
 		duration := time.Since(start)
+		session.close()
 		if err != nil {
 			return nil, fmt.Errorf("%s v8-v7: %w", item.display, err)
 		}
@@ -251,9 +267,9 @@ func writeFactorialTable(w io.Writer, results []factorialResult, loopCount int) 
 		averageRow = append(averageRow, emphasizeIfFastest(formatDuration(item.average), item.average == fastestAverage))
 		totalRow = append(totalRow, emphasizeIfFastest(formatDuration(item.total), item.total == fastestTotal))
 		if hasBaseline {
-			relativeRow = append(relativeRow, emphasizeIfBaseline(fmt.Sprintf("%.2fx", float64(baselineAverage)/float64(item.average)), index == baselineIndex))
+			relativeRow = append(relativeRow, emphasizeIfBaseline(formatSpeedRatio(baselineAverage, item.average), index == baselineIndex))
 		} else {
-			relativeRow = append(relativeRow, emphasizeIfFastest(fmt.Sprintf("%.2fx", float64(item.average)/float64(fastestAverage)), item.average == fastestAverage))
+			relativeRow = append(relativeRow, emphasizeIfFastest(formatSpeedRatio(item.average, fastestAverage), item.average == fastestAverage))
 		}
 	}
 	writeMarkdownRow(w, averageRow)
@@ -424,21 +440,13 @@ func emphasizeIfBaseline(value string, baseline bool) string {
 	return value
 }
 
+func formatSpeedRatio(numerator time.Duration, denominator time.Duration) string {
+	if denominator == 0 {
+		return "N/A"
+	}
+	return fmt.Sprintf("%.2fx", float64(numerator)/float64(denominator))
+}
+
 func formatInt(value int) string {
-	decimal := fmt.Sprintf("%d", value)
-	if len(decimal) <= 3 {
-		return decimal
-	}
-
-	var parts []string
-	for len(decimal) > 3 {
-		parts = append(parts, decimal[len(decimal)-3:])
-		decimal = decimal[:len(decimal)-3]
-	}
-	parts = append(parts, decimal)
-
-	for left, right := 0, len(parts)-1; left < right; left, right = left+1, right-1 {
-		parts[left], parts[right] = parts[right], parts[left]
-	}
-	return strings.Join(parts, ",")
+	return humanize.Comma(int64(value))
 }

@@ -38,6 +38,7 @@ var assetFS embed.FS
 
 func factorialSource(loopCount int) string {
 	return fmt.Sprintf(`
+(() => {
 function factorial(n) {
   return n <= 1 ? 1 : n * factorial(n - 1);
 }
@@ -51,7 +52,8 @@ if (result !== %d) {
   throw new Error("unexpected factorial result: " + result);
 }
 
-result;
+return result;
+})();
 `, loopCount, factorialExpected)
 }
 
