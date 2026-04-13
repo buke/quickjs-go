@@ -974,6 +974,7 @@ func (v *Value) IsString() bool        { return v != nil && bool(C.JS_IsString(v
 func (v *Value) IsSymbol() bool        { return v != nil && bool(C.JS_IsSymbol(v.ref)) }
 func (v *Value) IsObject() bool        { return v != nil && bool(C.JS_IsObject(v.ref)) }
 func (v *Value) IsArray() bool         { return v != nil && bool(C.JS_IsArray(v.ref)) }
+func (v *Value) IsDate() bool          { return v != nil && bool(C.JS_IsDate(v.ref)) }
 func (v *Value) IsError() bool         { return v != nil && bool(C.JS_IsError(v.ref)) }
 func (v *Value) IsFunction() bool      { return v != nil && bool(C.JS_IsFunction(v.ctx.ref, v.ref)) }
 func (v *Value) IsConstructor() bool   { return v != nil && bool(C.JS_IsConstructor(v.ctx.ref, v.ref)) }

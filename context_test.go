@@ -340,6 +340,106 @@ func TestContextBytecodeOperations(t *testing.T) {
 	})
 }
 
+func TestContextLibcStage4Helpers(t *testing.T) {
+	useStableOwnerHooksForLegacySubtests(t)
+
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	date := ctx.NewDate(1700000000000)
+	require.NotNil(t, date)
+	defer date.Free()
+	require.True(t, date.IsDate())
+
+	localSym := ctx.NewSymbol("local-key")
+	require.NotNil(t, localSym)
+	require.True(t, localSym.IsSymbol())
+
+	globalSym := ctx.NewGlobalSymbol("global-key")
+	require.NotNil(t, globalSym)
+	require.True(t, globalSym.IsSymbol())
+
+	globals := ctx.Globals()
+	require.NotNil(t, globals)
+	globals.Set("_localSym", localSym)
+	globals.Set("_globalSym", globalSym)
+
+	localKey := ctx.Eval(`Symbol.keyFor(globalThis._localSym)`)
+	require.NotNil(t, localKey)
+	defer localKey.Free()
+	require.True(t, localKey.IsUndefined())
+
+	globalKey := ctx.Eval(`Symbol.keyFor(globalThis._globalSym)`)
+	require.NotNil(t, globalKey)
+	defer globalKey.Free()
+	require.False(t, globalKey.IsException())
+	require.Equal(t, "global-key", globalKey.ToString())
+
+	moduleFunc := ctx.Eval(`export const v = 1`, EvalFlagModule(true), EvalFlagCompileOnly(true))
+	require.NotNil(t, moduleFunc)
+	defer moduleFunc.Free()
+	require.False(t, moduleFunc.IsException())
+	require.True(t, ctx.SetImportMeta(moduleFunc, false, false))
+
+	ctx2 := rt.NewContext()
+	require.NotNil(t, ctx2)
+	defer ctx2.Close()
+	foreignModuleFunc := ctx2.Eval(`export const v = 2`, EvalFlagModule(true), EvalFlagCompileOnly(true))
+	require.NotNil(t, foreignModuleFunc)
+	defer foreignModuleFunc.Free()
+	require.False(t, foreignModuleFunc.IsException())
+	require.False(t, ctx.SetImportMeta(foreignModuleFunc, false, false))
+
+	require.True(t, BootstrapBJSON(ctx))
+	require.GreaterOrEqual(t, ctx.LoopOnce(), -1)
+	require.GreaterOrEqual(t, ctx.PollIO(0), -1)
+
+	bad := ctx.Eval(`throw new Error("dump error")`)
+	require.NotNil(t, bad)
+	defer bad.Free()
+	require.True(t, bad.IsException())
+	require.NotPanics(t, func() {
+		ctx.DumpError()
+	})
+}
+
+func TestContextLibcStage4HelpersNilAndClosedGuards(t *testing.T) {
+	useStableOwnerHooksForLegacySubtests(t)
+
+	var nilCtx *Context
+	require.Nil(t, nilCtx.NewDate(0))
+	require.Nil(t, nilCtx.NewSymbol("x"))
+	require.Nil(t, nilCtx.NewGlobalSymbol("x"))
+	require.False(t, nilCtx.SetImportMeta(nil, false, false))
+	require.False(t, BootstrapBJSON(nilCtx))
+	require.Equal(t, -1, nilCtx.LoopOnce())
+	require.Equal(t, -1, nilCtx.PollIO(1))
+	require.NotPanics(t, func() { nilCtx.DumpError() })
+
+	rt := NewRuntime()
+	ctx := rt.NewContext()
+	require.NotNil(t, ctx)
+
+	moduleFunc := ctx.Eval(`export const k = 1`, EvalFlagModule(true), EvalFlagCompileOnly(true))
+	require.NotNil(t, moduleFunc)
+	defer moduleFunc.Free()
+	require.False(t, moduleFunc.IsException())
+
+	ctx.Close()
+	require.Nil(t, ctx.NewDate(0))
+	require.Nil(t, ctx.NewSymbol("x"))
+	require.Nil(t, ctx.NewGlobalSymbol("x"))
+	require.False(t, ctx.SetImportMeta(moduleFunc, false, false))
+	require.False(t, BootstrapBJSON(ctx))
+	require.Equal(t, -1, ctx.LoopOnce())
+	require.Equal(t, -1, ctx.PollIO(1))
+	require.NotPanics(t, func() { ctx.DumpError() })
+
+	rt.Close()
+}
+
 func TestContextModules(t *testing.T) {
 	useStableOwnerHooksForLegacySubtests(t)
 

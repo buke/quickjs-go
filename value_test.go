@@ -196,6 +196,28 @@ func TestValueObjectControlAPIsInvalidReceiver(t *testing.T) {
 	require.False(t, nilValue.SetPrototype(nil))
 }
 
+func TestValueIsDateAPI(t *testing.T) {
+	useStableOwnerHooksForLegacySubtests(t)
+
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	date := ctx.NewDate(1700000000000)
+	require.NotNil(t, date)
+	defer date.Free()
+	require.True(t, date.IsDate())
+
+	str := ctx.NewString("not-date")
+	require.NotNil(t, str)
+	defer str.Free()
+	require.False(t, str.IsDate())
+
+	var nilValue *Value
+	require.False(t, nilValue.IsDate())
+}
+
 func TestValuePropertyDescriptorAndAtomInt64APIs(t *testing.T) {
 	useStableOwnerHooksForLegacySubtests(t)
 
