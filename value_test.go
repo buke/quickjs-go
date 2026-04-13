@@ -969,7 +969,14 @@ func TestValueSpecialTypes(t *testing.T) {
 	})
 	defer funcVal.Free()
 	require.True(t, funcVal.IsFunction())
+	require.False(t, funcVal.IsAsyncFunction())
 	require.False(t, funcVal.IsPromise()) // Functions are not promises
+
+	asyncFuncVal := ctx.Eval(`async function testAsyncFn() {}; testAsyncFn`)
+	defer asyncFuncVal.Free()
+	require.False(t, asyncFuncVal.IsException())
+	require.True(t, asyncFuncVal.IsFunction())
+	require.True(t, asyncFuncVal.IsAsyncFunction())
 
 	// Test constructor - FIXED: removed error handling
 	constructorVal := ctx.Eval(`function TestConstructor() {}; TestConstructor`)
@@ -1039,6 +1046,7 @@ func TestValueSpecialTypes(t *testing.T) {
 	var nilValue *Value
 	require.False(t, nilValue.IsPromise(), "nil value should not be a promise")
 	require.False(t, nilValue.IsTypedArray(), "nil value should not be a typed array")
+	require.False(t, nilValue.IsAsyncFunction(), "nil value should not be an async function")
 
 }
 
