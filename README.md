@@ -26,6 +26,47 @@ Go bindings to QuickJS: a fast, small, and embeddable ES2020 JavaScript interpre
 - **Cross-platform:** Compile vendored quickjs-ng sources directly via cgo. ubuntu-latest, windows-latest, and macos-latest are covered and currently passing in [Test CI](https://github.com/buke/quickjs-go/actions/workflows/test.yml?query=workflow%3ATest).
  On Windows, you typically need to install and configure an MSYS2-based toolchain (such as gcc, make, and pkg-config). See [Issue #151](https://github.com/buke/quickjs-go/issues/151#issuecomment-2134307728).
 
+## Benchmarks
+
+Default `cd benchcmp && go run .` output:
+
+
+## Factorial Calculation
+
+Computing factorial(10) 1,000,000 times
+
+| Iteration | quickjs-go（cgo / QuickJS-ng） | GOJA（pure Go） | ModerncQuickJS （ccgo / QuickJS） | QJS（Wasm / wazero） | V8go（cgo / V8 JIT） |
+| --- | --- | --- | --- | --- | --- |
+| 1 | 210.233ms | 824.857ms | 1.162s | 920.073ms | 30.492ms |
+| 2 | 209.619ms | 821.983ms | 1.165s | 657.500ms | 23.412ms |
+| 3 | 208.898ms | 844.852ms | 1.286s | 655.415ms | 23.226ms |
+| 4 | 210.414ms | 822.420ms | 1.214s | 664.056ms | 23.270ms |
+| 5 | 238.587ms | 825.277ms | 1.165s | 658.205ms | 23.300ms |
+| Average | 215.550ms | 827.878ms | 1.198s | 711.050ms | **24.740ms** |
+| Total | 1.078s | 4.139s | 5.992s | 3.555s | **123.701ms** |
+| Speed vs quickjs-go（cgo / QuickJS-ng） | **1.00x** | 0.26x | 0.18x | 0.30x | 8.71x |
+
+## AreWeFastYet V8-V7
+
+| Metric | quickjs-go（cgo / QuickJS-ng） | GOJA（pure Go） | ModerncQuickJS（ccgo / QuickJS） | QJS（Wasm / wazero） | V8go（cgo / V8 JIT） |
+| --- | --- | --- | --- | --- | --- |
+| Richards | 1462 | 441 | 199 | 281 | **54019** |
+| DeltaBlue | 1449 | 546 | 242 | 289 | **176958** |
+| Crypto | 1197 | 278 | 240 | 270 | **91423** |
+| RayTrace | 1961 | 613 | 326 | 554 | **206827** |
+| EarleyBoyer | 3292 | 1152 | 665 | 919 | **144390** |
+| RegExp | 476 | 386 | 203 | 192 | **17109** |
+| Splay | 4331 | 2070 | 1147 | 1882 | **43272** |
+| NavierStokes | 1832 | 414 | 316 | 544 | **60042** |
+| Score (version 7) | 1674 | 595 | 341 | 465 | **76395** |
+| Duration (seconds) | 35.121s | 63.055s | 81.034s | 69.828s | **20.054s** |
+| Score vs quickjs-go（cgo / QuickJS-ng） | **1.00x** | 0.36x | 0.20x | 0.28x | 45.64x |
+| Speed vs quickjs-go（cgo / QuickJS-ng） | **1.00x** | 0.56x | 0.43x | 0.50x | 1.75x |
+
+For benchmark commands and output details, see [benchcmp/README.md](benchcmp/README.md).
+
+Benchmarks run on Apple M4, 32GB RAM, macOS.
+
 ## Upstream Sync
 
 This project has migrated its upstream runtime source from [bellard/quickjs](https://github.com/bellard/quickjs) to [quickjs-ng/quickjs](https://github.com/quickjs-ng/quickjs).
@@ -39,7 +80,7 @@ The runtime sources under deps/quickjs are no longer updated via git submodule. 
 - Current sync metadata is recorded in [deps/quickjs-release.env](deps/quickjs-release.env).
 - Manual update: [scripts/sync_quickjs_ng_release.sh](scripts/sync_quickjs_ng_release.sh).
 - GitHub Actions checks for new releases daily via [.github/workflows/sync_quickjs_ng_release.yml](.github/workflows/sync_quickjs_ng_release.yml) and automatically opens a PR.
-- Before opening a PR, the automation runs go test ./... to validate the current repository state.
+- Before opening a PR, the automation runs `go test ./...` to validate the current repository state.
 
 
 ## Guidelines
