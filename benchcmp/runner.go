@@ -190,6 +190,10 @@ func parseV8V7Output(output string) (map[string]string, error) {
 }
 
 func writeFactorialTable(w io.Writer, results []factorialResult, loopCount int) {
+	if len(results) == 0 {
+		return
+	}
+
 	fmt.Fprintln(w, "## Factorial Calculation")
 	fmt.Fprintf(w, "\nComputing factorial(10) %s times\n\n", formatInt(loopCount))
 
@@ -209,10 +213,27 @@ func writeFactorialTable(w io.Writer, results []factorialResult, loopCount int) 
 		writeMarkdownRow(w, row)
 	}
 
-	fastestAverage := averageDuration(results[0].durations)
-	for _, result := range results[1:] {
-		if avg := averageDuration(result.durations); avg < fastestAverage {
-			fastestAverage = avg
+	type summary struct {
+		average time.Duration
+		total   time.Duration
+	}
+
+	summaries := make([]summary, len(results))
+	for index, result := range results {
+		summaries[index] = summary{
+			average: averageDuration(result.durations),
+			total:   sumDurations(result.durations),
+		}
+	}
+
+	fastestAverage := summaries[0].average
+	fastestTotal := summaries[0].total
+	for _, item := range summaries[1:] {
+		if item.average < fastestAverage {
+			fastestAverage = item.average
+		}
+		if item.total < fastestTotal {
+			fastestTotal = item.total
 		}
 	}
 
@@ -226,15 +247,13 @@ func writeFactorialTable(w io.Writer, results []factorialResult, loopCount int) 
 	}
 	relativeRow := []string{relativeRowLabel}
 	baselineIndex := 0
-	for _, result := range results {
-		average := averageDuration(result.durations)
-		total := sumDurations(result.durations)
-		averageRow = append(averageRow, emphasizeIfFastest(formatDuration(average), average == fastestAverage))
-		totalRow = append(totalRow, emphasizeIfFastest(formatDuration(total), average == fastestAverage))
+	for index, item := range summaries {
+		averageRow = append(averageRow, emphasizeIfFastest(formatDuration(item.average), item.average == fastestAverage))
+		totalRow = append(totalRow, emphasizeIfFastest(formatDuration(item.total), item.total == fastestTotal))
 		if hasBaseline {
-			relativeRow = append(relativeRow, emphasizeIfBaseline(fmt.Sprintf("%.2fx", float64(baselineAverage)/float64(average)), len(relativeRow)-1 == baselineIndex))
+			relativeRow = append(relativeRow, emphasizeIfBaseline(fmt.Sprintf("%.2fx", float64(baselineAverage)/float64(item.average)), index == baselineIndex))
 		} else {
-			relativeRow = append(relativeRow, emphasizeIfFastest(fmt.Sprintf("%.2fx", float64(average)/float64(fastestAverage)), average == fastestAverage))
+			relativeRow = append(relativeRow, emphasizeIfFastest(fmt.Sprintf("%.2fx", float64(item.average)/float64(fastestAverage)), item.average == fastestAverage))
 		}
 	}
 	writeMarkdownRow(w, averageRow)
