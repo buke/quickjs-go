@@ -1020,7 +1020,7 @@ func (ctx *Context) SetImportMeta(moduleFunc *Value, useRealPath bool, isMain bo
 }
 
 // BootstrapBJSON registers the bjson module for the context.
-func BootstrapBJSON(ctx *Context) bool {
+func (ctx *Context) BootstrapBJSON() bool {
 	if ctx == nil || !ctx.hasValidRef() {
 		return false
 	}

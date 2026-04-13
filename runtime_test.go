@@ -1235,15 +1235,15 @@ func TestRuntimeContextBootstrapOptions(t *testing.T) {
 	bareCtx := rt.NewBareContext()
 	require.NotNil(t, bareCtx)
 	require.Equal(t, "undefined", typeOfSetTimeout(bareCtx))
-	require.True(t, BootstrapStdOS(bareCtx))
-	require.True(t, BootstrapTimers(bareCtx))
+	require.True(t, bareCtx.BootstrapStdOS())
+	require.True(t, bareCtx.BootstrapTimers())
 	require.Equal(t, "function", typeOfSetTimeout(bareCtx))
 	bareCtx.Close()
 
 	minimalCtx := rt.NewContextWithOptions(MinimalBootstrap())
 	require.NotNil(t, minimalCtx)
 	require.Equal(t, "undefined", typeOfSetTimeout(minimalCtx))
-	require.True(t, BootstrapTimers(minimalCtx))
+	require.True(t, minimalCtx.BootstrapTimers())
 	require.Equal(t, "function", typeOfSetTimeout(minimalCtx))
 	minimalCtx.Close()
 
@@ -1264,8 +1264,9 @@ func TestRuntimeContextBootstrapOptions(t *testing.T) {
 }
 
 func TestRuntimeContextBootstrapFailClosedAfterClose(t *testing.T) {
-	require.False(t, BootstrapStdOS(nil))
-	require.False(t, BootstrapTimers(nil))
+	var nilCtx *Context
+	require.False(t, nilCtx.BootstrapStdOS())
+	require.False(t, nilCtx.BootstrapTimers())
 
 	rt := NewRuntime()
 	defer rt.Close()
@@ -1274,8 +1275,8 @@ func TestRuntimeContextBootstrapFailClosedAfterClose(t *testing.T) {
 	require.NotNil(t, ctx)
 	ctx.Close()
 
-	require.False(t, BootstrapStdOS(ctx))
-	require.False(t, BootstrapTimers(ctx))
+	require.False(t, ctx.BootstrapStdOS())
+	require.False(t, ctx.BootstrapTimers())
 }
 
 func TestRuntimeContextBootstrapOwnerDenied(t *testing.T) {
@@ -1298,8 +1299,8 @@ func TestRuntimeContextBootstrapOwnerDenied(t *testing.T) {
 	require.NotNil(t, ctx)
 
 	gid.Store(72)
-	require.False(t, BootstrapStdOS(ctx))
-	require.False(t, BootstrapTimers(ctx))
+	require.False(t, ctx.BootstrapStdOS())
+	require.False(t, ctx.BootstrapTimers())
 
 	gid.Store(71)
 	ctx.Close()
@@ -1347,12 +1348,12 @@ func TestRuntimeBootstrapStdOSInitHook(t *testing.T) {
 	runtimeBootstrapStdOSInitHook = func(_ *Context) (bool, bool) {
 		return true, false
 	}
-	require.False(t, BootstrapStdOS(ctx))
+	require.False(t, ctx.BootstrapStdOS())
 
 	runtimeBootstrapStdOSInitHook = func(_ *Context) (bool, bool) {
 		return true, true
 	}
-	require.True(t, BootstrapStdOS(ctx))
+	require.True(t, ctx.BootstrapStdOS())
 }
 
 func TestRuntimeContextBootstrapStressContract(t *testing.T) {
@@ -1364,8 +1365,8 @@ func TestRuntimeContextBootstrapStressContract(t *testing.T) {
 		require.NotNil(t, ctx)
 
 		if i%2 == 0 {
-			require.True(t, BootstrapStdOS(ctx))
-			require.True(t, BootstrapTimers(ctx))
+			require.True(t, ctx.BootstrapStdOS())
+			require.True(t, ctx.BootstrapTimers())
 		}
 
 		result := ctx.Eval(`1 + 1`)

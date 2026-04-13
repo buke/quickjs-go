@@ -1055,8 +1055,8 @@ func applyIntrinsics(ctxRef *C.JSContext, set IntrinsicSet) bool {
 		applyStep("DOMException", set.DOMException, func() C.int { return C.JS_AddIntrinsicDOMException(ctxRef) })
 }
 
-// BootstrapStdOS registers std/os modules for the given context.
-func BootstrapStdOS(ctx *Context) bool {
+// BootstrapStdOS registers std/os modules for the context.
+func (ctx *Context) BootstrapStdOS() bool {
 	if runtimeBootstrapStdOSHook != nil {
 		return runtimeBootstrapStdOSHook(ctx)
 	}
@@ -1088,7 +1088,7 @@ func initStdOSModules(ctx *Context, stdModuleName *C.char, osModuleName *C.char)
 }
 
 // BootstrapTimers injects setTimeout/clearTimeout into globalThis.
-func BootstrapTimers(ctx *Context) bool {
+func (ctx *Context) BootstrapTimers() bool {
 	if runtimeBootstrapTimersHook != nil {
 		return runtimeBootstrapTimersHook(ctx)
 	}
@@ -1146,11 +1146,11 @@ func (r *Runtime) NewContextWithOptions(opts ...ContextBootstrapOption) *Context
 	registerContext(ctx_ref, ctx)
 	r.registerOwnedContext(ctx)
 
-	if bootstrap.loadStdOS && !BootstrapStdOS(ctx) {
+	if bootstrap.loadStdOS && !ctx.BootstrapStdOS() {
 		ctx.Close()
 		return nil
 	}
-	if bootstrap.injectTimers && !BootstrapTimers(ctx) {
+	if bootstrap.injectTimers && !ctx.BootstrapTimers() {
 		ctx.Close()
 		return nil
 	}

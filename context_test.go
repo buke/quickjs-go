@@ -392,7 +392,7 @@ func TestContextLibcStage4Helpers(t *testing.T) {
 	require.False(t, foreignModuleFunc.IsException())
 	require.False(t, ctx.SetImportMeta(foreignModuleFunc, false, false))
 
-	require.True(t, BootstrapBJSON(ctx))
+	require.True(t, ctx.BootstrapBJSON())
 	require.GreaterOrEqual(t, ctx.LoopOnce(), -1)
 	require.GreaterOrEqual(t, ctx.PollIO(0), -1)
 
@@ -413,7 +413,7 @@ func TestContextLibcStage4HelpersNilAndClosedGuards(t *testing.T) {
 	require.Nil(t, nilCtx.NewSymbol("x"))
 	require.Nil(t, nilCtx.NewGlobalSymbol("x"))
 	require.False(t, nilCtx.SetImportMeta(nil, false, false))
-	require.False(t, BootstrapBJSON(nilCtx))
+	require.False(t, nilCtx.BootstrapBJSON())
 	require.Equal(t, -1, nilCtx.LoopOnce())
 	require.Equal(t, -1, nilCtx.PollIO(1))
 	require.NotPanics(t, func() { nilCtx.DumpError() })
@@ -432,7 +432,7 @@ func TestContextLibcStage4HelpersNilAndClosedGuards(t *testing.T) {
 	require.Nil(t, ctx.NewSymbol("x"))
 	require.Nil(t, ctx.NewGlobalSymbol("x"))
 	require.False(t, ctx.SetImportMeta(moduleFunc, false, false))
-	require.False(t, BootstrapBJSON(ctx))
+	require.False(t, ctx.BootstrapBJSON())
 	require.Equal(t, -1, ctx.LoopOnce())
 	require.Equal(t, -1, ctx.PollIO(1))
 	require.NotPanics(t, func() { ctx.DumpError() })
