@@ -380,6 +380,34 @@ func (ctx *Context) NewString(v string) *Value {
 	return &Value{ctx: ctx, ref: C.JS_NewStringLen(ctx.ref, ptr, C.size_t(len(v)))}
 }
 
+// NewDate returns a JavaScript Date object from epoch milliseconds.
+func (ctx *Context) NewDate(epochMS float64) *Value {
+	if !ctx.hasValidRef() {
+		return nil
+	}
+	return &Value{ctx: ctx, ref: C.JS_NewDate(ctx.ref, C.double(epochMS))}
+}
+
+// NewSymbol returns a JavaScript local symbol.
+func (ctx *Context) NewSymbol(description string) *Value {
+	if !ctx.hasValidRef() {
+		return nil
+	}
+	desc := C.CString(description)
+	defer C.free(unsafe.Pointer(desc))
+	return &Value{ctx: ctx, ref: C.JS_NewSymbol(ctx.ref, desc, C.bool(false))}
+}
+
+// NewGlobalSymbol returns a JavaScript global symbol.
+func (ctx *Context) NewGlobalSymbol(description string) *Value {
+	if !ctx.hasValidRef() {
+		return nil
+	}
+	desc := C.CString(description)
+	defer C.free(unsafe.Pointer(desc))
+	return &Value{ctx: ctx, ref: C.JS_NewSymbol(ctx.ref, desc, C.bool(true))}
+}
+
 // String returns a string value with given string.
 // Deprecated: Use NewString() instead.
 func (ctx *Context) String(v string) *Value {
@@ -983,6 +1011,24 @@ func (ctx *Context) LoadModuleBytecode(buf []byte, opts ...EvalOption) *Value {
 	return &Value{ctx: ctx, ref: cVal}
 }
 
+// SetImportMeta sets import.meta for a compiled module function.
+func (ctx *Context) SetImportMeta(moduleFunc *Value, useRealPath bool, isMain bool) bool {
+	if !ctx.hasValidRef() || !moduleFunc.belongsTo(ctx) {
+		return false
+	}
+	return C.js_module_set_import_meta(ctx.ref, moduleFunc.ref, C.bool(useRealPath), C.bool(isMain)) == 0
+}
+
+// BootstrapBJSON registers the bjson module for the context.
+func (ctx *Context) BootstrapBJSON() bool {
+	if !ctx.hasValidRef() {
+		return false
+	}
+	moduleName := C.CString("bjson")
+	defer C.free(unsafe.Pointer(moduleName))
+	return C.js_init_module_bjson(ctx.ref, moduleName) != nil
+}
+
 // EvalBytecode returns a js value with given bytecode.
 // Need call Free() `quickjs.Value`'s returned by `Eval()` and `EvalFile()` and `EvalBytecode()`.
 func (ctx *Context) EvalBytecode(buf []byte) *Value {
@@ -1155,6 +1201,36 @@ func (ctx *Context) Loop() {
 	ctx.ProcessJobs()
 	C.js_std_loop(ctx.ref)
 	ctx.ProcessJobs()
+}
+
+// LoopOnce runs one event-loop iteration and returns QuickJS libc status.
+func (ctx *Context) LoopOnce() int {
+	if !ctx.hasValidRef() {
+		return -1
+	}
+	ctx.ProcessJobs()
+	ret := int(C.js_std_loop_once(ctx.ref))
+	ctx.ProcessJobs()
+	return ret
+}
+
+// PollIO polls host I/O and returns QuickJS libc status.
+func (ctx *Context) PollIO(timeoutMS int) int {
+	if !ctx.hasValidRef() {
+		return -1
+	}
+	ctx.ProcessJobs()
+	ret := int(C.js_std_poll_io(ctx.ref, C.int(timeoutMS)))
+	ctx.ProcessJobs()
+	return ret
+}
+
+// DumpError prints and clears current exception using QuickJS libc helper.
+func (ctx *Context) DumpError() {
+	if !ctx.hasValidRef() {
+		return
+	}
+	C.js_std_dump_error(ctx.ref)
 }
 
 // Wait for a promise and execute pending jobs while waiting for it.
