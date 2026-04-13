@@ -27,6 +27,49 @@ Go 语言的 QuickJS 绑定库：快速、小型、可嵌入的 ES2020 JavaScrip
 - **跨平台支持：** 通过 cgo 直接编译仓库内 vendored 的 quickjs-ng 源码；ubuntu-latest、windows-latest、macos-latest 已在 [Test CI](https://github.com/buke/quickjs-go/actions/workflows/test.yml?query=workflow%3ATest) 中覆盖并当前通过测试。
  Windows 环境通常需要先安装并配置 MSYS2 等工具链（如 gcc、make、pkg-config），可参考 [Issue #151](https://github.com/buke/quickjs-go/issues/151#issuecomment-2134307728)。
 
+## Benchmarks
+
+以下基准测试结果由 benchcmp 工具生成。如需重新生成，请运行 `cd benchcmp && go run .` 并更新此文件。
+
+默认 `cd benchcmp && go run .` 输出如下：
+
+
+### Factorial Calculation
+
+Computing factorial(10) 1,000,000 times
+
+| Iteration | quickjs-go（cgo / QuickJS-ng） | GOJA（pure Go） | ModerncQuickJS（ccgo / QuickJS） | QJS（Wasm / wazero） | V8go（cgo / V8 JIT） |
+| --- | --- | --- | --- | --- | --- |
+| 1 | 213.363ms | 712.622ms | 879.695ms | 626.162ms | 37.025ms |
+| 2 | 309.421ms | 728.404ms | 878.465ms | 626.668ms | 22.883ms |
+| 3 | 208.848ms | 697.569ms | 913.305ms | 629.525ms | 22.682ms |
+| 4 | 217.621ms | 672.554ms | 951.755ms | 627.514ms | 22.803ms |
+| 5 | 317.197ms | 695.230ms | 964.052ms | 627.884ms | 23.183ms |
+| Average | 253.290ms | 701.276ms | 917.455ms | 627.551ms | **25.715ms** |
+| Total | 1.266s | 3.506s | 4.587s | 3.138s | **128.576ms** |
+| Speed vs quickjs-go（cgo / QuickJS-ng） | **1.00x** | 0.36x | 0.28x | 0.40x | 9.85x |
+
+### AreWeFastYet V8-V7
+
+| Metric | quickjs-go（cgo / QuickJS-ng） | GOJA（pure Go） | ModerncQuickJS（ccgo / QuickJS） | QJS（Wasm / wazero） | V8go（cgo / V8 JIT） |
+| --- | --- | --- | --- | --- | --- |
+| Richards | 1425 | 453 | 259 | 470 | **51086** |
+| DeltaBlue | 1398 | 461 | 285 | 561 | **191967** |
+| Crypto | 1021 | 287 | 304 | 382 | **97807** |
+| RayTrace | 1628 | 588 | 519 | 760 | **208751** |
+| EarleyBoyer | 3216 | 1220 | 774 | 1163 | **152728** |
+| RegExp | 459 | 415 | 199 | 211 | **21456** |
+| Splay | 3989 | 2049 | 1324 | 2331 | **68909** |
+| NavierStokes | 1800 | 450 | 529 | 625 | **67832** |
+| Score (version 7) | 1560 | 599 | 434 | 638 | **86266** |
+| Duration (seconds) | 35.108s | 61.477s | 70.983s | 57.522s | **20.052s** |
+| Score vs quickjs-go（cgo / QuickJS-ng） | **1.00x** | 0.38x | 0.28x | 0.41x | 55.30x |
+| Speed vs quickjs-go（cgo / QuickJS-ng） | **1.00x** | 0.57x | 0.49x | 0.61x | 1.75x |
+
+如果想看 benchmark 命令、套件选择和完整输出格式说明，可继续参考 [benchcmp/README.md](benchcmp/README.md)。
+
+本次 Benchmarks 运行环境：Apple M4，32GB RAM，macOS。
+
 ## 上游同步
 
 本项目已将上游运行时源码从 [bellard/quickjs](https://github.com/bellard/quickjs) 迁移到 [quickjs-ng/quickjs](https://github.com/quickjs-ng/quickjs)。
@@ -40,7 +83,7 @@ deps/quickjs 中的运行时源码不再通过 git submodule 更新，而是按 
 - 当前同步元数据记录在 [deps/quickjs-release.env](deps/quickjs-release.env)。
 - 手动更新可使用 [scripts/sync_quickjs_ng_release.sh](scripts/sync_quickjs_ng_release.sh)。
 - GitHub Actions 会通过 [.github/workflows/sync_quickjs_ng_release.yml](.github/workflows/sync_quickjs_ng_release.yml) 每日检查新 release，并自动发起 PR。
-- 自动同步在发起 PR 前会执行 go test ./... 验证当前仓库。
+- 自动同步在发起 PR 前会执行 `go test ./...` 验证当前仓库。
 
 ## 使用指南
 
