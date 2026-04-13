@@ -131,7 +131,7 @@ func (s *qjsSession) runV8V7() (string, error) {
 
 	allScripts := append([]string{v8V7PreludeScript()}, scripts...)
 	for index, script := range allScripts {
-		value, err := s.ctx.Eval(fmt.Sprintf("v8-v7-%d.js", index), qjswasm.Code(wrapQJSScript(script)))
+		value, err := s.ctx.Eval(fmt.Sprintf("v8-v7-%d.js", index), qjswasm.Code(wrapQJSCompatScript(script)))
 		if err != nil {
 			return "", err
 		}
@@ -140,7 +140,7 @@ func (s *qjsSession) runV8V7() (string, error) {
 		}
 	}
 
-	value, err := s.ctx.Eval("v8-v7-runner.js", qjswasm.Code(wrapQJSScript(v8V7RunnerScript())))
+	value, err := s.ctx.Eval("v8-v7-runner.js", qjswasm.Code(wrapQJSCompatScript(v8V7RunnerScript())))
 	if err != nil {
 		return "", err
 	}
@@ -325,6 +325,10 @@ func normalizeInt(value any) (int64, error) {
 }
 
 func wrapQJSScript(script string) string {
+	return script
+}
+
+func wrapQJSCompatScript(script string) string {
 	return "(0, eval)(" + strconv.Quote(script) + ")"
 }
 

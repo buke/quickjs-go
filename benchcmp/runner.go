@@ -269,7 +269,7 @@ func writeFactorialTable(w io.Writer, results []factorialResult, loopCount int) 
 		if hasBaseline {
 			relativeRow = append(relativeRow, emphasizeIfBaseline(formatSpeedRatio(baselineAverage, item.average), index == baselineIndex))
 		} else {
-			relativeRow = append(relativeRow, emphasizeIfFastest(formatSpeedRatio(item.average, fastestAverage), item.average == fastestAverage))
+			relativeRow = append(relativeRow, emphasizeIfFastest(formatSpeedRatio(fastestAverage, item.average), item.average == fastestAverage))
 		}
 	}
 	writeMarkdownRow(w, averageRow)

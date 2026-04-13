@@ -40,31 +40,31 @@ Computing factorial(10) 1,000,000 times
 
 | Iteration | quickjs-go（cgo / QuickJS-ng） | GOJA（pure Go） | ModerncQuickJS（ccgo / QuickJS） | QJS（Wasm / wazero） | V8go（cgo / V8 JIT） |
 | --- | --- | --- | --- | --- | --- |
-| 1 | 205.036ms | 744.479ms | 999.372ms | 629.458ms | 42.053ms |
-| 2 | 204.293ms | 665.201ms | 904.357ms | 626.856ms | 23.432ms |
-| 3 | 203.742ms | 670.229ms | 950.830ms | 625.635ms | 23.262ms |
-| 4 | 291.048ms | 665.299ms | 891.658ms | 627.294ms | 23.031ms |
-| 5 | 205.653ms | 710.247ms | 882.321ms | 661.618ms | 23.183ms |
-| Average | 221.954ms | 691.091ms | 925.707ms | 634.172ms | **26.992ms** |
-| Total | 1.110s | 3.455s | 4.629s | 3.171s | **134.961ms** |
-| Speed vs quickjs-go（cgo / QuickJS-ng） | **1.00x** | 0.32x | 0.24x | 0.35x | 8.22x |
+| 1 | 213.363ms | 712.622ms | 879.695ms | 626.162ms | 37.025ms |
+| 2 | 309.421ms | 728.404ms | 878.465ms | 626.668ms | 22.883ms |
+| 3 | 208.848ms | 697.569ms | 913.305ms | 629.525ms | 22.682ms |
+| 4 | 217.621ms | 672.554ms | 951.755ms | 627.514ms | 22.803ms |
+| 5 | 317.197ms | 695.230ms | 964.052ms | 627.884ms | 23.183ms |
+| Average | 253.290ms | 701.276ms | 917.455ms | 627.551ms | **25.715ms** |
+| Total | 1.266s | 3.506s | 4.587s | 3.138s | **128.576ms** |
+| Speed vs quickjs-go（cgo / QuickJS-ng） | **1.00x** | 0.36x | 0.28x | 0.40x | 9.85x |
 
 ### AreWeFastYet V8-V7
 
 | Metric | quickjs-go（cgo / QuickJS-ng） | GOJA（pure Go） | ModerncQuickJS（ccgo / QuickJS） | QJS（Wasm / wazero） | V8go（cgo / V8 JIT） |
 | --- | --- | --- | --- | --- | --- |
-| Richards | 1373 | 361 | 259 | 519 | **26032** |
-| DeltaBlue | 1378 | 544 | 216 | 469 | **154505** |
-| Crypto | 1006 | 279 | 318 | 342 | **96105** |
-| RayTrace | 1942 | 661 | 518 | 756 | **203053** |
-| EarleyBoyer | 3399 | 1188 | 788 | 1050 | **140608** |
-| RegExp | 465 | 440 | 215 | 208 | **18729** |
-| Splay | 3814 | 2169 | 1360 | 2277 | **54379** |
-| NavierStokes | 1917 | 483 | 445 | 572 | **62476** |
-| Score (version 7) | 1599 | 613 | 419 | 605 | **71748** |
-| Duration (seconds) | 36.232s | 59.233s | 71.858s | 60.488s | **20.060s** |
-| Score vs quickjs-go（cgo / QuickJS-ng） | **1.00x** | 0.38x | 0.26x | 0.38x | 44.87x |
-| Speed vs quickjs-go（cgo / QuickJS-ng） | **1.00x** | 0.61x | 0.50x | 0.60x | 1.81x |
+| Richards | 1425 | 453 | 259 | 470 | **51086** |
+| DeltaBlue | 1398 | 461 | 285 | 561 | **191967** |
+| Crypto | 1021 | 287 | 304 | 382 | **97807** |
+| RayTrace | 1628 | 588 | 519 | 760 | **208751** |
+| EarleyBoyer | 3216 | 1220 | 774 | 1163 | **152728** |
+| RegExp | 459 | 415 | 199 | 211 | **21456** |
+| Splay | 3989 | 2049 | 1324 | 2331 | **68909** |
+| NavierStokes | 1800 | 450 | 529 | 625 | **67832** |
+| Score (version 7) | 1560 | 599 | 434 | 638 | **86266** |
+| Duration (seconds) | 35.108s | 61.477s | 70.983s | 57.522s | **20.052s** |
+| Score vs quickjs-go（cgo / QuickJS-ng） | **1.00x** | 0.38x | 0.28x | 0.41x | 55.30x |
+| Speed vs quickjs-go（cgo / QuickJS-ng） | **1.00x** | 0.57x | 0.49x | 0.61x | 1.75x |
 
 如果想看 benchmark 命令、套件选择和完整输出格式说明，可继续参考 [benchcmp/README.md](benchcmp/README.md)。
 
