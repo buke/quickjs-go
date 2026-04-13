@@ -1013,7 +1013,7 @@ func (ctx *Context) LoadModuleBytecode(buf []byte, opts ...EvalOption) *Value {
 
 // SetImportMeta sets import.meta for a compiled module function.
 func (ctx *Context) SetImportMeta(moduleFunc *Value, useRealPath bool, isMain bool) bool {
-	if !ctx.hasValidRef() || moduleFunc == nil || !moduleFunc.belongsTo(ctx) {
+	if !ctx.hasValidRef() || !moduleFunc.belongsTo(ctx) {
 		return false
 	}
 	return C.js_module_set_import_meta(ctx.ref, moduleFunc.ref, C.bool(useRealPath), C.bool(isMain)) == 0
@@ -1021,7 +1021,7 @@ func (ctx *Context) SetImportMeta(moduleFunc *Value, useRealPath bool, isMain bo
 
 // BootstrapBJSON registers the bjson module for the context.
 func (ctx *Context) BootstrapBJSON() bool {
-	if ctx == nil || !ctx.hasValidRef() {
+	if !ctx.hasValidRef() {
 		return false
 	}
 	moduleName := C.CString("bjson")
