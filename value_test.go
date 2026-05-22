@@ -534,6 +534,7 @@ func TestValueArrayBuffer(t *testing.T) {
 	defer arrayBuffer.Free()
 
 	require.True(t, arrayBuffer.IsByteArray())
+	require.False(t, arrayBuffer.IsImmutableArrayBuffer())
 	require.Equal(t, int64(len(data)), arrayBuffer.ByteLen())
 
 	// Test ToByteArray with various sizes
@@ -548,11 +549,32 @@ func TestValueArrayBuffer(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "exceeds the maximum length")
 
+	t.Run("DetachedArrayBuffer", func(t *testing.T) {
+		detachedBuffer := ctx.Eval(`
+			(() => {
+				const buffer = new ArrayBuffer(4);
+				buffer.transfer();
+				return buffer;
+			})()
+		`)
+		defer detachedBuffer.Free()
+		require.False(t, detachedBuffer.IsException())
+
+		_, err := detachedBuffer.ToByteArray(0)
+		require.Error(t, err)
+		require.ErrorContains(t, ctx.Exception(), "ArrayBuffer")
+	})
+
 	// Test array length - FIXED: removed error handling
 	arr := ctx.Eval(`[1, 2, 3, 4, 5]`)
 	defer arr.Free()
 	require.False(t, arr.IsException()) // Check for exceptions instead of error
 	require.Equal(t, int64(5), arr.Len())
+
+	require.True(t, arrayBuffer.SetImmutableArrayBuffer(true))
+	require.True(t, arrayBuffer.IsImmutableArrayBuffer())
+	require.True(t, arrayBuffer.SetImmutableArrayBuffer(false))
+	require.False(t, arrayBuffer.IsImmutableArrayBuffer())
 
 	// Test error cases with non-ArrayBuffer types - Updated to use New* methods
 	errorTests := []struct {
@@ -569,6 +591,8 @@ func TestValueArrayBuffer(t *testing.T) {
 		t.Run(tt.name+"Error", func(t *testing.T) {
 			val := tt.createVal()
 			defer val.Free()
+			require.False(t, val.IsImmutableArrayBuffer())
+			require.False(t, val.SetImmutableArrayBuffer(true))
 			_, err := val.ToByteArray(1)
 			require.Error(t, err)
 		})
@@ -698,6 +722,11 @@ func TestValueTypedArrays(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, []uint8{0, 128, 255}, result)
 		}},
+		{"EmptyUint8Array", "new Uint8Array([])", func(v *Value) {
+			result, err := v.ToUint8Array()
+			require.NoError(t, err)
+			require.Empty(t, result)
+		}},
 		{"Uint16Array", "new Uint16Array([0, 32768, 65535])", func(v *Value) {
 			result, err := v.ToUint16Array()
 			require.NoError(t, err)
@@ -737,6 +766,173 @@ func TestValueTypedArrays(t *testing.T) {
 			tt.testFn(val)
 		})
 	}
+
+	t.Run("Uint8ArrayWrongType", func(t *testing.T) {
+		notUint8 := ctx.Eval(`new Int8Array([1, 2, 3])`)
+		defer notUint8.Free()
+		require.False(t, notUint8.IsException())
+
+		_, err := notUint8.ToUint8Array()
+		require.Error(t, err)
+	})
+
+	t.Run("Uint8ArrayDetachedBuffer", func(t *testing.T) {
+		detachedUint8 := ctx.Eval(`
+			(() => {
+				const buffer = new ArrayBuffer(4);
+				const view = new Uint8Array(buffer);
+				buffer.transfer();
+				return view;
+			})()
+		`)
+		defer detachedUint8.Free()
+		require.False(t, detachedUint8.IsException())
+
+		_, err := detachedUint8.ToUint8Array()
+		require.Error(t, err)
+		require.ErrorContains(t, ctx.Exception(), "ArrayBuffer")
+	})
+
+	detachedConversionTests := []struct {
+		name        string
+		jsCode      string
+		convertFunc func(*Value) (interface{}, error)
+	}{
+		{"Int8ArrayDetachedBuffer", `(() => { const view = new Int8Array(1); view.buffer.transfer(); return view; })()`, func(v *Value) (interface{}, error) { return v.ToInt8Array() }},
+		{"Int16ArrayDetachedBuffer", `(() => { const view = new Int16Array(1); view.buffer.transfer(); return view; })()`, func(v *Value) (interface{}, error) { return v.ToInt16Array() }},
+		{"Uint16ArrayDetachedBuffer", `(() => { const view = new Uint16Array(1); view.buffer.transfer(); return view; })()`, func(v *Value) (interface{}, error) { return v.ToUint16Array() }},
+		{"Int32ArrayDetachedBuffer", `(() => { const view = new Int32Array(1); view.buffer.transfer(); return view; })()`, func(v *Value) (interface{}, error) { return v.ToInt32Array() }},
+		{"Uint32ArrayDetachedBuffer", `(() => { const view = new Uint32Array(1); view.buffer.transfer(); return view; })()`, func(v *Value) (interface{}, error) { return v.ToUint32Array() }},
+		{"Float32ArrayDetachedBuffer", `(() => { const view = new Float32Array(1); view.buffer.transfer(); return view; })()`, func(v *Value) (interface{}, error) { return v.ToFloat32Array() }},
+		{"Float64ArrayDetachedBuffer", `(() => { const view = new Float64Array(1); view.buffer.transfer(); return view; })()`, func(v *Value) (interface{}, error) { return v.ToFloat64Array() }},
+		{"BigInt64ArrayDetachedBuffer", `(() => { const view = new BigInt64Array(1); view.buffer.transfer(); return view; })()`, func(v *Value) (interface{}, error) { return v.ToBigInt64Array() }},
+		{"BigUint64ArrayDetachedBuffer", `(() => { const view = new BigUint64Array(1); view.buffer.transfer(); return view; })()`, func(v *Value) (interface{}, error) { return v.ToBigUint64Array() }},
+	}
+
+	for _, tt := range detachedConversionTests {
+		t.Run(tt.name, func(t *testing.T) {
+			val := ctx.Eval(tt.jsCode)
+			defer val.Free()
+			require.False(t, val.IsException())
+
+			_, err := tt.convertFunc(val)
+			require.Error(t, err)
+			require.ErrorContains(t, ctx.Exception(), "ArrayBuffer")
+		})
+	}
+}
+
+func TestValueNativeObjectPredicates(t *testing.T) {
+	useStableOwnerHooksForLegacySubtests(t)
+
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	tests := []struct {
+		name      string
+		jsCode    string
+		checkFunc func(*Value) bool
+	}{
+		{"RegExp", `/abc/`, func(v *Value) bool { return v.IsRegExp() }},
+		{"Map", `new Map([[1, 2]])`, func(v *Value) bool { return v.IsMap() }},
+		{"Set", `new Set([1, 2])`, func(v *Value) bool { return v.IsSet() }},
+		{"WeakRef", `new WeakRef({ value: 1 })`, func(v *Value) bool { return v.IsWeakRef() }},
+		{"WeakSet", `new WeakSet([{}])`, func(v *Value) bool { return v.IsWeakSet() }},
+		{"WeakMap", `new WeakMap([[{}, 1]])`, func(v *Value) bool { return v.IsWeakMap() }},
+		{"DataView", `new DataView(new ArrayBuffer(8))`, func(v *Value) bool { return v.IsDataView() }},
+		{"Proxy", `new Proxy({}, {})`, func(v *Value) bool { return v.IsProxy() }},
+		{"ArrayBuffer", `new ArrayBuffer(8)`, func(v *Value) bool { return v.IsByteArray() }},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			val := ctx.Eval(tt.jsCode)
+			defer val.Free()
+			require.False(t, val.IsException())
+			require.True(t, tt.checkFunc(val))
+		})
+	}
+
+	negativeChecks := []struct {
+		name      string
+		checkFunc func(*Value) bool
+	}{
+		{"RegExp", func(v *Value) bool { return v.IsRegExp() }},
+		{"Map", func(v *Value) bool { return v.IsMap() }},
+		{"Set", func(v *Value) bool { return v.IsSet() }},
+		{"WeakRef", func(v *Value) bool { return v.IsWeakRef() }},
+		{"WeakSet", func(v *Value) bool { return v.IsWeakSet() }},
+		{"WeakMap", func(v *Value) bool { return v.IsWeakMap() }},
+		{"DataView", func(v *Value) bool { return v.IsDataView() }},
+		{"Proxy", func(v *Value) bool { return v.IsProxy() }},
+		{"ArrayBuffer", func(v *Value) bool { return v.IsByteArray() }},
+	}
+
+	plainObject := ctx.NewObject()
+	defer plainObject.Free()
+
+	for _, tt := range negativeChecks {
+		t.Run(tt.name+"Negative", func(t *testing.T) {
+			require.False(t, tt.checkFunc(plainObject))
+		})
+	}
+}
+
+func TestValueProxyHelpers(t *testing.T) {
+	useStableOwnerHooksForLegacySubtests(t)
+
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	target := ctx.NewObject()
+	defer target.Free()
+	target.Set("value", ctx.NewInt32(42))
+
+	handler := ctx.NewObject()
+	defer handler.Free()
+	handler.Set("tag", ctx.NewString("handler"))
+
+	proxy := ctx.NewProxy(target, handler)
+	defer proxy.Free()
+	require.NotNil(t, proxy)
+	require.False(t, proxy.IsException())
+	require.True(t, proxy.IsProxy())
+
+	var nilCtx *Context
+	require.Nil(t, nilCtx.NewProxy(target, handler))
+
+	proxyTarget := proxy.ProxyTarget()
+	defer proxyTarget.Free()
+	require.NotNil(t, proxyTarget)
+	require.False(t, proxyTarget.IsException())
+	require.True(t, proxyTarget.SameValue(target))
+
+	proxyHandler := proxy.ProxyHandler()
+	defer proxyHandler.Free()
+	require.NotNil(t, proxyHandler)
+	require.False(t, proxyHandler.IsException())
+	require.True(t, proxyHandler.SameValue(handler))
+
+	plainObject := ctx.NewObject()
+	defer plainObject.Free()
+
+	notProxyTarget := plainObject.ProxyTarget()
+	defer notProxyTarget.Free()
+	require.True(t, notProxyTarget.IsException())
+	require.ErrorContains(t, ctx.Exception(), "not a proxy")
+
+	notProxyHandler := plainObject.ProxyHandler()
+	defer notProxyHandler.Free()
+	require.True(t, notProxyHandler.IsException())
+	require.ErrorContains(t, ctx.Exception(), "not a proxy")
+
+	var nilValue *Value
+	require.Nil(t, nilValue.ProxyTarget())
+	require.Nil(t, nilValue.ProxyHandler())
 }
 
 // TestValueProperties tests property operations
@@ -1046,6 +1242,17 @@ func TestValueSpecialTypes(t *testing.T) {
 	var nilValue *Value
 	require.False(t, nilValue.IsPromise(), "nil value should not be a promise")
 	require.False(t, nilValue.IsTypedArray(), "nil value should not be a typed array")
+	require.False(t, nilValue.IsByteArray(), "nil value should not be an array buffer")
+	require.False(t, nilValue.IsImmutableArrayBuffer(), "nil value should not be an immutable array buffer")
+	require.False(t, nilValue.SetImmutableArrayBuffer(true), "nil value should not update immutable array buffer state")
+	require.False(t, nilValue.IsRegExp(), "nil value should not be a regexp")
+	require.False(t, nilValue.IsMap(), "nil value should not be a map")
+	require.False(t, nilValue.IsSet(), "nil value should not be a set")
+	require.False(t, nilValue.IsWeakRef(), "nil value should not be a weak ref")
+	require.False(t, nilValue.IsWeakSet(), "nil value should not be a weak set")
+	require.False(t, nilValue.IsWeakMap(), "nil value should not be a weak map")
+	require.False(t, nilValue.IsDataView(), "nil value should not be a data view")
+	require.False(t, nilValue.IsProxy(), "nil value should not be a proxy")
 	require.False(t, nilValue.IsAsyncFunction(), "nil value should not be an async function")
 
 }
