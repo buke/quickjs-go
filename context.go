@@ -987,6 +987,8 @@ func (ctx *Context) CompileModule(filePath string, moduleName string, opts ...Ev
 }
 
 // LoadModuleByteCode returns a js value with given bytecode and module name.
+// Only load bytecode produced by a trusted source. QuickJS bytecode is not a
+// safe interchange format for untrusted data.
 func (ctx *Context) LoadModuleBytecode(buf []byte, opts ...EvalOption) *Value {
 	if !ctx.hasValidRef() {
 		return nil
@@ -1030,6 +1032,8 @@ func (ctx *Context) BootstrapBJSON() bool {
 }
 
 // EvalBytecode returns a js value with given bytecode.
+// Only load bytecode produced by a trusted source. QuickJS bytecode is not a
+// safe interchange format for untrusted data.
 // Need call Free() `quickjs.Value`'s returned by `Eval()` and `EvalFile()` and `EvalBytecode()`.
 func (ctx *Context) EvalBytecode(buf []byte) *Value {
 	if !ctx.hasValidRef() {

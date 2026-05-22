@@ -1578,6 +1578,8 @@ func main() {
 
 ### Bytecode Compiler
 
+QuickJS bytecode should only be loaded from trusted input produced by this library or another trusted writer. It is not a safe interchange format for untrusted data, and loading hostile bytecode may lead to memory corruption in the underlying engine.
+
 ```go
 package main
 
