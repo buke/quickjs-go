@@ -388,6 +388,13 @@ func (ctx *Context) NewDate(epochMS float64) *Value {
 	return &Value{ctx: ctx, ref: C.JS_NewDate(ctx.ref, C.double(epochMS))}
 }
 
+func (ctx *Context) newSymbol(description *C.char, isGlobal bool) *Value {
+	if !ctx.hasValidRef() {
+		return nil
+	}
+	return &Value{ctx: ctx, ref: C.JS_NewSymbol(ctx.ref, description, C.bool(isGlobal))}
+}
+
 // NewSymbol returns a JavaScript local symbol.
 func (ctx *Context) NewSymbol(description string) *Value {
 	if !ctx.hasValidRef() {
@@ -395,7 +402,12 @@ func (ctx *Context) NewSymbol(description string) *Value {
 	}
 	desc := C.CString(description)
 	defer C.free(unsafe.Pointer(desc))
-	return &Value{ctx: ctx, ref: C.JS_NewSymbol(ctx.ref, desc, C.bool(false))}
+	return ctx.newSymbol(desc, false)
+}
+
+// NewSymbolWithoutDescription returns a JavaScript local symbol created with Symbol().
+func (ctx *Context) NewSymbolWithoutDescription() *Value {
+	return ctx.newSymbol(nil, false)
 }
 
 // NewGlobalSymbol returns a JavaScript global symbol.
@@ -405,7 +417,12 @@ func (ctx *Context) NewGlobalSymbol(description string) *Value {
 	}
 	desc := C.CString(description)
 	defer C.free(unsafe.Pointer(desc))
-	return &Value{ctx: ctx, ref: C.JS_NewSymbol(ctx.ref, desc, C.bool(true))}
+	return ctx.newSymbol(desc, true)
+}
+
+// NewGlobalSymbolWithoutDescription returns a JavaScript global symbol created with Symbol.for("undefined").
+func (ctx *Context) NewGlobalSymbolWithoutDescription() *Value {
+	return ctx.newSymbol(nil, true)
 }
 
 // String returns a string value with given string.

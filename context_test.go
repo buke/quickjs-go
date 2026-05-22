@@ -357,14 +357,24 @@ func TestContextLibcStage4Helpers(t *testing.T) {
 	require.NotNil(t, localSym)
 	require.True(t, localSym.IsSymbol())
 
+	localSymNoDesc := ctx.NewSymbolWithoutDescription()
+	require.NotNil(t, localSymNoDesc)
+	require.True(t, localSymNoDesc.IsSymbol())
+
 	globalSym := ctx.NewGlobalSymbol("global-key")
 	require.NotNil(t, globalSym)
 	require.True(t, globalSym.IsSymbol())
 
+	globalSymNoDesc := ctx.NewGlobalSymbolWithoutDescription()
+	require.NotNil(t, globalSymNoDesc)
+	require.True(t, globalSymNoDesc.IsSymbol())
+
 	globals := ctx.Globals()
 	require.NotNil(t, globals)
 	globals.Set("_localSym", localSym)
+	globals.Set("_localSymNoDesc", localSymNoDesc)
 	globals.Set("_globalSym", globalSym)
+	globals.Set("_globalSymNoDesc", globalSymNoDesc)
 
 	localKey := ctx.Eval(`Symbol.keyFor(globalThis._localSym)`)
 	require.NotNil(t, localKey)
@@ -376,6 +386,18 @@ func TestContextLibcStage4Helpers(t *testing.T) {
 	defer globalKey.Free()
 	require.False(t, globalKey.IsException())
 	require.Equal(t, "global-key", globalKey.ToString())
+
+	localNoDescSemantics := ctx.Eval(`globalThis._localSymNoDesc.description === undefined && Symbol.keyFor(globalThis._localSymNoDesc) === undefined`)
+	require.NotNil(t, localNoDescSemantics)
+	defer localNoDescSemantics.Free()
+	require.False(t, localNoDescSemantics.IsException())
+	require.True(t, localNoDescSemantics.ToBool())
+
+	globalNoDescSemantics := ctx.Eval(`globalThis._globalSymNoDesc.description === "undefined" && Symbol.keyFor(globalThis._globalSymNoDesc) === "undefined"`)
+	require.NotNil(t, globalNoDescSemantics)
+	defer globalNoDescSemantics.Free()
+	require.False(t, globalNoDescSemantics.IsException())
+	require.True(t, globalNoDescSemantics.ToBool())
 
 	moduleFunc := ctx.Eval(`export const v = 1`, EvalFlagModule(true), EvalFlagCompileOnly(true))
 	require.NotNil(t, moduleFunc)
@@ -411,7 +433,9 @@ func TestContextLibcStage4HelpersNilAndClosedGuards(t *testing.T) {
 	var nilCtx *Context
 	require.Nil(t, nilCtx.NewDate(0))
 	require.Nil(t, nilCtx.NewSymbol("x"))
+	require.Nil(t, nilCtx.NewSymbolWithoutDescription())
 	require.Nil(t, nilCtx.NewGlobalSymbol("x"))
+	require.Nil(t, nilCtx.NewGlobalSymbolWithoutDescription())
 	require.False(t, nilCtx.SetImportMeta(nil, false, false))
 	require.False(t, nilCtx.BootstrapBJSON())
 	require.Equal(t, -1, nilCtx.LoopOnce())
@@ -430,7 +454,9 @@ func TestContextLibcStage4HelpersNilAndClosedGuards(t *testing.T) {
 	ctx.Close()
 	require.Nil(t, ctx.NewDate(0))
 	require.Nil(t, ctx.NewSymbol("x"))
+	require.Nil(t, ctx.NewSymbolWithoutDescription())
 	require.Nil(t, ctx.NewGlobalSymbol("x"))
+	require.Nil(t, ctx.NewGlobalSymbolWithoutDescription())
 	require.False(t, ctx.SetImportMeta(moduleFunc, false, false))
 	require.False(t, ctx.BootstrapBJSON())
 	require.Equal(t, -1, ctx.LoopOnce())
