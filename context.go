@@ -397,6 +397,9 @@ func (ctx *Context) newSymbol(description *C.char, isGlobal bool) *Value {
 
 // NewSymbol returns a JavaScript local symbol.
 func (ctx *Context) NewSymbol(description string) *Value {
+	if !ctx.hasValidRef() {
+		return nil
+	}
 	desc := C.CString(description)
 	defer C.free(unsafe.Pointer(desc))
 	return ctx.newSymbol(desc, false)
@@ -409,6 +412,9 @@ func (ctx *Context) NewSymbolWithoutDescription() *Value {
 
 // NewGlobalSymbol returns a JavaScript global symbol.
 func (ctx *Context) NewGlobalSymbol(description string) *Value {
+	if !ctx.hasValidRef() {
+		return nil
+	}
 	desc := C.CString(description)
 	defer C.free(unsafe.Pointer(desc))
 	return ctx.newSymbol(desc, true)
