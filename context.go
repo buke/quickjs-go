@@ -650,6 +650,14 @@ func (ctx *Context) NewObject() *Value {
 	return &Value{ctx: ctx, ref: C.JS_NewObject(ctx.ref)}
 }
 
+// NewProxy returns a new Proxy value backed by the given target and handler.
+func (ctx *Context) NewProxy(target, handler *Value) *Value {
+	if ctx == nil || !ctx.hasValidRef() || !target.belongsTo(ctx) || !handler.belongsTo(ctx) {
+		return nil
+	}
+	return &Value{ctx: ctx, ref: C.JS_NewProxy(ctx.ref, target.ref, handler.ref)}
+}
+
 // Object returns a new object value.
 // Deprecated: Use NewObject() instead.
 func (ctx *Context) Object() *Value {

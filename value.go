@@ -713,6 +713,22 @@ func (v *Value) Freeze() bool {
 	return ret == 1
 }
 
+// ProxyTarget returns the Proxy target value.
+func (v *Value) ProxyTarget() *Value {
+	if !v.isAlive() {
+		return nil
+	}
+	return &Value{ctx: v.ctx, ref: C.JS_GetProxyTarget(v.ctx.ref, v.ref)}
+}
+
+// ProxyHandler returns the Proxy handler value.
+func (v *Value) ProxyHandler() *Value {
+	if !v.isAlive() {
+		return nil
+	}
+	return &Value{ctx: v.ctx, ref: C.JS_GetProxyHandler(v.ctx.ref, v.ref)}
+}
+
 // GlobalInstanceof checks if the value is an instance of the given global constructor
 func (v *Value) GlobalInstanceof(name string) bool {
 	ctor := v.ctx.Globals().Get(name)
@@ -761,16 +777,13 @@ func (v *Value) ToUint8Array() ([]uint8, error) {
 		return nil, errors.New("value is not a Uint8Array or Uint8ClampedArray")
 	}
 
-	buffer, byteOffset, byteLength, _ := v.getTypedArrayInfo()
-	defer buffer.Free()
-
-	totalSize := uint(byteOffset + byteLength)
-	bytes, err := buffer.ToByteArray(totalSize)
-	if err != nil {
-		return nil, err
+	var cSize C.size_t
+	outBuf := C.JS_GetUint8Array(v.ctx.ref, &cSize, v.ref)
+	if outBuf == nil {
+		return nil, errors.New("failed to get Uint8Array data")
 	}
 
-	return bytes[byteOffset : byteOffset+byteLength], nil
+	return C.GoBytes(unsafe.Pointer(outBuf), C.int(cSize)), nil
 }
 
 // ToInt16Array converts the value to int16 slice if it's an Int16Array.
@@ -976,6 +989,14 @@ func (v *Value) IsObject() bool        { return v != nil && bool(C.JS_IsObject(v
 func (v *Value) IsArray() bool         { return v != nil && bool(C.JS_IsArray(v.ref)) }
 func (v *Value) IsDate() bool          { return v != nil && bool(C.JS_IsDate(v.ref)) }
 func (v *Value) IsError() bool         { return v != nil && bool(C.JS_IsError(v.ref)) }
+func (v *Value) IsRegExp() bool        { return v != nil && bool(C.JS_IsRegExp(v.ref)) }
+func (v *Value) IsMap() bool           { return v != nil && bool(C.JS_IsMap(v.ref)) }
+func (v *Value) IsSet() bool           { return v != nil && bool(C.JS_IsSet(v.ref)) }
+func (v *Value) IsWeakRef() bool       { return v != nil && bool(C.JS_IsWeakRef(v.ref)) }
+func (v *Value) IsWeakSet() bool       { return v != nil && bool(C.JS_IsWeakSet(v.ref)) }
+func (v *Value) IsWeakMap() bool       { return v != nil && bool(C.JS_IsWeakMap(v.ref)) }
+func (v *Value) IsDataView() bool      { return v != nil && bool(C.JS_IsDataView(v.ref)) }
+func (v *Value) IsProxy() bool         { return v != nil && bool(C.JS_IsProxy(v.ref)) }
 func (v *Value) IsFunction() bool      { return v != nil && bool(C.JS_IsFunction(v.ctx.ref, v.ref)) }
 func (v *Value) IsAsyncFunction() bool { return v != nil && bool(C.JS_IsAsyncFunction(v.ref)) }
 func (v *Value) IsConstructor() bool   { return v != nil && bool(C.JS_IsConstructor(v.ctx.ref, v.ref)) }
@@ -985,15 +1006,7 @@ func (v *Value) IsConstructor() bool   { return v != nil && bool(C.JS_IsConstruc
 // =============================================================================
 
 func (v *Value) IsPromise() bool {
-	if v == nil {
-		return false
-	}
-	state := C.JS_PromiseState(v.ctx.ref, v.ref)
-	pending := C.int(C.JS_PROMISE_PENDING)
-	fulfilled := C.int(C.JS_PROMISE_FULFILLED)
-	rejected := C.int(C.JS_PROMISE_REJECTED)
-
-	return C.int(state) == pending || C.int(state) == fulfilled || C.int(state) == rejected
+	return v != nil && bool(C.JS_IsPromise(v.ref))
 }
 
 // Promise state enumeration matching QuickJS
@@ -1133,41 +1146,96 @@ func (v *Value) IsInstanceOfConstructor(constructor *Value) bool {
 }
 
 // TypedArray detection methods
-func (v *Value) IsTypedArray() bool {
+func (v *Value) typedArrayType() (int, bool) {
 	if v == nil {
-		return false
+		return -1, false
 	}
-	typedArrayTypes := []string{
-		"Int8Array", "Uint8Array", "Uint8ClampedArray",
-		"Int16Array", "Uint16Array", "Int32Array", "Uint32Array",
-		"Float32Array", "Float64Array", "BigInt64Array", "BigUint64Array",
+	typeID := int(C.JS_GetTypedArrayType(v.ref))
+	if typeID < 0 {
+		return typeID, false
 	}
-
-	for _, typeName := range typedArrayTypes {
-		if v.GlobalInstanceof(typeName) {
-			return true
-		}
-	}
-	return false
+	return typeID, true
 }
 
-func (v *Value) IsInt8Array() bool  { return v != nil && v.GlobalInstanceof("Int8Array") }
-func (v *Value) IsUint8Array() bool { return v != nil && v.GlobalInstanceof("Uint8Array") }
+func (v *Value) IsTypedArray() bool {
+	_, ok := v.typedArrayType()
+	return ok
+}
+
+func (v *Value) IsInt8Array() bool {
+	typeID, ok := v.typedArrayType()
+	return ok && typeID == int(C.JS_TYPED_ARRAY_INT8)
+}
+
+func (v *Value) IsUint8Array() bool {
+	typeID, ok := v.typedArrayType()
+	return ok && typeID == int(C.JS_TYPED_ARRAY_UINT8)
+}
+
 func (v *Value) IsUint8ClampedArray() bool {
-	return v != nil && v.GlobalInstanceof("Uint8ClampedArray")
+	typeID, ok := v.typedArrayType()
+	return ok && typeID == int(C.JS_TYPED_ARRAY_UINT8C)
 }
-func (v *Value) IsInt16Array() bool     { return v != nil && v.GlobalInstanceof("Int16Array") }
-func (v *Value) IsUint16Array() bool    { return v != nil && v.GlobalInstanceof("Uint16Array") }
-func (v *Value) IsInt32Array() bool     { return v != nil && v.GlobalInstanceof("Int32Array") }
-func (v *Value) IsUint32Array() bool    { return v != nil && v.GlobalInstanceof("Uint32Array") }
-func (v *Value) IsFloat32Array() bool   { return v != nil && v.GlobalInstanceof("Float32Array") }
-func (v *Value) IsFloat64Array() bool   { return v != nil && v.GlobalInstanceof("Float64Array") }
-func (v *Value) IsBigInt64Array() bool  { return v != nil && v.GlobalInstanceof("BigInt64Array") }
-func (v *Value) IsBigUint64Array() bool { return v != nil && v.GlobalInstanceof("BigUint64Array") }
+
+func (v *Value) IsInt16Array() bool {
+	typeID, ok := v.typedArrayType()
+	return ok && typeID == int(C.JS_TYPED_ARRAY_INT16)
+}
+
+func (v *Value) IsUint16Array() bool {
+	typeID, ok := v.typedArrayType()
+	return ok && typeID == int(C.JS_TYPED_ARRAY_UINT16)
+}
+
+func (v *Value) IsInt32Array() bool {
+	typeID, ok := v.typedArrayType()
+	return ok && typeID == int(C.JS_TYPED_ARRAY_INT32)
+}
+
+func (v *Value) IsUint32Array() bool {
+	typeID, ok := v.typedArrayType()
+	return ok && typeID == int(C.JS_TYPED_ARRAY_UINT32)
+}
+
+func (v *Value) IsFloat32Array() bool {
+	typeID, ok := v.typedArrayType()
+	return ok && typeID == int(C.JS_TYPED_ARRAY_FLOAT32)
+}
+
+func (v *Value) IsFloat64Array() bool {
+	typeID, ok := v.typedArrayType()
+	return ok && typeID == int(C.JS_TYPED_ARRAY_FLOAT64)
+}
+
+func (v *Value) IsBigInt64Array() bool {
+	typeID, ok := v.typedArrayType()
+	return ok && typeID == int(C.JS_TYPED_ARRAY_BIG_INT64)
+}
+
+func (v *Value) IsBigUint64Array() bool {
+	typeID, ok := v.typedArrayType()
+	return ok && typeID == int(C.JS_TYPED_ARRAY_BIG_UINT64)
+}
 
 // IsByteArray returns true if the value is array buffer
 func (v *Value) IsByteArray() bool {
-	return v != nil && v.IsObject() && (v.GlobalInstanceof("ArrayBuffer") || v.ToString() == "[object ArrayBuffer]")
+	return v != nil && bool(C.JS_IsArrayBuffer(v.ref))
+}
+
+// IsImmutableArrayBuffer returns true if the value is an immutable ArrayBuffer.
+func (v *Value) IsImmutableArrayBuffer() bool {
+	if v == nil {
+		return false
+	}
+	return C.JS_IsImmutableArrayBuffer(v.ref) > 0
+}
+
+// SetImmutableArrayBuffer updates the immutability flag on an ArrayBuffer value.
+func (v *Value) SetImmutableArrayBuffer(immutable bool) bool {
+	if v == nil {
+		return false
+	}
+	return C.JS_SetImmutableArrayBuffer(v.ref, C.bool(immutable)) == 0
 }
 
 // resolveClassIDFromInheritance attempts to resolve classID by checking if this constructor
