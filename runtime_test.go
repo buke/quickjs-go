@@ -978,6 +978,104 @@ func TestRuntimeSetModuleImportToggle(t *testing.T) {
 	requireImportFailure(ctx)
 }
 
+func TestRuntimeJobQueuePrimitives(t *testing.T) {
+	t.Run("PendingAndExecute", func(t *testing.T) {
+		rt := NewRuntime()
+		defer rt.Close()
+		ctx := rt.NewContext()
+		require.NotNil(t, ctx)
+		defer ctx.Close()
+
+		setup := ctx.Eval(`
+			(() => {
+				globalThis.__jobPrimitiveCounter = 0;
+				Promise.resolve().then(() => { globalThis.__jobPrimitiveCounter = 1; });
+				return 0;
+			})()
+		`)
+		require.NotNil(t, setup)
+		defer setup.Free()
+		require.False(t, setup.IsException())
+
+		require.True(t, rt.IsJobPending())
+
+		pendingCtx := rt.PendingJobContext()
+		require.Same(t, pendingCtx, rt.GetPendingJobContext())
+		if pendingCtx != nil {
+			require.Same(t, ctx, pendingCtx)
+		}
+
+		executed, executedCtx := rt.ExecutePendingJob()
+		require.Greater(t, executed, 0)
+		if executedCtx != nil {
+			require.Same(t, ctx, executedCtx)
+		}
+
+		for rt.IsJobPending() {
+			status, jobCtx := rt.ExecutePendingJob()
+			require.NotEqual(t, 0, status)
+			if jobCtx != nil {
+				require.Same(t, ctx, jobCtx)
+			}
+		}
+
+		counter := ctx.Eval(`globalThis.__jobPrimitiveCounter`)
+		require.NotNil(t, counter)
+		defer counter.Free()
+		require.False(t, counter.IsException())
+		require.EqualValues(t, 1, counter.ToInt32())
+
+		status, idleCtx := rt.ExecutePendingJob()
+		require.Equal(t, 0, status)
+		require.False(t, rt.IsJobPending())
+		require.Nil(t, rt.PendingJobContext())
+		require.Nil(t, rt.GetPendingJobContext())
+		if idleCtx != nil {
+			require.Same(t, ctx, idleCtx)
+		}
+	})
+
+	t.Run("FailClosed", func(t *testing.T) {
+		var nilRuntime *Runtime
+		require.False(t, nilRuntime.IsJobPending())
+		require.Nil(t, nilRuntime.PendingJobContext())
+		require.Nil(t, nilRuntime.GetPendingJobContext())
+		status, pendingCtx := nilRuntime.ExecutePendingJob()
+		require.Equal(t, 0, status)
+		require.Nil(t, pendingCtx)
+
+		func() {
+			ownerHook := ownerCheckCurrentGoroutineID
+			ownerRT := NewRuntime()
+			require.NotNil(t, ownerRT)
+			defer func() {
+				ownerCheckCurrentGoroutineID = ownerHook
+				ownerRT.Close()
+			}()
+			ownerCheckCurrentGoroutineID = func() uint64 { return 0 }
+			require.False(t, ownerRT.IsJobPending())
+			require.Nil(t, ownerRT.PendingJobContext())
+			require.Nil(t, ownerRT.GetPendingJobContext())
+			status, pendingCtx = ownerRT.ExecutePendingJob()
+			require.Equal(t, 0, status)
+			require.Nil(t, pendingCtx)
+		}()
+
+		closedRT := NewRuntime()
+		closedCtx := closedRT.NewContext()
+		require.NotNil(t, closedCtx)
+		closedCtx.Close()
+		closedRT.Close()
+
+		require.False(t, closedRT.IsJobPending())
+		require.Nil(t, closedRT.PendingJobContext())
+		require.Nil(t, closedRT.GetPendingJobContext())
+		status, pendingCtx = closedRT.ExecutePendingJob()
+		require.Equal(t, 0, status)
+		require.Nil(t, pendingCtx)
+	})
+}
+
 func TestRuntimeTimeoutOpaqueLifecycle(t *testing.T) {
 	base := timeoutOpaqueCount()
 

@@ -1269,6 +1269,132 @@ func TestContextPromise(t *testing.T) {
 	})
 }
 
+func TestContextPromisePrimitives(t *testing.T) {
+	useStableOwnerHooksForLegacySubtests(t)
+
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	t.Run("NewPromiseCapability", func(t *testing.T) {
+		capability := ctx.NewPromiseCapability()
+		require.NotNil(t, capability)
+		require.NotNil(t, capability.Promise)
+		require.NotNil(t, capability.Resolve)
+		require.NotNil(t, capability.Reject)
+		defer capability.Promise.Free()
+		defer capability.Resolve.Free()
+		defer capability.Reject.Free()
+		require.True(t, capability.Promise.IsPromise())
+
+		thisVal := ctx.NewUndefined()
+		defer thisVal.Free()
+
+		resolvedValue := ctx.NewString("capability resolved")
+		defer resolvedValue.Free()
+		resolvedCall := capability.Resolve.Execute(thisVal, resolvedValue)
+		require.NotNil(t, resolvedCall)
+		defer resolvedCall.Free()
+		require.False(t, resolvedCall.IsException())
+
+		resolvedResult := ctx.Await(capability.Promise)
+		defer resolvedResult.Free()
+		require.False(t, resolvedResult.IsException())
+		require.Equal(t, "capability resolved", resolvedResult.ToString())
+
+		rejectedCapability := ctx.NewPromiseCapability()
+		require.NotNil(t, rejectedCapability)
+		defer rejectedCapability.Promise.Free()
+		defer rejectedCapability.Resolve.Free()
+		defer rejectedCapability.Reject.Free()
+
+		errObj := ctx.NewError(errors.New("capability rejected"))
+		defer errObj.Free()
+		rejectedCall := rejectedCapability.Reject.Execute(thisVal, errObj)
+		require.NotNil(t, rejectedCall)
+		defer rejectedCall.Free()
+		require.False(t, rejectedCall.IsException())
+
+		rejectedResult := ctx.Await(rejectedCapability.Promise)
+		defer rejectedResult.Free()
+		require.True(t, rejectedResult.IsException())
+		err := ctx.Exception()
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "capability rejected")
+	})
+
+	t.Run("NewSettledPromise", func(t *testing.T) {
+		fulfilledValue := ctx.NewString("settled fulfilled")
+		defer fulfilledValue.Free()
+		fulfilledPromise := ctx.NewSettledPromise(fulfilledValue, false)
+		require.NotNil(t, fulfilledPromise)
+		defer fulfilledPromise.Free()
+		require.True(t, fulfilledPromise.IsPromise())
+
+		fulfilledResult := ctx.Await(fulfilledPromise)
+		defer fulfilledResult.Free()
+		require.False(t, fulfilledResult.IsException())
+		require.Equal(t, "settled fulfilled", fulfilledResult.ToString())
+
+		errObj := ctx.NewError(errors.New("settled rejected"))
+		defer errObj.Free()
+		rejectedPromise := ctx.NewSettledPromise(errObj, true)
+		require.NotNil(t, rejectedPromise)
+		defer rejectedPromise.Free()
+		require.True(t, rejectedPromise.IsPromise())
+
+		rejectedResult := ctx.Await(rejectedPromise)
+		defer rejectedResult.Free()
+		require.True(t, rejectedResult.IsException())
+		err := ctx.Exception()
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "settled rejected")
+
+		undefinedPromise := ctx.NewSettledPromise(nil, false)
+		require.NotNil(t, undefinedPromise)
+		defer undefinedPromise.Free()
+		undefinedResult := ctx.Await(undefinedPromise)
+		defer undefinedResult.Free()
+		require.True(t, undefinedResult.IsUndefined())
+	})
+
+	t.Run("PromisePrimitiveFailClosed", func(t *testing.T) {
+		var nilCtx *Context
+		require.Nil(t, nilCtx.NewPromiseCapability())
+		require.Nil(t, nilCtx.NewSettledPromise(nil, false))
+		require.False(t, nilCtx.EnqueueJob(func(*Context) {}))
+
+		otherRT := NewRuntime()
+		defer otherRT.Close()
+		otherCtx := otherRT.NewContext()
+		require.NotNil(t, otherCtx)
+		defer otherCtx.Close()
+		foreignValue := otherCtx.NewString("foreign")
+		defer foreignValue.Free()
+		require.Nil(t, ctx.NewSettledPromise(foreignValue, false))
+
+		closedRT := NewRuntime()
+		closedCtx := closedRT.NewContext()
+		require.NotNil(t, closedCtx)
+		closedCtx.Close()
+		require.Nil(t, closedCtx.NewPromiseCapability())
+		require.Nil(t, closedCtx.NewSettledPromise(nil, false))
+		require.False(t, closedCtx.EnqueueJob(func(*Context) {}))
+		closedRT.Close()
+	})
+
+	t.Run("EnqueueJob", func(t *testing.T) {
+		executed := false
+		require.True(t, ctx.EnqueueJob(func(inner *Context) {
+			require.Same(t, ctx, inner)
+			executed = true
+		}))
+		ctx.ProcessJobs()
+		require.True(t, executed)
+	})
+}
+
 func TestContextScheduler(t *testing.T) {
 	useStableOwnerHooksForLegacySubtests(t)
 

@@ -110,6 +110,11 @@ func (ctx *Context) Schedule(job func(*Context)) bool {
 	}
 }
 
+// EnqueueJob enqueues a job to run on the Context thread.
+func (ctx *Context) EnqueueJob(job func(*Context)) bool {
+	return ctx.Schedule(job)
+}
+
 // ProcessJobs drains all pending scheduled jobs.
 // Call this regularly (e.g., inside Loop or Await) to allow resolve/reject handlers to run.
 func (ctx *Context) ProcessJobs() {
@@ -1468,4 +1473,43 @@ func (ctx *Context) NewPromise(executor func(resolve, reject func(*Value))) *Val
 // Deprecated: Use NewPromise() instead.
 func (ctx *Context) Promise(executor func(resolve, reject func(*Value))) *Value {
 	return ctx.NewPromise(executor)
+}
+
+// PromiseCapability mirrors QuickJS promise capability tuple.
+type PromiseCapability struct {
+	Promise *Value
+	Resolve *Value
+	Reject  *Value
+}
+
+// NewPromiseCapability creates a promise plus its resolve/reject functions.
+func (ctx *Context) NewPromiseCapability() *PromiseCapability {
+	if !ctx.hasValidRef() {
+		return nil
+	}
+
+	resolving := [2]C.JSValue{C.JS_NewUndefined(), C.JS_NewUndefined()}
+	promise := C.JS_NewPromiseCapability(ctx.ref, &resolving[0])
+	return &PromiseCapability{
+		Promise: &Value{ctx: ctx, ref: promise},
+		Resolve: &Value{ctx: ctx, ref: resolving[0]},
+		Reject:  &Value{ctx: ctx, ref: resolving[1]},
+	}
+}
+
+// NewSettledPromise creates an already-fulfilled or already-rejected promise.
+func (ctx *Context) NewSettledPromise(value *Value, isReject bool) *Value {
+	if !ctx.hasValidRef() {
+		return nil
+	}
+
+	input := C.JS_NewUndefined()
+	if value != nil {
+		if !value.belongsTo(ctx) {
+			return nil
+		}
+		input = value.ref
+	}
+
+	return &Value{ctx: ctx, ref: C.JS_NewSettledPromise(ctx.ref, C.bool(isReject), input)}
 }

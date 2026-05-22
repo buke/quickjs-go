@@ -160,7 +160,7 @@ const (
 	DumpFlagAtoms           uint64 = C.JS_DUMP_ATOMS
 	DumpFlagShapes          uint64 = C.JS_DUMP_SHAPES
 	// DumpFlagAbortOnLeaks aborts on atom/object/string leaks and is intended for testing.
-	DumpFlagAbortOnLeaks    uint64 = C.JS_ABORT_ON_LEAKS
+	DumpFlagAbortOnLeaks uint64 = C.JS_ABORT_ON_LEAKS
 )
 
 // IntrinsicSet controls which QuickJS intrinsics are injected into a raw context.
@@ -897,6 +897,75 @@ func (r *Runtime) SetExecuteTimeout(timeout uint64) {
 	C.SetExecuteTimeout(r.ref, C.time_t(timeout))
 	// Clear user interrupt handler since timeout takes precedence
 	r.interruptHandlerState.Store(nil)
+}
+
+// IsJobPending reports whether there are pending jobs in the runtime queue.
+func (r *Runtime) IsJobPending() bool {
+	if r == nil {
+		return false
+	}
+	if !r.ensureOwnerAccess() {
+		return false
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if r.closed.Load() || r.ref == nil {
+		return false
+	}
+	return bool(C.JS_IsJobPending(r.ref))
+}
+
+// PendingJobContext returns the Context for the next pending job, if any.
+func (r *Runtime) PendingJobContext() *Context {
+	if r == nil {
+		return nil
+	}
+	if !r.ensureOwnerAccess() {
+		return nil
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if r.closed.Load() || r.ref == nil {
+		return nil
+	}
+	ctxRef := C.JS_GetPendingJobContext(r.ref)
+	if ctxRef == nil {
+		return nil
+	}
+	return getContextFromJS(ctxRef)
+}
+
+// GetPendingJobContext returns the Context for the next pending job.
+// Deprecated: Use PendingJobContext() instead.
+func (r *Runtime) GetPendingJobContext() *Context {
+	return r.PendingJobContext()
+}
+
+// ExecutePendingJob runs one pending runtime job and returns the raw status code.
+// Return values mirror quickjs-ng:
+//
+//	> 0: one job executed
+//	== 0: no pending jobs
+//	< 0: job execution raised an exception in the returned Context
+func (r *Runtime) ExecutePendingJob() (int, *Context) {
+	if r == nil {
+		return 0, nil
+	}
+	if !r.ensureOwnerAccess() {
+		return 0, nil
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if r.closed.Load() || r.ref == nil {
+		return 0, nil
+	}
+
+	var ctxRef *C.JSContext
+	status := int(C.JS_ExecutePendingJob(r.ref, &ctxRef))
+	if ctxRef == nil {
+		return status, nil
+	}
+	return status, getContextFromJS(ctxRef)
 }
 
 // SetStripInfo is retained for backward compatibility only.
