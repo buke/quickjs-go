@@ -108,7 +108,7 @@ if(NOT SUNOS)
 xcheck_add_c_compiler_flag(-funsigned-char)
 endif()
 
-# Clang on Windows without MSVC command line fails because the codebase uses 
+# Clang on Windows without MSVC command line fails because the codebase uses
 # functions like strcpy over strcpy_s
 if(CMAKE_C_COMPILER_ID STREQUAL "Clang" AND WIN32 AND NOT MSVC)
     add_compile_definitions(_CRT_SECURE_NO_WARNINGS)
@@ -381,6 +381,8 @@ add_qjs_libc_if_needed(qjs_exe)
 add_static_if_needed(qjs_exe)
 set_target_properties(qjs_exe PROPERTIES
     OUTPUT_NAME "qjs"
+    PDB_NAME "qjs_cli"
+    COMPILE_PDB_NAME "qjs_cli"
 )
 target_compile_definitions(qjs_exe PRIVATE ${qjs_defines})
 target_link_libraries(qjs_exe PRIVATE qjs)
@@ -557,7 +559,7 @@ if (QJS_ENABLE_INSTALL)
             RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
             LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
             ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR})
-    install(EXPORT qjsConfig DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/quickjs)
+    install(EXPORT qjsConfig DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/qjs)
     install(FILES LICENSE DESTINATION ${CMAKE_INSTALL_DOCDIR})
     install(DIRECTORY examples DESTINATION ${CMAKE_INSTALL_DOCDIR})
 endif()
