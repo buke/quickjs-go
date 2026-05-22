@@ -130,6 +130,7 @@ extern void SetInterruptHandler(JSRuntime *rt);
 extern void ClearInterruptHandler(JSRuntime *rt);
 extern void SetExecuteTimeout(JSRuntime *rt, time_t timeout);
 extern void SetPromiseRejectionTracker(JSRuntime *rt, int enabled);
+extern void SetQuickjsGoPromiseHook(JSRuntime *rt, int enabled);
 extern int GetTimeoutOpaqueCount(void);
 
 // =============================================================================

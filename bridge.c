@@ -189,6 +189,8 @@ static void QuickjsGoPromiseRejectionTracker(JSContext *ctx,
     JSRuntime *rt = JS_GetRuntime(ctx);
     (void)opaque;
 
+    goHostPromiseRejectionTracker(rt, ctx, promise, reason, is_handled ? 1 : 0);
+
     qjsgo_mutex_lock(&g_rejection_states_mu);
     RejectionStateEntry *state = getRejectionState(rt, 1);
     if (!state) {
@@ -247,6 +249,29 @@ static void QuickjsGoPromiseRejectionTracker(JSContext *ctx,
     state->tail = entry;
 
     qjsgo_mutex_unlock(&g_rejection_states_mu);
+}
+
+static void QuickjsGoPromiseHook(JSContext *ctx,
+                                 JSPromiseHookType type,
+                                 JSValueConst promise,
+                                 JSValueConst parent_promise,
+                                 void *opaque) {
+    JSRuntime *rt = JS_GetRuntime(ctx);
+    (void)opaque;
+    goPromiseHook(rt, ctx, (int)type, promise, parent_promise);
+}
+
+void SetQuickjsGoPromiseHook(JSRuntime *rt, int enabled) {
+    if (!rt) {
+        return;
+    }
+
+    if (enabled) {
+        JS_SetPromiseHook(rt, QuickjsGoPromiseHook, NULL);
+        return;
+    }
+
+    JS_SetPromiseHook(rt, NULL, NULL);
 }
 
 void SetPromiseRejectionTracker(JSRuntime *rt, int enabled) {

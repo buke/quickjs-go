@@ -1076,6 +1076,353 @@ func TestRuntimeJobQueuePrimitives(t *testing.T) {
 	})
 }
 
+func TestRuntimePromiseHookAPI(t *testing.T) {
+	drainPendingJobs := func(t *testing.T, rt *Runtime, ctx *Context) {
+		t.Helper()
+		for rt.IsJobPending() {
+			status, _ := rt.ExecutePendingJob()
+			require.NotEqual(t, 0, status)
+			if status < 0 {
+				require.Error(t, ctx.Exception())
+				return
+			}
+		}
+	}
+
+	t.Run("CallbackLifecycle", func(t *testing.T) {
+		rt := NewRuntime()
+		defer rt.Close()
+		ctx := rt.NewContext()
+		require.NotNil(t, ctx)
+		defer ctx.Close()
+
+		type hookEvent struct {
+			hookType  PromiseHookType
+			hasParent bool
+			isPromise bool
+		}
+
+		var (
+			eventsMu sync.Mutex
+			events   []hookEvent
+		)
+		ctxMatched := atomic.Bool{}
+		ctxMatched.Store(true)
+
+		rt.SetPromiseHook(func(hookCtx *Context, hookType PromiseHookType, promise *Value, parentPromise *Value) {
+			if hookCtx != ctx {
+				ctxMatched.Store(false)
+			}
+
+			event := hookEvent{hookType: hookType}
+			if promise != nil {
+				event.isPromise = promise.IsPromise()
+			}
+			if parentPromise != nil {
+				event.hasParent = !parentPromise.IsUndefined()
+			}
+
+			eventsMu.Lock()
+			events = append(events, event)
+			eventsMu.Unlock()
+		})
+
+		promise := ctx.Eval(`
+			(() => {
+				const root = Promise.resolve(1);
+				return root.then((v) => v + 1);
+			})()
+		`)
+		require.NotNil(t, promise)
+		defer promise.Free()
+		require.False(t, promise.IsException())
+
+		result := ctx.Await(promise)
+		require.NotNil(t, result)
+		defer result.Free()
+		require.False(t, result.IsException())
+		require.EqualValues(t, 2, result.ToInt32())
+
+		drainPendingJobs(t, rt, ctx)
+
+		eventsMu.Lock()
+		snapshot := append([]hookEvent(nil), events...)
+		eventsMu.Unlock()
+
+		require.True(t, ctxMatched.Load())
+		require.NotEmpty(t, snapshot)
+
+		foundInit := false
+		foundResolve := false
+		foundParent := false
+		for _, event := range snapshot {
+			if event.hookType == PromiseHookInit {
+				foundInit = true
+			}
+			if event.hookType == PromiseHookResolve {
+				foundResolve = true
+			}
+			if event.hasParent {
+				foundParent = true
+			}
+			require.True(t, event.isPromise)
+		}
+		require.True(t, foundInit)
+		require.True(t, foundResolve)
+		require.True(t, foundParent)
+
+		rt.SetPromiseHook(nil)
+		before := len(snapshot)
+
+		clearedPromise := ctx.Eval(`Promise.resolve(3).then((v) => v)`)
+		require.NotNil(t, clearedPromise)
+		defer clearedPromise.Free()
+		require.False(t, clearedPromise.IsException())
+
+		clearedResult := ctx.Await(clearedPromise)
+		require.NotNil(t, clearedResult)
+		defer clearedResult.Free()
+		require.False(t, clearedResult.IsException())
+		require.EqualValues(t, 3, clearedResult.ToInt32())
+
+		eventsMu.Lock()
+		after := len(events)
+		eventsMu.Unlock()
+		require.Equal(t, before, after)
+	})
+
+	t.Run("FailClosed", func(t *testing.T) {
+		var nilRuntime *Runtime
+		nilRuntime.SetPromiseHook(func(*Context, PromiseHookType, *Value, *Value) {})
+
+		func() {
+			ownerHook := ownerCheckCurrentGoroutineID
+			ownerRT := NewRuntime()
+			require.NotNil(t, ownerRT)
+			defer func() {
+				ownerCheckCurrentGoroutineID = ownerHook
+				ownerRT.Close()
+			}()
+			ownerCheckCurrentGoroutineID = func() uint64 { return 0 }
+			ownerRT.SetPromiseHook(func(*Context, PromiseHookType, *Value, *Value) {})
+		}()
+
+		closedRT := NewRuntime()
+		closedCtx := closedRT.NewContext()
+		require.NotNil(t, closedCtx)
+		closedCtx.Close()
+		closedRT.Close()
+		closedRT.SetPromiseHook(func(*Context, PromiseHookType, *Value, *Value) {})
+	})
+
+	t.Run("DispatchGuards", func(t *testing.T) {
+		rt := NewRuntime()
+		defer rt.Close()
+		ctx := rt.NewContext()
+		require.NotNil(t, ctx)
+		defer ctx.Close()
+
+		promise := ctx.Eval(`Promise.resolve(1)`)
+		require.NotNil(t, promise)
+		defer promise.Free()
+		require.False(t, promise.IsException())
+
+		undefinedParent := ctx.Eval(`void 0`)
+		require.NotNil(t, undefinedParent)
+		defer undefinedParent.Free()
+		require.False(t, undefinedParent.IsException())
+
+		var nilRuntime *Runtime
+		nilRuntime.callPromiseHook(ctx.ref, PromiseHookInit, promise.ref, promise.ref)
+
+		// Holder not set should no-op.
+		rt.callPromiseHook(ctx.ref, PromiseHookInit, promise.ref, promise.ref)
+
+		calls := atomic.Int32{}
+		rt.SetPromiseHook(func(*Context, PromiseHookType, *Value, *Value) {
+			calls.Add(1)
+		})
+
+		// Nil context should fail closed.
+		rt.callPromiseHook(nil, PromiseHookInit, promise.ref, promise.ref)
+		require.EqualValues(t, 0, calls.Load())
+
+		// Exercise parent undefined and parent present branches.
+		rt.callPromiseHook(ctx.ref, PromiseHookInit, promise.ref, undefinedParent.ref)
+		rt.callPromiseHook(ctx.ref, PromiseHookInit, promise.ref, promise.ref)
+		require.EqualValues(t, 2, calls.Load())
+
+		// C dispatch guard: runtime mapping miss should no-op.
+		goPromiseHook(nil, nil, 0, promise.ref, promise.ref)
+	})
+}
+
+func TestRuntimeHostPromiseRejectionTrackerAPI(t *testing.T) {
+	drainPendingJobs := func(t *testing.T, rt *Runtime, ctx *Context) {
+		t.Helper()
+		for rt.IsJobPending() {
+			status, _ := rt.ExecutePendingJob()
+			require.NotEqual(t, 0, status)
+			if status < 0 {
+				require.Error(t, ctx.Exception())
+				return
+			}
+		}
+	}
+
+	t.Run("CallbackLifecycle", func(t *testing.T) {
+		rt := NewRuntime()
+		defer rt.Close()
+		ctx := rt.NewContext()
+		require.NotNil(t, ctx)
+		defer ctx.Close()
+
+		type rejectionEvent struct {
+			reason     string
+			isHandled  bool
+			ctxMatched bool
+			isPromise  bool
+		}
+
+		var (
+			eventsMu sync.Mutex
+			events   []rejectionEvent
+		)
+
+		rt.SetHostPromiseRejectionTracker(func(hookCtx *Context, promise *Value, reason *Value, isHandled bool) {
+			event := rejectionEvent{
+				isHandled:  isHandled,
+				ctxMatched: hookCtx == ctx,
+				isPromise:  promise != nil && promise.IsPromise(),
+			}
+			if reason != nil && !reason.IsUndefined() {
+				event.reason = reason.ToString()
+			}
+			eventsMu.Lock()
+			events = append(events, event)
+			eventsMu.Unlock()
+		})
+
+		setup := ctx.Eval(`
+			(() => {
+				globalThis.__trackerPromise = Promise.reject("tracker-reason");
+				return 0;
+			})()
+		`)
+		require.NotNil(t, setup)
+		defer setup.Free()
+		require.False(t, setup.IsException())
+
+		drainPendingJobs(t, rt, ctx)
+
+		attach := ctx.Eval(`globalThis.__trackerPromise.catch(() => {});`)
+		require.NotNil(t, attach)
+		defer attach.Free()
+		require.False(t, attach.IsException())
+
+		drainPendingJobs(t, rt, ctx)
+
+		eventsMu.Lock()
+		snapshot := append([]rejectionEvent(nil), events...)
+		eventsMu.Unlock()
+
+		require.NotEmpty(t, snapshot)
+
+		hasUnhandled := false
+		hasHandled := false
+		for _, event := range snapshot {
+			require.True(t, event.ctxMatched)
+			require.True(t, event.isPromise)
+			if event.reason == "tracker-reason" && !event.isHandled {
+				hasUnhandled = true
+			}
+			if event.reason == "tracker-reason" && event.isHandled {
+				hasHandled = true
+			}
+		}
+		require.True(t, hasUnhandled)
+		require.True(t, hasHandled)
+
+		rt.SetHostPromiseRejectionTracker(nil)
+		before := len(snapshot)
+
+		cleared := ctx.Eval(`Promise.reject("tracker-cleared");`)
+		require.NotNil(t, cleared)
+		defer cleared.Free()
+		require.False(t, cleared.IsException())
+
+		drainPendingJobs(t, rt, ctx)
+
+		eventsMu.Lock()
+		after := len(events)
+		eventsMu.Unlock()
+		require.Equal(t, before, after)
+	})
+
+	t.Run("FailClosed", func(t *testing.T) {
+		var nilRuntime *Runtime
+		nilRuntime.SetHostPromiseRejectionTracker(func(*Context, *Value, *Value, bool) {})
+
+		func() {
+			ownerHook := ownerCheckCurrentGoroutineID
+			ownerRT := NewRuntime()
+			require.NotNil(t, ownerRT)
+			defer func() {
+				ownerCheckCurrentGoroutineID = ownerHook
+				ownerRT.Close()
+			}()
+			ownerCheckCurrentGoroutineID = func() uint64 { return 0 }
+			ownerRT.SetHostPromiseRejectionTracker(func(*Context, *Value, *Value, bool) {})
+		}()
+
+		closedRT := NewRuntime()
+		closedCtx := closedRT.NewContext()
+		require.NotNil(t, closedCtx)
+		closedCtx.Close()
+		closedRT.Close()
+		closedRT.SetHostPromiseRejectionTracker(func(*Context, *Value, *Value, bool) {})
+	})
+
+	t.Run("DispatchGuards", func(t *testing.T) {
+		rt := NewRuntime()
+		defer rt.Close()
+		ctx := rt.NewContext()
+		require.NotNil(t, ctx)
+		defer ctx.Close()
+
+		promise := ctx.Eval(`Promise.resolve(1)`)
+		require.NotNil(t, promise)
+		defer promise.Free()
+		require.False(t, promise.IsException())
+
+		reason := ctx.Eval(`"reason"`)
+		require.NotNil(t, reason)
+		defer reason.Free()
+		require.False(t, reason.IsException())
+
+		var nilRuntime *Runtime
+		nilRuntime.callHostPromiseRejectionTracker(ctx.ref, promise.ref, reason.ref, false)
+
+		// Holder not set should no-op.
+		rt.callHostPromiseRejectionTracker(ctx.ref, promise.ref, reason.ref, false)
+
+		calls := atomic.Int32{}
+		rt.SetHostPromiseRejectionTracker(func(*Context, *Value, *Value, bool) {
+			calls.Add(1)
+		})
+
+		// Nil context should fail closed.
+		rt.callHostPromiseRejectionTracker(nil, promise.ref, reason.ref, false)
+		require.EqualValues(t, 0, calls.Load())
+
+		rt.callHostPromiseRejectionTracker(ctx.ref, promise.ref, reason.ref, false)
+		require.EqualValues(t, 1, calls.Load())
+
+		// C dispatch guard: runtime mapping miss should no-op.
+		goHostPromiseRejectionTracker(nil, nil, promise.ref, reason.ref, 0)
+	})
+}
+
 func TestRuntimeTimeoutOpaqueLifecycle(t *testing.T) {
 	base := timeoutOpaqueCount()
 

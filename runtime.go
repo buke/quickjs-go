@@ -19,8 +19,32 @@ import (
 // Return != 0 if the JS code needs to be interrupted
 type InterruptHandler func() int
 
+// PromiseHookType mirrors quickjs-ng JSPromiseHookType.
+type PromiseHookType int
+
+const (
+	PromiseHookInit    PromiseHookType = PromiseHookType(C.JS_PROMISE_HOOK_INIT)
+	PromiseHookBefore  PromiseHookType = PromiseHookType(C.JS_PROMISE_HOOK_BEFORE)
+	PromiseHookAfter   PromiseHookType = PromiseHookType(C.JS_PROMISE_HOOK_AFTER)
+	PromiseHookResolve PromiseHookType = PromiseHookType(C.JS_PROMISE_HOOK_RESOLVE)
+)
+
+// PromiseHook receives runtime-level promise lifecycle events.
+type PromiseHook func(ctx *Context, hookType PromiseHookType, promise *Value, parentPromise *Value)
+
+// HostPromiseRejectionTracker receives host rejection tracking events.
+type HostPromiseRejectionTracker func(ctx *Context, promise *Value, reason *Value, isHandled bool)
+
 type interruptHandlerHolder struct {
 	fn InterruptHandler
+}
+
+type promiseHookHolder struct {
+	fn PromiseHook
+}
+
+type hostPromiseRejectionTrackerHolder struct {
+	fn HostPromiseRejectionTracker
 }
 
 // runtimeNewContextHook is used in tests to force JS_NewContext failure paths.
@@ -67,6 +91,8 @@ type Runtime struct {
 	ownerGoroutineID       atomic.Uint64
 	ownerThreadID          atomic.Uint64
 	interruptHandlerState  atomic.Pointer[interruptHandlerHolder]
+	promiseHookState       atomic.Pointer[promiseHookHolder]
+	hostRejectionHookState atomic.Pointer[hostPromiseRejectionTrackerHolder]
 	contexts               sync.Map
 	contextsByID           sync.Map
 	contextIDCounter       atomic.Uint64
@@ -624,7 +650,10 @@ func (r *Runtime) Close() {
 
 		ref := r.ref
 		r.interruptHandlerState.Store(nil)
+		r.promiseHookState.Store(nil)
+		r.hostRejectionHookState.Store(nil)
 		C.ClearInterruptHandler(ref)
+		C.SetQuickjsGoPromiseHook(ref, 0)
 		C.SetPromiseRejectionTracker(ref, 0)
 
 		r.constructorRegistry.Range(func(key, _ interface{}) bool {
@@ -1052,6 +1081,50 @@ func (r *Runtime) ClearInterruptHandler() {
 	C.ClearInterruptHandler(r.ref)
 }
 
+// SetPromiseHook registers a runtime-level promise hook.
+// Pass nil to clear the hook.
+func (r *Runtime) SetPromiseHook(hook PromiseHook) {
+	if r == nil {
+		return
+	}
+	if !r.ensureOwnerAccess() {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.closed.Load() || r.ref == nil {
+		return
+	}
+	if hook == nil {
+		r.promiseHookState.Store(nil)
+		C.SetQuickjsGoPromiseHook(r.ref, 0)
+		return
+	}
+	r.promiseHookState.Store(&promiseHookHolder{fn: hook})
+	C.SetQuickjsGoPromiseHook(r.ref, 1)
+}
+
+// SetHostPromiseRejectionTracker registers a host rejection tracker callback.
+// Pass nil to clear the hook.
+func (r *Runtime) SetHostPromiseRejectionTracker(tracker HostPromiseRejectionTracker) {
+	if r == nil {
+		return
+	}
+	if !r.ensureOwnerAccess() {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.closed.Load() || r.ref == nil {
+		return
+	}
+	if tracker == nil {
+		r.hostRejectionHookState.Store(nil)
+		return
+	}
+	r.hostRejectionHookState.Store(&hostPromiseRejectionTrackerHolder{fn: tracker})
+}
+
 // callInterruptHandler is called from C layer via runtime mapping (internal use)
 func (r *Runtime) callInterruptHandler() int {
 	if r == nil {
@@ -1062,6 +1135,45 @@ func (r *Runtime) callInterruptHandler() int {
 		return holder.fn()
 	}
 	return 0 // No interrupt
+}
+
+// callPromiseHook is called from C layer via runtime mapping (internal use).
+func (r *Runtime) callPromiseHook(ctxRef *C.JSContext, hookType PromiseHookType, promise C.JSValue, parentPromise C.JSValue) {
+	if r == nil {
+		return
+	}
+	holder := r.promiseHookState.Load()
+	if holder == nil || holder.fn == nil {
+		return
+	}
+	ctx := getContextFromJS(ctxRef)
+	if ctx == nil {
+		return
+	}
+	promiseVal := &Value{ctx: ctx, ref: promise, borrowed: true}
+	var parentVal *Value
+	if !bool(C.JS_IsUndefined(parentPromise)) {
+		parentVal = &Value{ctx: ctx, ref: parentPromise, borrowed: true}
+	}
+	holder.fn(ctx, hookType, promiseVal, parentVal)
+}
+
+// callHostPromiseRejectionTracker is called from C layer via runtime mapping (internal use).
+func (r *Runtime) callHostPromiseRejectionTracker(ctxRef *C.JSContext, promise C.JSValue, reason C.JSValue, isHandled bool) {
+	if r == nil {
+		return
+	}
+	holder := r.hostRejectionHookState.Load()
+	if holder == nil || holder.fn == nil {
+		return
+	}
+	ctx := getContextFromJS(ctxRef)
+	if ctx == nil {
+		return
+	}
+	promiseVal := &Value{ctx: ctx, ref: promise, borrowed: true}
+	reasonVal := &Value{ctx: ctx, ref: reason, borrowed: true}
+	holder.fn(ctx, promiseVal, reasonVal, isHandled)
 }
 
 // NewContext creates a new JavaScript context with default host bootstrap.
