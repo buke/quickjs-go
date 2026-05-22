@@ -759,6 +759,23 @@ func TestValueTypedArrays(t *testing.T) {
 		_, err := notUint8.ToUint8Array()
 		require.Error(t, err)
 	})
+
+	t.Run("Uint8ArrayDetachedBuffer", func(t *testing.T) {
+		detachedUint8 := ctx.Eval(`
+			(() => {
+				const buffer = new ArrayBuffer(4);
+				const view = new Uint8Array(buffer);
+				buffer.transfer();
+				return view;
+			})()
+		`)
+		defer detachedUint8.Free()
+		require.False(t, detachedUint8.IsException())
+
+		_, err := detachedUint8.ToUint8Array()
+		require.Error(t, err)
+		require.ErrorContains(t, ctx.Exception(), "ArrayBuffer")
+	})
 }
 
 func TestValueNativeObjectPredicates(t *testing.T) {
@@ -840,6 +857,9 @@ func TestValueProxyHelpers(t *testing.T) {
 	require.NotNil(t, proxy)
 	require.False(t, proxy.IsException())
 	require.True(t, proxy.IsProxy())
+
+	var nilCtx *Context
+	require.Nil(t, nilCtx.NewProxy(target, handler))
 
 	proxyTarget := proxy.ProxyTarget()
 	defer proxyTarget.Free()
