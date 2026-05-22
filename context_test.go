@@ -411,6 +411,7 @@ func TestContextLibcStage4HelpersNilAndClosedGuards(t *testing.T) {
 
 	var nilCtx *Context
 	require.Nil(t, nilCtx.NewDate(0))
+	require.Nil(t, nilCtx.NewUint64(1))
 	require.Nil(t, nilCtx.NewSymbol("x"))
 	require.Nil(t, nilCtx.NewGlobalSymbol("x"))
 	require.False(t, nilCtx.SetImportMeta(nil, false, false))
@@ -430,6 +431,7 @@ func TestContextLibcStage4HelpersNilAndClosedGuards(t *testing.T) {
 
 	ctx.Close()
 	require.Nil(t, ctx.NewDate(0))
+	require.Nil(t, ctx.NewUint64(1))
 	require.Nil(t, ctx.NewSymbol("x"))
 	require.Nil(t, ctx.NewGlobalSymbol("x"))
 	require.False(t, ctx.SetImportMeta(moduleFunc, false, false))
