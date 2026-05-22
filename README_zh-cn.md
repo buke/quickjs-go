@@ -1681,7 +1681,7 @@ import (
 )
 
 func main() {
-    // 启用模块导入
+    // 安装默认的基于文件系统的模块 loader
     rt := quickjs.NewRuntime(quickjs.WithModuleImport(true))
     defer rt.Close()
 

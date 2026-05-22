@@ -1686,7 +1686,7 @@ import (
 )
 
 func main() {
-    // enable module import
+    // install the default file-based module loader
     rt := quickjs.NewRuntime(quickjs.WithModuleImport(true))
     defer rt.Close()
 
