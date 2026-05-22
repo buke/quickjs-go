@@ -154,6 +154,23 @@ func TestContextNewStringUTF16(t *testing.T) {
 	closedRT.Close()
 }
 
+func TestContextExceptionPrimitiveFallback(t *testing.T) {
+	useStableOwnerHooksForLegacySubtests(t)
+
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	result := ctx.Eval(`throw 42`)
+	defer result.Free()
+	require.True(t, result.IsException())
+	require.True(t, ctx.HasException())
+	require.EqualError(t, ctx.Exception(), "javascript exception")
+	require.False(t, ctx.HasException())
+	require.Nil(t, ctx.Exception())
+}
+
 func TestContextInternalStateHelpers(t *testing.T) {
 	var nilCtx *Context
 	require.Nil(t, nilCtx.Runtime())

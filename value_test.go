@@ -642,6 +642,89 @@ func TestValueNativeConversionAPIs(t *testing.T) {
 		require.Nil(t, utf16)
 		require.EqualError(t, err, "value context is not available")
 	})
+
+	t.Run("PrimitiveExceptionFallback", func(t *testing.T) {
+		tests := []struct {
+			name   string
+			expr   string
+			invoke func(*Value) error
+		}{
+			{
+				name: "ToNumber",
+				expr: `({ valueOf() { throw 42 }, toString() { return "1" } })`,
+				invoke: func(v *Value) error {
+					converted, err := v.ToNumber()
+					if converted != nil {
+						converted.Free()
+					}
+					return err
+				},
+			},
+			{
+				name: "ToIndex",
+				expr: `({ valueOf() { throw 42 }, toString() { return "1" } })`,
+				invoke: func(v *Value) error {
+					_, err := v.ToIndex()
+					return err
+				},
+			},
+			{
+				name: "ToBigInt64",
+				expr: `({ valueOf() { throw 42 } })`,
+				invoke: func(v *Value) error {
+					_, err := v.ToBigInt64()
+					return err
+				},
+			},
+			{
+				name: "ToBigUint64",
+				expr: `({ valueOf() { throw 42 } })`,
+				invoke: func(v *Value) error {
+					_, err := v.ToBigUint64()
+					return err
+				},
+			},
+			{
+				name: "ToInt64Ext",
+				expr: `({ valueOf() { throw 42 } })`,
+				invoke: func(v *Value) error {
+					_, err := v.ToInt64Ext()
+					return err
+				},
+			},
+			{
+				name: "ToPropertyKey",
+				expr: `({ toString() { throw 42 } })`,
+				invoke: func(v *Value) error {
+					converted, err := v.ToPropertyKey()
+					if converted != nil {
+						converted.Free()
+					}
+					return err
+				},
+			},
+			{
+				name: "ToStringUTF16",
+				expr: `({ toString() { throw 42 } })`,
+				invoke: func(v *Value) error {
+					converted, err := v.ToStringUTF16()
+					if converted != nil {
+						return errors.New("unexpected utf16 result")
+					}
+					return err
+				},
+			},
+		}
+
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				throwing := ctx.Eval(tt.expr)
+				defer throwing.Free()
+				err := tt.invoke(throwing)
+				require.EqualError(t, err, "javascript exception")
+			})
+		}
+	})
 }
 
 // TestValueJSON tests JSON operations

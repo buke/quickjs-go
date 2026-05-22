@@ -1,6 +1,7 @@
 package quickjs
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	goruntime "runtime"
@@ -1247,14 +1248,21 @@ func (ctx *Context) HasException() bool {
 	return bool(C.JS_HasException(ctx.ref))
 }
 
-// Exception returns a context's exception value.
-func (ctx *Context) Exception() error {
-	if !ctx.hasValidRef() {
-		return nil
-	}
+func (ctx *Context) exceptionError() error {
 	val := &Value{ctx: ctx, ref: C.JS_GetException(ctx.ref)}
 	defer val.Free()
-	return val.Error()
+	if err := val.Error(); err != nil {
+		return err
+	}
+	return errors.New("javascript exception")
+}
+
+// Exception returns a context's exception value.
+func (ctx *Context) Exception() error {
+	if !ctx.hasValidRef() || !ctx.HasException() {
+		return nil
+	}
+	return ctx.exceptionError()
 }
 
 // Loop runs the context's event loop.
