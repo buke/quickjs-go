@@ -549,6 +549,22 @@ func TestValueArrayBuffer(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "exceeds the maximum length")
 
+	t.Run("DetachedArrayBuffer", func(t *testing.T) {
+		detachedBuffer := ctx.Eval(`
+			(() => {
+				const buffer = new ArrayBuffer(4);
+				buffer.transfer();
+				return buffer;
+			})()
+		`)
+		defer detachedBuffer.Free()
+		require.False(t, detachedBuffer.IsException())
+
+		_, err := detachedBuffer.ToByteArray(0)
+		require.Error(t, err)
+		require.ErrorContains(t, ctx.Exception(), "ArrayBuffer")
+	})
+
 	// Test array length - FIXED: removed error handling
 	arr := ctx.Eval(`[1, 2, 3, 4, 5]`)
 	defer arr.Free()
@@ -776,6 +792,34 @@ func TestValueTypedArrays(t *testing.T) {
 		require.Error(t, err)
 		require.ErrorContains(t, ctx.Exception(), "ArrayBuffer")
 	})
+
+	detachedConversionTests := []struct {
+		name        string
+		jsCode      string
+		convertFunc func(*Value) (interface{}, error)
+	}{
+		{"Int8ArrayDetachedBuffer", `(() => { const view = new Int8Array(1); view.buffer.transfer(); return view; })()`, func(v *Value) (interface{}, error) { return v.ToInt8Array() }},
+		{"Int16ArrayDetachedBuffer", `(() => { const view = new Int16Array(1); view.buffer.transfer(); return view; })()`, func(v *Value) (interface{}, error) { return v.ToInt16Array() }},
+		{"Uint16ArrayDetachedBuffer", `(() => { const view = new Uint16Array(1); view.buffer.transfer(); return view; })()`, func(v *Value) (interface{}, error) { return v.ToUint16Array() }},
+		{"Int32ArrayDetachedBuffer", `(() => { const view = new Int32Array(1); view.buffer.transfer(); return view; })()`, func(v *Value) (interface{}, error) { return v.ToInt32Array() }},
+		{"Uint32ArrayDetachedBuffer", `(() => { const view = new Uint32Array(1); view.buffer.transfer(); return view; })()`, func(v *Value) (interface{}, error) { return v.ToUint32Array() }},
+		{"Float32ArrayDetachedBuffer", `(() => { const view = new Float32Array(1); view.buffer.transfer(); return view; })()`, func(v *Value) (interface{}, error) { return v.ToFloat32Array() }},
+		{"Float64ArrayDetachedBuffer", `(() => { const view = new Float64Array(1); view.buffer.transfer(); return view; })()`, func(v *Value) (interface{}, error) { return v.ToFloat64Array() }},
+		{"BigInt64ArrayDetachedBuffer", `(() => { const view = new BigInt64Array(1); view.buffer.transfer(); return view; })()`, func(v *Value) (interface{}, error) { return v.ToBigInt64Array() }},
+		{"BigUint64ArrayDetachedBuffer", `(() => { const view = new BigUint64Array(1); view.buffer.transfer(); return view; })()`, func(v *Value) (interface{}, error) { return v.ToBigUint64Array() }},
+	}
+
+	for _, tt := range detachedConversionTests {
+		t.Run(tt.name, func(t *testing.T) {
+			val := ctx.Eval(tt.jsCode)
+			defer val.Free()
+			require.False(t, val.IsException())
+
+			_, err := tt.convertFunc(val)
+			require.Error(t, err)
+			require.ErrorContains(t, ctx.Exception(), "ArrayBuffer")
+		})
+	}
 }
 
 func TestValueNativeObjectPredicates(t *testing.T) {
