@@ -52,33 +52,38 @@ func TestDeprecatedContextAPIs(t *testing.T) {
 		defer val7.Free()
 		require.True(t, val7.IsNumber())
 
-		val8 := ctx.BigInt64(9223372036854775807)
+		val8 := ctx.Uint64(uint64(1) << 32)
 		defer val8.Free()
-		require.True(t, val8.IsBigInt())
+		require.True(t, val8.IsNumber())
+		require.Equal(t, float64(uint64(1)<<32), val8.ToFloat64())
 
-		val9 := ctx.BigUint64(18446744073709551615)
+		val9 := ctx.BigInt64(9223372036854775807)
 		defer val9.Free()
 		require.True(t, val9.IsBigInt())
 
-		val10 := ctx.Float64(3.14159)
+		val10 := ctx.BigUint64(18446744073709551615)
 		defer val10.Free()
-		require.True(t, val10.IsNumber())
+		require.True(t, val10.IsBigInt())
 
-		val11 := ctx.String("test")
+		val11 := ctx.Float64(3.14159)
 		defer val11.Free()
-		require.True(t, val11.IsString())
+		require.True(t, val11.IsNumber())
 
-		val12 := ctx.Object()
+		val12 := ctx.String("test")
 		defer val12.Free()
-		require.True(t, val12.IsObject())
+		require.True(t, val12.IsString())
 
-		val13 := ctx.ArrayBuffer([]byte{1, 2, 3})
+		val13 := ctx.Object()
 		defer val13.Free()
-		require.True(t, val13.IsByteArray())
+		require.True(t, val13.IsObject())
 
-		val14 := ctx.Error(errors.New("test error"))
+		val14 := ctx.ArrayBuffer([]byte{1, 2, 3})
 		defer val14.Free()
-		require.True(t, val14.IsError())
+		require.True(t, val14.IsByteArray())
+
+		val15 := ctx.Error(errors.New("test error"))
+		defer val15.Free()
+		require.True(t, val15.IsError())
 	})
 
 	t.Run("DeprecatedTypedArrays", func(t *testing.T) {
