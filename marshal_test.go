@@ -684,70 +684,53 @@ func TestTypedArrayErrors(t *testing.T) {
 	ctx := rt.NewContext()
 	defer ctx.Close()
 
-	// Helper function to create fake TypedArray objects
-	createFakeTypedArray := func(typeName string) *Value {
-		jsCode := fmt.Sprintf(`
-            var corrupted = Object.create(%s.prototype);
-            Object.defineProperty(corrupted, 'constructor', {
-                value: %s,
-                writable: true,
-                enumerable: false,
-                configurable: true
-            });
-            corrupted;
-        `, typeName, typeName)
-		val := ctx.Eval(jsCode)
-		return val
-	}
-
 	// Test ToXXXArray error branches in unmarshalSlice
 	errorTests := []struct {
-		name     string
-		target   interface{}
-		typeName string
+		name        string
+		target      interface{}
+		jsCode      string
+		expectedErr string
 	}{
-		{"FakeInt8Array", &[]int8{}, "Int8Array"},
-		{"FakeUint8Array", &[]uint8{}, "Uint8Array"},
-		{"FakeInt16Array", &[]int16{}, "Int16Array"},
-		{"FakeUint16Array", &[]uint16{}, "Uint16Array"},
-		{"FakeInt32Array", &[]int32{}, "Int32Array"},
-		{"FakeUint32Array", &[]uint32{}, "Uint32Array"},
-		{"FakeFloat32Array", &[]float32{}, "Float32Array"},
-		{"FakeFloat64Array", &[]float64{}, "Float64Array"},
-		{"FakeBigInt64Array", &[]int64{}, "BigInt64Array"},
-		{"FakeBigUint64Array", &[]uint64{}, "BigUint64Array"},
+		{"DetachedInt8Array", &[]int8{}, `(() => { const view = new Int8Array(1); view.buffer.transfer(); return view; })()`, "ArrayBuffer"},
+		{"DetachedUint8Array", &[]uint8{}, `(() => { const view = new Uint8Array(1); view.buffer.transfer(); return view; })()`, "Uint8Array"},
+		{"DetachedInt16Array", &[]int16{}, `(() => { const view = new Int16Array(1); view.buffer.transfer(); return view; })()`, "ArrayBuffer"},
+		{"DetachedUint16Array", &[]uint16{}, `(() => { const view = new Uint16Array(1); view.buffer.transfer(); return view; })()`, "ArrayBuffer"},
+		{"DetachedInt32Array", &[]int32{}, `(() => { const view = new Int32Array(1); view.buffer.transfer(); return view; })()`, "ArrayBuffer"},
+		{"DetachedUint32Array", &[]uint32{}, `(() => { const view = new Uint32Array(1); view.buffer.transfer(); return view; })()`, "ArrayBuffer"},
+		{"DetachedFloat32Array", &[]float32{}, `(() => { const view = new Float32Array(1); view.buffer.transfer(); return view; })()`, "ArrayBuffer"},
+		{"DetachedFloat64Array", &[]float64{}, `(() => { const view = new Float64Array(1); view.buffer.transfer(); return view; })()`, "ArrayBuffer"},
+		{"DetachedBigInt64Array", &[]int64{}, `(() => { const view = new BigInt64Array(1); view.buffer.transfer(); return view; })()`, "ArrayBuffer"},
+		{"DetachedBigUint64Array", &[]uint64{}, `(() => { const view = new BigUint64Array(1); view.buffer.transfer(); return view; })()`, "ArrayBuffer"},
 	}
 
 	for _, tt := range errorTests {
 		t.Run(tt.name, func(t *testing.T) {
-			fakeTypedArray := createFakeTypedArray(tt.typeName)
-			defer fakeTypedArray.Free()
+			jsVal := ctx.Eval(tt.jsCode)
+			defer jsVal.Free()
+			require.False(t, jsVal.IsException())
 
-			err := ctx.Unmarshal(fakeTypedArray, tt.target)
-			if err != nil {
-				t.Logf("✓ Covered ToXXXArray error branch for %s: %v", tt.name, err)
-			}
+			err := ctx.Unmarshal(jsVal, tt.target)
+			require.Error(t, err)
+			require.Contains(t, err.Error(), tt.expectedErr)
 		})
 	}
 
 	// Test specific error cases for byte arrays
 	t.Run("ByteArrayErrors", func(t *testing.T) {
-		fakeArrayBuffer := ctx.Eval(`
-            var fakeBuffer = {
-                constructor: ArrayBuffer,
-                byteLength: 10
-            };
-            Object.setPrototypeOf(fakeBuffer, ArrayBuffer.prototype);
-            fakeBuffer;
+		detachedArrayBuffer := ctx.Eval(`
+            (() => {
+                const buffer = new ArrayBuffer(8);
+                buffer.transfer();
+                return buffer;
+            })()
         `)
-		defer fakeArrayBuffer.Free()
-		require.False(t, fakeArrayBuffer.IsException())
+		defer detachedArrayBuffer.Free()
+		require.False(t, detachedArrayBuffer.IsException())
 
 		var result []byte
-		err := ctx.Unmarshal(fakeArrayBuffer, &result)
-		if err != nil {
-			t.Logf("✓ Covered ToByteArray error branch: %v", err)
-		}
+		err := ctx.Unmarshal(detachedArrayBuffer, &result)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "ArrayBuffer")
 	})
 
 	// Test fallback to regular array
@@ -1243,27 +1226,20 @@ func TestErrorCases(t *testing.T) {
 
 	// Test ToByteArray error in unmarshalInterface
 	t.Run("ToByteArrayErrorInInterface", func(t *testing.T) {
-		fakeArrayBuffer := ctx.Eval(`
-            var fakeArrayBuffer = {
-                constructor: ArrayBuffer,
-                byteLength: 10,
-                toString: function() { return "[object ArrayBuffer]"; }
-            };
-            Object.setPrototypeOf(fakeArrayBuffer, ArrayBuffer.prototype);
-            Object.defineProperty(fakeArrayBuffer, Symbol.toStringTag, {
-                value: "ArrayBuffer",
-                configurable: true
-            });
-            fakeArrayBuffer;
-        `)
-		defer fakeArrayBuffer.Free()
-		require.False(t, fakeArrayBuffer.IsException())
+		detachedArrayBuffer := ctx.Eval(`
+			(() => {
+				const buffer = new ArrayBuffer(8);
+				buffer.transfer();
+				return buffer;
+			})()
+		`)
+		defer detachedArrayBuffer.Free()
+		require.False(t, detachedArrayBuffer.IsException())
 
 		var result interface{}
-		err := ctx.Unmarshal(fakeArrayBuffer, &result)
-		if err != nil {
-			t.Logf("✓ Covered ToByteArray error in unmarshalInterface: %v", err)
-		}
+		err := ctx.Unmarshal(detachedArrayBuffer, &result)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "ArrayBuffer")
 	})
 }
 
