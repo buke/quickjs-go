@@ -137,6 +137,8 @@ type MemoryUsage struct {
 	BinaryObjectSize   int64
 }
 
+// DumpFlag* constants mirror the quickjs-ng runtime dump flags and can be
+// combined with bitwise OR for Runtime.SetDumpFlags.
 const (
 	DumpFlagBytecodeFinal   uint64 = C.JS_DUMP_BYTECODE_FINAL
 	DumpFlagBytecodePass2   uint64 = C.JS_DUMP_BYTECODE_PASS2
@@ -157,6 +159,7 @@ const (
 	DumpFlagObjects         uint64 = C.JS_DUMP_OBJECTS
 	DumpFlagAtoms           uint64 = C.JS_DUMP_ATOMS
 	DumpFlagShapes          uint64 = C.JS_DUMP_SHAPES
+	// DumpFlagAbortOnLeaks aborts on atom/object/string leaks and is intended for testing.
 	DumpFlagAbortOnLeaks    uint64 = C.JS_ABORT_ON_LEAKS
 )
 
