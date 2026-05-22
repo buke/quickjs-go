@@ -152,6 +152,7 @@ type IntrinsicSet struct {
 	WeakRef      bool
 	Performance  bool
 	DOMException bool
+	AToB         bool
 }
 
 // IntrinsicOption modifies IntrinsicSet.
@@ -184,6 +185,7 @@ func AllIntrinsics() IntrinsicSet {
 		WeakRef:      true,
 		Performance:  true,
 		DOMException: true,
+		AToB:         true,
 	}
 }
 
@@ -257,9 +259,14 @@ func WithDOMException(enabled bool) IntrinsicOption {
 	return func(s *IntrinsicSet) { s.DOMException = enabled }
 }
 
+// WithAToB toggles atob/btoa intrinsic injection.
+func WithAToB(enabled bool) IntrinsicOption {
+	return func(s *IntrinsicSet) { s.AToB = enabled }
+}
+
 func normalizeIntrinsicSet(set IntrinsicSet) IntrinsicSet {
 	if set.Date || set.Eval || set.RegExp || set.JSON || set.Proxy || set.MapSet ||
-		set.TypedArrays || set.Promise || set.BigInt || set.WeakRef || set.Performance || set.DOMException {
+		set.TypedArrays || set.Promise || set.BigInt || set.WeakRef || set.Performance || set.DOMException || set.AToB {
 		set.BaseObjects = true
 	}
 	return set
@@ -1052,7 +1059,8 @@ func applyIntrinsics(ctxRef *C.JSContext, set IntrinsicSet) bool {
 		applyStep("BigInt", set.BigInt, func() C.int { return C.JS_AddIntrinsicBigInt(ctxRef) }) &&
 		applyStep("WeakRef", set.WeakRef, func() C.int { return C.JS_AddIntrinsicWeakRef(ctxRef) }) &&
 		applyStep("Performance", set.Performance, func() C.int { return C.JS_AddPerformance(ctxRef) }) &&
-		applyStep("DOMException", set.DOMException, func() C.int { return C.JS_AddIntrinsicDOMException(ctxRef) })
+		applyStep("DOMException", set.DOMException, func() C.int { return C.JS_AddIntrinsicDOMException(ctxRef) }) &&
+		applyStep("AToB", set.AToB, func() C.int { return C.JS_AddIntrinsicAToB(ctxRef) })
 }
 
 // BootstrapStdOS registers std/os modules for the context.

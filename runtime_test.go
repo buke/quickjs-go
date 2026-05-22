@@ -164,11 +164,27 @@ func TestRuntimeDiagnosticsAndRawContext(t *testing.T) {
 	require.NotNil(t, withEvalCtx)
 	defer withEvalCtx.Close()
 
+	missingAToB := withEvalCtx.Eval(`typeof atob === "undefined" && typeof btoa === "undefined"`)
+	require.NotNil(t, missingAToB)
+	defer missingAToB.Free()
+	require.False(t, missingAToB.IsException())
+	require.True(t, missingAToB.ToBool())
+
 	evalResult := withEvalCtx.Eval(`1 + 1`)
 	require.NotNil(t, evalResult)
 	defer evalResult.Free()
 	require.False(t, evalResult.IsException())
 	require.EqualValues(t, 2, evalResult.ToInt32())
+
+	withAToBCtx := rt.NewContextRaw(NewIntrinsicSet(WithEval(true), WithAToB(true)))
+	require.NotNil(t, withAToBCtx)
+	defer withAToBCtx.Close()
+
+	atobResult := withAToBCtx.Eval(`typeof atob === "function" && typeof btoa === "function" && atob("Zm9v") === "foo" && btoa("bar") === "YmFy"`)
+	require.NotNil(t, atobResult)
+	defer atobResult.Free()
+	require.False(t, atobResult.IsException())
+	require.True(t, atobResult.ToBool())
 
 	all := AllIntrinsics()
 	require.True(t, all.BaseObjects)
@@ -177,12 +193,14 @@ func TestRuntimeDiagnosticsAndRawContext(t *testing.T) {
 	require.True(t, all.JSON)
 	require.True(t, all.RegExp)
 	require.True(t, all.DOMException)
+	require.True(t, all.AToB)
 
-	selected := NewIntrinsicSet(WithPromise(true), WithJSON(true), WithEval(true))
+	selected := NewIntrinsicSet(WithPromise(true), WithJSON(true), WithEval(true), WithAToB(true))
 	require.True(t, selected.BaseObjects)
 	require.True(t, selected.Promise)
 	require.True(t, selected.JSON)
 	require.True(t, selected.Eval)
+	require.True(t, selected.AToB)
 }
 
 func TestRuntimeStage3CoveragePaths(t *testing.T) {
@@ -204,6 +222,7 @@ func TestRuntimeStage3CoveragePaths(t *testing.T) {
 		WithWeakRef(true),
 		WithPerformance(true),
 		WithDOMException(true),
+		WithAToB(true),
 	)
 	require.True(t, full.BaseObjects)
 	require.True(t, full.Date)
@@ -218,6 +237,7 @@ func TestRuntimeStage3CoveragePaths(t *testing.T) {
 	require.True(t, full.WeakRef)
 	require.True(t, full.Performance)
 	require.True(t, full.DOMException)
+	require.True(t, full.AToB)
 
 	rtIntrinsics := NewRuntime()
 	ctx := rtIntrinsics.NewContextRaw(full)
@@ -1178,6 +1198,11 @@ func TestRuntimeNewContextRawApplyIntrinsicsFailureHook(t *testing.T) {
 	restoreStepDate := forceRuntimeApplyIntrinsicStepFailureForTest("Date")
 	defer restoreStepDate()
 	ctx = rt.NewContextRaw(NewIntrinsicSet(WithDate(true)))
+	require.Nil(t, ctx)
+
+	restoreStepAToB := forceRuntimeApplyIntrinsicStepFailureForTest("AToB")
+	defer restoreStepAToB()
+	ctx = rt.NewContextRaw(NewIntrinsicSet(WithAToB(true)))
 	require.Nil(t, ctx)
 
 	restoreNoop := forceRuntimeApplyIntrinsicsFailureForTest(false)
