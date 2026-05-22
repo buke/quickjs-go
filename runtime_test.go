@@ -908,6 +908,76 @@ func TestRuntimeAdvancedOptions(t *testing.T) {
 	require.Equal(t, "GC test", result4.ToString())
 }
 
+func TestRuntimeWithModuleImportOptionInstallsDefaultLoader(t *testing.T) {
+	rt := NewRuntime(WithModuleImport(true))
+	defer rt.Close()
+
+	ctx := rt.NewContext()
+	require.NotNil(t, ctx)
+	defer ctx.Close()
+
+	result := ctx.Eval(`
+		(async function() {
+			const mod = await import("./test/fib_module.js");
+			return mod.fib(6);
+		})()
+	`, EvalAwait(true))
+	defer result.Free()
+
+	require.False(t, result.IsException())
+	require.EqualValues(t, 8, result.ToInt32())
+}
+
+func TestRuntimeSetModuleImportToggle(t *testing.T) {
+	evalFibImport := func(ctx *Context) *Value {
+		return ctx.Eval(`
+			(async function() {
+				const mod = await import("./test/fib_module.js");
+				return mod.fib(6);
+			})()
+		`, EvalAwait(true))
+	}
+
+	requireImportFailure := func(ctx *Context) {
+		result := evalFibImport(ctx)
+		require.NotNil(t, result)
+		defer result.Free()
+		require.True(t, result.IsException())
+
+		err := ctx.Exception()
+		require.Error(t, err)
+		require.Contains(t, strings.ToLower(err.Error()), "could not load module")
+	}
+
+	requireImportSuccess := func(ctx *Context) {
+		result := evalFibImport(ctx)
+		require.NotNil(t, result)
+		defer result.Free()
+		require.False(t, result.IsException())
+		require.EqualValues(t, 8, result.ToInt32())
+	}
+
+	rt := NewRuntime()
+	defer rt.Close()
+
+	ctx := rt.NewContext()
+	require.NotNil(t, ctx)
+	requireImportFailure(ctx)
+	ctx.Close()
+
+	rt.SetModuleImport(true)
+	ctx = rt.NewContext()
+	require.NotNil(t, ctx)
+	requireImportSuccess(ctx)
+	ctx.Close()
+
+	rt.SetModuleImport(false)
+	ctx = rt.NewContext()
+	require.NotNil(t, ctx)
+	defer ctx.Close()
+	requireImportFailure(ctx)
+}
+
 func TestRuntimeTimeoutOpaqueLifecycle(t *testing.T) {
 	base := timeoutOpaqueCount()
 

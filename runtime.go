@@ -476,12 +476,17 @@ func WithCanBlock(canBlock bool) Option {
 	}
 }
 
+// WithModuleImport installs or clears the default quickjs-libc file/module loader.
+// When enabled, import/export resolution can load modules via quickjs-ng's default loader.
+// When disabled, module resolution fails closed unless another loader is installed.
 func WithModuleImport(moduleImport bool) Option {
 	return func(o *Options) {
 		o.moduleImport = moduleImport
 	}
 }
 
+// WithStripInfo is retained for backward compatibility only.
+// Deprecated: quickjs-ng does not expose a runtime-level strip-info API, so this option is a no-op.
 func WithStripInfo(strip int) Option {
 	return func(o *Options) {
 		o.strip = strip
@@ -512,7 +517,7 @@ func NewRuntime(opts ...Option) *Runtime {
 		maxStackSize:         0,
 		canBlock:             true,
 		moduleImport:         false,
-		strip:                1,
+		strip:                0,
 		ownerGoroutineCheck:  true,
 		strictThreadAffinity: false,
 	}
@@ -894,7 +899,8 @@ func (r *Runtime) SetExecuteTimeout(timeout uint64) {
 	r.interruptHandlerState.Store(nil)
 }
 
-// SetStripInfo sets the strip info for the runtime.
+// SetStripInfo is retained for backward compatibility only.
+// Deprecated: quickjs-ng does not expose a runtime-level strip-info API, so this method is a no-op.
 func (r *Runtime) SetStripInfo(strip int) {
 	if r == nil {
 		return
@@ -911,7 +917,8 @@ func (r *Runtime) SetStripInfo(strip int) {
 	_ = strip
 }
 
-// SetModuleImport sets whether the runtime supports module import.
+// SetModuleImport installs or clears the default quickjs-libc file/module loader.
+// When disabled, import resolution fails closed unless another loader is installed.
 func (r *Runtime) SetModuleImport(moduleImport bool) {
 	if r == nil {
 		return
@@ -919,12 +926,16 @@ func (r *Runtime) SetModuleImport(moduleImport bool) {
 	if !r.ensureOwnerAccess() {
 		return
 	}
-	r.mu.RLock()
-	defer r.mu.RUnlock()
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	if r.closed.Load() || r.ref == nil {
 		return
 	}
-	C.JS_SetModuleLoaderFunc2(r.ref, (*C.JSModuleNormalizeFunc)(unsafe.Pointer(nil)), (*C.JSModuleLoaderFunc2)(C.js_module_loader), (*C.JSModuleCheckSupportedImportAttributes)(C.js_module_check_attributes), unsafe.Pointer(nil))
+	if moduleImport {
+		C.JS_SetModuleLoaderFunc2(r.ref, (*C.JSModuleNormalizeFunc)(unsafe.Pointer(nil)), (*C.JSModuleLoaderFunc2)(C.js_module_loader), (*C.JSModuleCheckSupportedImportAttributes)(C.js_module_check_attributes), unsafe.Pointer(nil))
+		return
+	}
+	C.JS_SetModuleLoaderFunc2(r.ref, (*C.JSModuleNormalizeFunc)(unsafe.Pointer(nil)), nil, nil, unsafe.Pointer(nil))
 }
 
 // SetInterruptHandler sets a user interrupt handler using simplified approach.
