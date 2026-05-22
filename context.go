@@ -1,6 +1,7 @@
 package quickjs
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	goruntime "runtime"
@@ -396,6 +397,21 @@ func (ctx *Context) NewString(v string) *Value {
 		ptr = (*C.char)(unsafe.Pointer(unsafe.StringData(v)))
 	}
 	return &Value{ctx: ctx, ref: C.JS_NewStringLen(ctx.ref, ptr, C.size_t(len(v)))}
+}
+
+// NewStringUTF16 returns a string value from UTF-16 code units.
+func (ctx *Context) NewStringUTF16(v []uint16) *Value {
+	if !ctx.hasValidRef() {
+		return nil
+	}
+
+	var ptr *C.uint16_t
+	if len(v) > 0 {
+		ptr = (*C.uint16_t)(unsafe.Pointer(&v[0]))
+	}
+	ref := C.JS_NewStringUTF16(ctx.ref, ptr, C.size_t(len(v)))
+	goruntime.KeepAlive(v)
+	return &Value{ctx: ctx, ref: ref}
 }
 
 // NewDate returns a JavaScript Date object from epoch milliseconds.
@@ -1232,14 +1248,21 @@ func (ctx *Context) HasException() bool {
 	return bool(C.JS_HasException(ctx.ref))
 }
 
-// Exception returns a context's exception value.
-func (ctx *Context) Exception() error {
-	if !ctx.hasValidRef() {
-		return nil
-	}
+func (ctx *Context) exceptionError() error {
 	val := &Value{ctx: ctx, ref: C.JS_GetException(ctx.ref)}
 	defer val.Free()
-	return val.Error()
+	if err := val.Error(); err != nil {
+		return err
+	}
+	return errors.New("javascript exception")
+}
+
+// Exception returns a context's exception value.
+func (ctx *Context) Exception() error {
+	if !ctx.hasValidRef() || !ctx.HasException() {
+		return nil
+	}
+	return ctx.exceptionError()
 }
 
 // Loop runs the context's event loop.

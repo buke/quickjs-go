@@ -231,6 +231,107 @@ func (v *Value) ToBigInt() *big.Int {
 	return val
 }
 
+// ToNumber returns the numeric value as a new JavaScript Number.
+func (v *Value) ToNumber() (*Value, error) {
+	if !v.hasValidContext() {
+		return nil, errors.New("value context is not available")
+	}
+
+	converted := &Value{ctx: v.ctx, ref: C.JS_ToNumber(v.ctx.ref, v.ref)}
+	if converted.IsException() {
+		return nil, v.ctx.Exception()
+	}
+
+	return converted, nil
+}
+
+// ToIndex returns the value converted to a JavaScript array index.
+func (v *Value) ToIndex() (uint64, error) {
+	if !v.hasValidContext() {
+		return 0, errors.New("value context is not available")
+	}
+
+	val := C.uint64_t(0)
+	if C.JS_ToIndex(v.ctx.ref, &val, v.ref) != 0 {
+		return 0, v.ctx.Exception()
+	}
+
+	return uint64(val), nil
+}
+
+// ToBigInt64 returns the value converted to int64 using BigInt semantics.
+func (v *Value) ToBigInt64() (int64, error) {
+	if !v.hasValidContext() {
+		return 0, errors.New("value context is not available")
+	}
+
+	val := C.int64_t(0)
+	if C.JS_ToBigInt64(v.ctx.ref, &val, v.ref) != 0 {
+		return 0, v.ctx.Exception()
+	}
+
+	return int64(val), nil
+}
+
+// ToBigUint64 returns the value converted to uint64 using BigInt semantics.
+func (v *Value) ToBigUint64() (uint64, error) {
+	if !v.hasValidContext() {
+		return 0, errors.New("value context is not available")
+	}
+
+	val := C.uint64_t(0)
+	if C.JS_ToBigUint64(v.ctx.ref, &val, v.ref) != 0 {
+		return 0, v.ctx.Exception()
+	}
+
+	return uint64(val), nil
+}
+
+// ToInt64Ext returns the value converted to int64, accepting BigInt inputs.
+func (v *Value) ToInt64Ext() (int64, error) {
+	if !v.hasValidContext() {
+		return 0, errors.New("value context is not available")
+	}
+
+	val := C.int64_t(0)
+	if C.JS_ToInt64Ext(v.ctx.ref, &val, v.ref) != 0 {
+		return 0, v.ctx.Exception()
+	}
+
+	return int64(val), nil
+}
+
+// ToPropertyKey returns the value converted to a JavaScript property key.
+func (v *Value) ToPropertyKey() (*Value, error) {
+	if !v.hasValidContext() {
+		return nil, errors.New("value context is not available")
+	}
+
+	converted := &Value{ctx: v.ctx, ref: C.JS_ToPropertyKey(v.ctx.ref, v.ref)}
+	if converted.IsException() {
+		return nil, v.ctx.Exception()
+	}
+
+	return converted, nil
+}
+
+// ToStringUTF16 returns the UTF-16 code units of the string representation of the value.
+func (v *Value) ToStringUTF16() ([]uint16, error) {
+	if !v.hasValidContext() {
+		return nil, errors.New("value context is not available")
+	}
+
+	length := C.size_t(0)
+	ptr := C.JS_ToCStringLenUTF16(v.ctx.ref, &length, v.ref)
+	if ptr == nil {
+		return nil, v.ctx.Exception()
+	}
+	defer C.JS_FreeCStringUTF16(v.ctx.ref, ptr)
+
+	utf16 := unsafe.Slice((*uint16)(unsafe.Pointer(ptr)), int(length))
+	return append([]uint16(nil), utf16...), nil
+}
+
 // Len returns the length of the array.
 func (v *Value) Len() int64 {
 	length := v.Get("length")

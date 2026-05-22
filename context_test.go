@@ -104,7 +104,6 @@ func TestContextPostCloseContracts(t *testing.T) {
 	require.NotNil(t, v)
 
 	ctx.Close()
-
 	require.Nil(t, ctx.Runtime())
 	require.False(t, ctx.HasException())
 	require.Nil(t, ctx.Exception())
@@ -117,6 +116,59 @@ func TestContextPostCloseContracts(t *testing.T) {
 	})
 
 	rt.Close()
+}
+
+func TestContextNewStringUTF16(t *testing.T) {
+	useStableOwnerHooksForLegacySubtests(t)
+
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	ascii := ctx.NewStringUTF16([]uint16{'o', 'k'})
+	require.NotNil(t, ascii)
+	defer ascii.Free()
+	require.True(t, ascii.IsString())
+	require.Equal(t, "ok", ascii.ToString())
+
+	empty := ctx.NewStringUTF16(nil)
+	require.NotNil(t, empty)
+	defer empty.Free()
+	require.Equal(t, "", empty.ToString())
+
+	wide := ctx.NewStringUTF16([]uint16{0xD800})
+	require.NotNil(t, wide)
+	defer wide.Free()
+	utf16, err := wide.ToStringUTF16()
+	require.NoError(t, err)
+	require.Equal(t, []uint16{0xD800}, utf16)
+
+	var nilCtx *Context
+	require.Nil(t, nilCtx.NewStringUTF16([]uint16{'x'}))
+
+	closedRT := NewRuntime()
+	closedCtx := closedRT.NewContext()
+	closedCtx.Close()
+	require.Nil(t, closedCtx.NewStringUTF16([]uint16{'x'}))
+	closedRT.Close()
+}
+
+func TestContextExceptionPrimitiveFallback(t *testing.T) {
+	useStableOwnerHooksForLegacySubtests(t)
+
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	result := ctx.Eval(`throw 42`)
+	defer result.Free()
+	require.True(t, result.IsException())
+	require.True(t, ctx.HasException())
+	require.EqualError(t, ctx.Exception(), "javascript exception")
+	require.False(t, ctx.HasException())
+	require.Nil(t, ctx.Exception())
 }
 
 func TestContextInternalStateHelpers(t *testing.T) {

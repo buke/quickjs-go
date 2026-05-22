@@ -477,6 +477,256 @@ func TestValueConversions(t *testing.T) {
 	require.Nil(t, normalIntVal.ToBigInt())
 }
 
+func TestValueNativeConversionAPIs(t *testing.T) {
+	useStableOwnerHooksForLegacySubtests(t)
+
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	t.Run("ToNumber", func(t *testing.T) {
+		str := ctx.NewString("42.5")
+		defer str.Free()
+
+		number, err := str.ToNumber()
+		require.NoError(t, err)
+		require.NotNil(t, number)
+		defer number.Free()
+		require.True(t, number.IsNumber())
+		require.InDelta(t, 42.5, number.ToFloat64(), 0.00001)
+
+		throwing := ctx.Eval(`({ valueOf() { throw new Error("num fail") }, toString() { return "1" } })`)
+		defer throwing.Free()
+		_, err = throwing.ToNumber()
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "num fail")
+
+		var nilValue *Value
+		converted, err := nilValue.ToNumber()
+		require.Nil(t, converted)
+		require.EqualError(t, err, "value context is not available")
+	})
+
+	t.Run("ToIndex", func(t *testing.T) {
+		str := ctx.NewString("7")
+		defer str.Free()
+
+		index, err := str.ToIndex()
+		require.NoError(t, err)
+		require.Equal(t, uint64(7), index)
+
+		negative := ctx.NewInt32(-1)
+		defer negative.Free()
+		_, err = negative.ToIndex()
+		require.Error(t, err)
+
+		var nilValue *Value
+		_, err = nilValue.ToIndex()
+		require.EqualError(t, err, "value context is not available")
+	})
+
+	t.Run("ToBigInt64AndToBigUint64", func(t *testing.T) {
+		bigInt := ctx.NewBigInt64(-42)
+		defer bigInt.Free()
+
+		int64Val, err := bigInt.ToBigInt64()
+		require.NoError(t, err)
+		require.Equal(t, int64(-42), int64Val)
+
+		bigUint := ctx.NewBigUint64(^uint64(0))
+		defer bigUint.Free()
+
+		uint64Val, err := bigUint.ToBigUint64()
+		require.NoError(t, err)
+		require.Equal(t, ^uint64(0), uint64Val)
+
+		number := ctx.NewInt32(7)
+		defer number.Free()
+		_, err = number.ToBigInt64()
+		require.Error(t, err)
+		_, err = number.ToBigUint64()
+		require.Error(t, err)
+
+		var nilValue *Value
+		_, err = nilValue.ToBigInt64()
+		require.EqualError(t, err, "value context is not available")
+		_, err = nilValue.ToBigUint64()
+		require.EqualError(t, err, "value context is not available")
+	})
+
+	t.Run("ToInt64Ext", func(t *testing.T) {
+		number := ctx.NewInt32(33)
+		defer number.Free()
+
+		int64Val, err := number.ToInt64Ext()
+		require.NoError(t, err)
+		require.Equal(t, int64(33), int64Val)
+
+		bigInt := ctx.NewBigInt64(-9)
+		defer bigInt.Free()
+		int64Val, err = bigInt.ToInt64Ext()
+		require.NoError(t, err)
+		require.Equal(t, int64(-9), int64Val)
+
+		symbol := ctx.NewSymbol("ext-fail")
+		defer symbol.Free()
+		_, err = symbol.ToInt64Ext()
+		require.Error(t, err)
+
+		var nilValue *Value
+		_, err = nilValue.ToInt64Ext()
+		require.EqualError(t, err, "value context is not available")
+	})
+
+	t.Run("ToPropertyKey", func(t *testing.T) {
+		index := ctx.NewInt32(12)
+		defer index.Free()
+
+		key, err := index.ToPropertyKey()
+		require.NoError(t, err)
+		require.NotNil(t, key)
+		defer key.Free()
+		require.True(t, key.IsString())
+		require.Equal(t, "12", key.ToString())
+
+		symbol := ctx.NewSymbol("local-key")
+		defer symbol.Free()
+		symbolKey, err := symbol.ToPropertyKey()
+		require.NoError(t, err)
+		require.NotNil(t, symbolKey)
+		defer symbolKey.Free()
+		require.True(t, symbolKey.IsSymbol())
+		require.True(t, symbol.SameValue(symbolKey))
+
+		throwing := ctx.Eval(`({ toString() { throw new Error("key fail") } })`)
+		defer throwing.Free()
+		_, err = throwing.ToPropertyKey()
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "key fail")
+
+		var nilValue *Value
+		converted, err := nilValue.ToPropertyKey()
+		require.Nil(t, converted)
+		require.EqualError(t, err, "value context is not available")
+	})
+
+	t.Run("ToStringUTF16", func(t *testing.T) {
+		ascii := ctx.NewString("ok")
+		defer ascii.Free()
+
+		utf16, err := ascii.ToStringUTF16()
+		require.NoError(t, err)
+		require.Equal(t, []uint16{'o', 'k'}, utf16)
+
+		wide := ctx.NewStringUTF16([]uint16{0xD800})
+		defer wide.Free()
+		utf16, err = wide.ToStringUTF16()
+		require.NoError(t, err)
+		require.Equal(t, []uint16{0xD800}, utf16)
+
+		number := ctx.NewInt32(42)
+		defer number.Free()
+		utf16, err = number.ToStringUTF16()
+		require.NoError(t, err)
+		require.Equal(t, []uint16{'4', '2'}, utf16)
+
+		throwing := ctx.Eval(`({ toString() { throw new Error("utf16 fail") } })`)
+		defer throwing.Free()
+		_, err = throwing.ToStringUTF16()
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "utf16 fail")
+
+		var nilValue *Value
+		utf16, err = nilValue.ToStringUTF16()
+		require.Nil(t, utf16)
+		require.EqualError(t, err, "value context is not available")
+	})
+
+	t.Run("PrimitiveExceptionFallback", func(t *testing.T) {
+		tests := []struct {
+			name   string
+			expr   string
+			invoke func(*Value) error
+		}{
+			{
+				name: "ToNumber",
+				expr: `({ valueOf() { throw 42 }, toString() { return "1" } })`,
+				invoke: func(v *Value) error {
+					converted, err := v.ToNumber()
+					if converted != nil {
+						converted.Free()
+					}
+					return err
+				},
+			},
+			{
+				name: "ToIndex",
+				expr: `({ valueOf() { throw 42 }, toString() { return "1" } })`,
+				invoke: func(v *Value) error {
+					_, err := v.ToIndex()
+					return err
+				},
+			},
+			{
+				name: "ToBigInt64",
+				expr: `({ valueOf() { throw 42 } })`,
+				invoke: func(v *Value) error {
+					_, err := v.ToBigInt64()
+					return err
+				},
+			},
+			{
+				name: "ToBigUint64",
+				expr: `({ valueOf() { throw 42 } })`,
+				invoke: func(v *Value) error {
+					_, err := v.ToBigUint64()
+					return err
+				},
+			},
+			{
+				name: "ToInt64Ext",
+				expr: `({ valueOf() { throw 42 } })`,
+				invoke: func(v *Value) error {
+					_, err := v.ToInt64Ext()
+					return err
+				},
+			},
+			{
+				name: "ToPropertyKey",
+				expr: `({ toString() { throw 42 } })`,
+				invoke: func(v *Value) error {
+					converted, err := v.ToPropertyKey()
+					if converted != nil {
+						converted.Free()
+					}
+					return err
+				},
+			},
+			{
+				name: "ToStringUTF16",
+				expr: `({ toString() { throw 42 } })`,
+				invoke: func(v *Value) error {
+					converted, err := v.ToStringUTF16()
+					if converted != nil {
+						return errors.New("unexpected utf16 result")
+					}
+					return err
+				},
+			},
+		}
+
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				throwing := ctx.Eval(tt.expr)
+				defer throwing.Free()
+				err := tt.invoke(throwing)
+				require.EqualError(t, err, "javascript exception")
+			})
+		}
+	})
+}
+
 // TestValueJSON tests JSON operations
 func TestValueJSON(t *testing.T) {
 	useStableOwnerHooksForLegacySubtests(t)
