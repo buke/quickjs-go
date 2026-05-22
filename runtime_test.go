@@ -28,7 +28,7 @@ func TestRuntimeBasics(t *testing.T) {
 	// Test runtime with all options in one go
 	rt2 := NewRuntime(
 		WithExecuteTimeout(30),
-		WithMemoryLimit(128*1024),
+		WithMemoryLimit(4*1024*1024),
 		WithGCThreshold(256*1024),
 		WithMaxStackSize(65534),
 		WithCanBlock(true),
@@ -38,9 +38,11 @@ func TestRuntimeBasics(t *testing.T) {
 	defer rt2.Close()
 
 	ctx2 := rt2.NewContext()
+	require.NotNil(t, ctx2)
 	defer ctx2.Close()
 
 	result2 := ctx2.Eval(`"Hello World"`)
+	require.NotNil(t, result2)
 	defer result2.Free()
 	require.False(t, result2.IsException()) // Check for exceptions instead of error
 	require.Equal(t, "Hello World", result2.ToString())
