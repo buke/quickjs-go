@@ -203,6 +203,19 @@ func TestRuntimeDiagnosticsAndRawContext(t *testing.T) {
 	require.True(t, selected.AToB)
 }
 
+func TestRuntimeDumpFlagConstants(t *testing.T) {
+	rt := NewRuntime()
+	defer rt.Close()
+
+	flags := DumpFlagBytecodeFinal | DumpFlagModuleResolve | DumpFlagPromise
+	rt.SetDumpFlags(flags)
+	require.EqualValues(t, flags, rt.DumpFlags())
+
+	require.NotZero(t, DumpFlagAbortOnLeaks)
+	require.EqualValues(t, DumpFlagLeaks, DumpFlagAbortOnLeaks&DumpFlagLeaks)
+	require.EqualValues(t, DumpFlagAtomLeaks, DumpFlagAbortOnLeaks&DumpFlagAtomLeaks)
+}
+
 func TestRuntimeStage3CoveragePaths(t *testing.T) {
 	useStableOwnerHooksForLegacySubtests(t)
 

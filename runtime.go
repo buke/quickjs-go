@@ -137,6 +137,32 @@ type MemoryUsage struct {
 	BinaryObjectSize   int64
 }
 
+// DumpFlag* constants mirror the quickjs-ng runtime dump flags and can be
+// combined with bitwise OR for Runtime.SetDumpFlags.
+const (
+	DumpFlagBytecodeFinal   uint64 = C.JS_DUMP_BYTECODE_FINAL
+	DumpFlagBytecodePass2   uint64 = C.JS_DUMP_BYTECODE_PASS2
+	DumpFlagBytecodePass1   uint64 = C.JS_DUMP_BYTECODE_PASS1
+	DumpFlagBytecodeHex     uint64 = C.JS_DUMP_BYTECODE_HEX
+	DumpFlagBytecodePC2Line uint64 = C.JS_DUMP_BYTECODE_PC2LINE
+	DumpFlagBytecodeStack   uint64 = C.JS_DUMP_BYTECODE_STACK
+	DumpFlagBytecodeStep    uint64 = C.JS_DUMP_BYTECODE_STEP
+	DumpFlagReadObject      uint64 = C.JS_DUMP_READ_OBJECT
+	DumpFlagFree            uint64 = C.JS_DUMP_FREE
+	DumpFlagGC              uint64 = C.JS_DUMP_GC
+	DumpFlagGCFree          uint64 = C.JS_DUMP_GC_FREE
+	DumpFlagModuleResolve   uint64 = C.JS_DUMP_MODULE_RESOLVE
+	DumpFlagPromise         uint64 = C.JS_DUMP_PROMISE
+	DumpFlagLeaks           uint64 = C.JS_DUMP_LEAKS
+	DumpFlagAtomLeaks       uint64 = C.JS_DUMP_ATOM_LEAKS
+	DumpFlagMem             uint64 = C.JS_DUMP_MEM
+	DumpFlagObjects         uint64 = C.JS_DUMP_OBJECTS
+	DumpFlagAtoms           uint64 = C.JS_DUMP_ATOMS
+	DumpFlagShapes          uint64 = C.JS_DUMP_SHAPES
+	// DumpFlagAbortOnLeaks aborts on atom/object/string leaks and is intended for testing.
+	DumpFlagAbortOnLeaks    uint64 = C.JS_ABORT_ON_LEAKS
+)
+
 // IntrinsicSet controls which QuickJS intrinsics are injected into a raw context.
 type IntrinsicSet struct {
 	BaseObjects  bool

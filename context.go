@@ -338,6 +338,24 @@ func (ctx *Context) Uint32(v uint32) *Value {
 	return ctx.NewUint32(v)
 }
 
+// NewUint64 returns a JavaScript Number from a uint64.
+// Note: Precision loss occurs for values exceeding 2^53 - 1. Use NewBigUint64
+// for full 64-bit precision.
+func (ctx *Context) NewUint64(v uint64) *Value {
+	if !ctx.hasValidRef() {
+		return nil
+	}
+	return &Value{ctx: ctx, ref: C.JS_NewUint64(ctx.ref, C.uint64_t(v))}
+}
+
+// Uint64 returns a JavaScript Number from a uint64.
+// Note: Precision loss occurs for values exceeding 2^53 - 1. Use NewBigUint64
+// for full 64-bit precision.
+// Deprecated: Use NewUint64() instead.
+func (ctx *Context) Uint64(v uint64) *Value {
+	return ctx.NewUint64(v)
+}
+
 // NewBigInt64 returns a int64 value with given uint64.
 func (ctx *Context) NewBigInt64(v int64) *Value {
 	return &Value{ctx: ctx, ref: C.JS_NewBigInt64(ctx.ref, C.int64_t(v))}
