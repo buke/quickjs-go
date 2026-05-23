@@ -997,6 +997,42 @@ func (r *Runtime) ExecutePendingJob() (int, *Context) {
 	return status, getContextFromJS(ctxRef)
 }
 
+// DrainPendingJobs executes pending runtime jobs until the queue is empty,
+// an error occurs, or max jobs have been executed.
+//
+// If max > 0, at most max jobs are executed. If max <= 0, all available
+// pending jobs are drained.
+func (r *Runtime) DrainPendingJobs(max int) (executed int, lastCtx *Context, err error) {
+	if r == nil {
+		return 0, nil, nil
+	}
+
+	for {
+		if max > 0 && executed >= max {
+			return executed, lastCtx, nil
+		}
+
+		status, ctx := r.ExecutePendingJob()
+		if ctx != nil {
+			lastCtx = ctx
+		}
+
+		if status > 0 {
+			executed += status
+			continue
+		}
+		if status == 0 {
+			return executed, lastCtx, nil
+		}
+
+		err = errors.New("quickjs: failed to execute pending job")
+		if ctx != nil && ctx.HasException() {
+			err = ctx.Exception()
+		}
+		return executed, lastCtx, err
+	}
+}
+
 // SetStripInfo is retained for backward compatibility only.
 // Deprecated: quickjs-ng does not expose a runtime-level strip-info API, so this method is a no-op.
 func (r *Runtime) SetStripInfo(strip int) {

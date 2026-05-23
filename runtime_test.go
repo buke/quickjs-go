@@ -1076,6 +1076,124 @@ func TestRuntimeJobQueuePrimitives(t *testing.T) {
 	})
 }
 
+func TestRuntimeDrainPendingJobs(t *testing.T) {
+	t.Run("LimitAndDrainAll", func(t *testing.T) {
+		rt := NewRuntime()
+		defer rt.Close()
+		ctx := rt.NewContext()
+		require.NotNil(t, ctx)
+		defer ctx.Close()
+
+		setup := ctx.Eval(`
+			(() => {
+				globalThis.__drainCounter = 0;
+				Promise.resolve().then(() => { globalThis.__drainCounter += 1; });
+				Promise.resolve().then(() => { globalThis.__drainCounter += 1; });
+				return 0;
+			})()
+		`)
+		require.NotNil(t, setup)
+		defer setup.Free()
+		require.False(t, setup.IsException())
+
+		require.True(t, rt.IsJobPending())
+
+		executed, lastCtx, err := rt.DrainPendingJobs(1)
+		require.NoError(t, err)
+		require.Equal(t, 1, executed)
+		if lastCtx != nil {
+			require.Same(t, ctx, lastCtx)
+		}
+
+		counterAfterOne := ctx.Eval(`globalThis.__drainCounter`)
+		require.NotNil(t, counterAfterOne)
+		defer counterAfterOne.Free()
+		require.False(t, counterAfterOne.IsException())
+		require.EqualValues(t, 1, counterAfterOne.ToInt32())
+
+		executed, lastCtx, err = rt.DrainPendingJobs(0)
+		require.NoError(t, err)
+		require.GreaterOrEqual(t, executed, 1)
+		if lastCtx != nil {
+			require.Same(t, ctx, lastCtx)
+		}
+
+		counter := ctx.Eval(`globalThis.__drainCounter`)
+		require.NotNil(t, counter)
+		defer counter.Free()
+		require.False(t, counter.IsException())
+		require.EqualValues(t, 2, counter.ToInt32())
+
+		executed, lastCtx, err = rt.DrainPendingJobs(0)
+		require.NoError(t, err)
+		require.Equal(t, 0, executed)
+		require.Nil(t, lastCtx)
+	})
+
+	t.Run("ErrorPath", func(t *testing.T) {
+		rt := NewRuntime()
+		defer rt.Close()
+		ctx := rt.NewContext()
+		require.NotNil(t, ctx)
+		defer ctx.Close()
+
+		setup := ctx.Eval(`
+			(() => {
+				queueMicrotask(() => { throw new Error("drain boom"); });
+				return 0;
+			})()
+		`)
+		require.NotNil(t, setup)
+		defer setup.Free()
+		require.False(t, setup.IsException())
+
+		require.True(t, rt.IsJobPending())
+
+		executed, lastCtx, err := rt.DrainPendingJobs(0)
+		require.Equal(t, 0, executed)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "drain boom")
+		if lastCtx != nil {
+			require.Same(t, ctx, lastCtx)
+		}
+	})
+
+	t.Run("FailClosed", func(t *testing.T) {
+		var nilRuntime *Runtime
+		executed, lastCtx, err := nilRuntime.DrainPendingJobs(0)
+		require.Equal(t, 0, executed)
+		require.Nil(t, lastCtx)
+		require.NoError(t, err)
+
+		func() {
+			ownerHook := ownerCheckCurrentGoroutineID
+			ownerRT := NewRuntime()
+			require.NotNil(t, ownerRT)
+			defer func() {
+				ownerCheckCurrentGoroutineID = ownerHook
+				ownerRT.Close()
+			}()
+			ownerCheckCurrentGoroutineID = func() uint64 { return 0 }
+
+			executed, lastCtx, err = ownerRT.DrainPendingJobs(0)
+			require.Equal(t, 0, executed)
+			require.Nil(t, lastCtx)
+			require.NoError(t, err)
+		}()
+
+		closedRT := NewRuntime()
+		closedCtx := closedRT.NewContext()
+		require.NotNil(t, closedCtx)
+		closedCtx.Close()
+		closedRT.Close()
+
+		executed, lastCtx, err = closedRT.DrainPendingJobs(0)
+		require.Equal(t, 0, executed)
+		require.Nil(t, lastCtx)
+		require.NoError(t, err)
+	})
+}
+
 func TestRuntimePromiseHookAPI(t *testing.T) {
 	drainPendingJobs := func(t *testing.T, rt *Runtime, ctx *Context) {
 		t.Helper()
