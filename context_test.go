@@ -1160,7 +1160,7 @@ func TestContextPromise(t *testing.T) {
 		// Test PromiseState on non-Promise
 		nonPromise := ctx.NewString("not a promise")
 		defer nonPromise.Free()
-		require.Equal(t, PromisePending, nonPromise.PromiseState()) // Should return default
+		require.Equal(t, PromiseNotAPromise, nonPromise.PromiseState())
 	})
 
 	t.Run("ValueAwait", func(t *testing.T) {
