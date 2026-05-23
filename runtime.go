@@ -1018,7 +1018,7 @@ func (r *Runtime) DrainPendingJobs(max int) (executed int, lastCtx *Context, err
 		}
 
 		if status > 0 {
-			executed += status
+			executed++
 			continue
 		}
 		if status == 0 {

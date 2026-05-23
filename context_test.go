@@ -1324,6 +1324,18 @@ func TestContextPromisePrimitives(t *testing.T) {
 		require.Contains(t, err.Error(), "capability rejected")
 	})
 
+	t.Run("NewPromiseCapabilityException", func(t *testing.T) {
+		rtLowMem := NewRuntime()
+		defer rtLowMem.Close()
+		ctxLowMem := rtLowMem.NewContext()
+		require.NotNil(t, ctxLowMem)
+		defer ctxLowMem.Close()
+
+		// Force allocation failure path for JS_NewPromiseCapability.
+		rtLowMem.SetMemoryLimit(256)
+		require.Nil(t, ctxLowMem.NewPromiseCapability())
+	})
+
 	t.Run("NewSettledPromise", func(t *testing.T) {
 		fulfilledValue := ctx.NewString("settled fulfilled")
 		defer fulfilledValue.Free()

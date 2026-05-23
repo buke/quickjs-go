@@ -1509,6 +1509,9 @@ func (ctx *Context) NewPromiseCapability() *PromiseCapability {
 
 	resolving := [2]C.JSValue{C.JS_NewUndefined(), C.JS_NewUndefined()}
 	promise := C.JS_NewPromiseCapability(ctx.ref, &resolving[0])
+	if bool(C.JS_IsException(promise)) {
+		return nil
+	}
 	return &PromiseCapability{
 		Promise: &Value{ctx: ctx, ref: promise},
 		Resolve: &Value{ctx: ctx, ref: resolving[0]},
