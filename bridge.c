@@ -369,6 +369,23 @@ JSValue CallPropertyByNameLen(JSContext *ctx, JSValueConst obj, const char *name
     return ret;
 }
 
+static JSValue QuickjsGoCallableJob(JSContext *ctx, int argc, JSValueConst *argv) {
+    if (argc < 1) {
+        return JS_ThrowInternalError(ctx, "invalid native job payload");
+    }
+    if (!JS_IsFunction(ctx, argv[0])) {
+        return JS_ThrowTypeError(ctx, "native job target must be callable");
+    }
+    return JS_Call(ctx, argv[0], JS_UNDEFINED, argc - 1, argv + 1);
+}
+
+int EnqueueCallableJob(JSContext *ctx, int argc, JSValue *argv) {
+    if (!ctx || argc < 1 || !argv) {
+        return -1;
+    }
+    return JS_EnqueueJob(ctx, QuickjsGoCallableJob, argc, argv);
+}
+
 int DetectModuleSourceWithProbe(JSContext *ctx, const char *code, size_t code_len) {
     if (!JS_DetectModule(code, code_len)) {
         return 0;

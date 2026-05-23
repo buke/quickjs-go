@@ -1364,6 +1364,7 @@ func TestContextPromisePrimitives(t *testing.T) {
 		require.Nil(t, nilCtx.NewPromiseCapability())
 		require.Nil(t, nilCtx.NewSettledPromise(nil, false))
 		require.False(t, nilCtx.EnqueueJob(func(*Context) {}))
+		require.False(t, nilCtx.EnqueueNativeJob(nil))
 
 		otherRT := NewRuntime()
 		defer otherRT.Close()
@@ -1374,6 +1375,23 @@ func TestContextPromisePrimitives(t *testing.T) {
 		defer foreignValue.Free()
 		require.Nil(t, ctx.NewSettledPromise(foreignValue, false))
 
+		foreignFn := otherCtx.Eval(`() => 1`)
+		require.NotNil(t, foreignFn)
+		defer foreignFn.Free()
+		require.False(t, foreignFn.IsException())
+		require.False(t, ctx.EnqueueNativeJob(foreignFn))
+
+		nativeFn := ctx.Eval(`() => 0`)
+		require.NotNil(t, nativeFn)
+		defer nativeFn.Free()
+		require.False(t, nativeFn.IsException())
+		require.False(t, ctx.EnqueueNativeJob(nativeFn, foreignValue))
+
+		notCallable := ctx.NewString("not callable")
+		defer notCallable.Free()
+		require.False(t, ctx.EnqueueNativeJob(notCallable))
+		require.False(t, ctx.EnqueueNativeJob(nil))
+
 		closedRT := NewRuntime()
 		closedCtx := closedRT.NewContext()
 		require.NotNil(t, closedCtx)
@@ -1381,6 +1399,7 @@ func TestContextPromisePrimitives(t *testing.T) {
 		require.Nil(t, closedCtx.NewPromiseCapability())
 		require.Nil(t, closedCtx.NewSettledPromise(nil, false))
 		require.False(t, closedCtx.EnqueueJob(func(*Context) {}))
+		require.False(t, closedCtx.EnqueueNativeJob(nil))
 		closedRT.Close()
 	})
 
@@ -1392,6 +1411,55 @@ func TestContextPromisePrimitives(t *testing.T) {
 		}))
 		ctx.ProcessJobs()
 		require.True(t, executed)
+	})
+
+	t.Run("EnqueueNativeJob", func(t *testing.T) {
+		initCounter := ctx.Eval(`globalThis.__nativeJobCounter = 0;`)
+		require.NotNil(t, initCounter)
+		defer initCounter.Free()
+		require.False(t, initCounter.IsException())
+
+		callable := ctx.Eval(`(delta) => { globalThis.__nativeJobCounter += delta; return globalThis.__nativeJobCounter; }`)
+		require.NotNil(t, callable)
+		defer callable.Free()
+		require.False(t, callable.IsException())
+
+		arg := ctx.NewInt32(2)
+		defer arg.Free()
+		require.True(t, ctx.EnqueueNativeJob(callable, arg))
+
+		before := ctx.Eval(`globalThis.__nativeJobCounter`)
+		require.NotNil(t, before)
+		defer before.Free()
+		require.False(t, before.IsException())
+		require.EqualValues(t, 0, before.ToInt32())
+
+		status, jobCtx := rt.ExecutePendingJob()
+		require.Greater(t, status, 0)
+		if jobCtx != nil {
+			require.Same(t, ctx, jobCtx)
+		}
+
+		after := ctx.Eval(`globalThis.__nativeJobCounter`)
+		require.NotNil(t, after)
+		defer after.Free()
+		require.False(t, after.IsException())
+		require.EqualValues(t, 2, after.ToInt32())
+
+		thrower := ctx.Eval(`() => { throw new Error("native job failed"); }`)
+		require.NotNil(t, thrower)
+		defer thrower.Free()
+		require.False(t, thrower.IsException())
+
+		require.True(t, ctx.EnqueueNativeJob(thrower))
+		status, jobCtx = rt.ExecutePendingJob()
+		require.Less(t, status, 0)
+		if jobCtx != nil {
+			require.Same(t, ctx, jobCtx)
+		}
+		err := ctx.Exception()
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "native job failed")
 	})
 }
 
