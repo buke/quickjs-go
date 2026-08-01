@@ -391,6 +391,158 @@ static void module_serde(void)
     JS_FreeRuntime(rt);
 }
 
+struct rejection_counts {
+    int reject_count;
+    int handle_count;
+};
+
+static void rejection_counter(JSContext *ctx, JSValueConst promise,
+                              JSValueConst reason, bool is_handled, void *opaque)
+{
+    struct rejection_counts *c = opaque;
+    if (is_handled)
+        c->handle_count++;
+    else
+        c->reject_count++;
+}
+
+// A synchronous module that throws at top level must surface exactly one unhandled rejection
+static void module_unhandled_rejection(void)
+{
+    struct rejection_counts c = {0, 0};
+    JSRuntime *rt = new_runtime();
+    JS_SetHostPromiseRejectionTracker(rt, rejection_counter, &c);
+    JSContext *ctx = JS_NewContext(rt);
+
+    static const char code[] = "throw new Error('Nuke the entire site from orbit. It\\'s the only way to be sure.')";
+    JSValue v = JS_Eval(ctx, code, strlen(code), "<m>", JS_EVAL_TYPE_MODULE);
+    JS_FreeValue(ctx, v);
+
+    JSContext *c1;
+    while (JS_ExecutePendingJob(rt, &c1) > 0)
+        ;
+
+    // net unhandled rejections == (2 rejects - 1 handled)
+    assert(c.reject_count == 2);
+    assert(c.handle_count == 1);
+
+    JS_FreeContext(ctx);
+    JS_FreeRuntime(rt);
+}
+
+static void promise_mark_as_handled(void)
+{
+    struct rejection_counts c = {0, 0};
+    JSRuntime *rt = new_runtime();
+    JS_SetHostPromiseRejectionTracker(rt, rejection_counter, &c);
+    JSContext *ctx = JS_NewContext(rt);
+    JSContext *c1;
+
+    // marking an already-rejected promise notifies the tracker exactly once
+    static const char code[] = "Promise.reject('kaboom')";
+    JSValue promise = JS_Eval(ctx, code, strlen(code), "<t>", JS_EVAL_TYPE_GLOBAL);
+    assert(JS_IsPromise(promise));
+    while (JS_ExecutePendingJob(rt, &c1) > 0)
+        ;
+    assert(c.reject_count == 1);
+    assert(c.handle_count == 0);
+    JS_PromiseMarkAsHandled(ctx, promise);
+    assert(c.handle_count == 1);
+    JS_PromiseMarkAsHandled(ctx, promise);
+    assert(c.handle_count == 1);
+    JS_FreeValue(ctx, promise);
+
+    // marking a pending promise suppresses the report when it later rejects
+    JSValue resolving_funcs[2];
+    JSValue promise2 = JS_NewPromiseCapability(ctx, resolving_funcs);
+    JS_PromiseMarkAsHandled(ctx, promise2);
+    JSValue reason = JS_NewString(ctx, "unseen");
+    JSValue ret = JS_Call(ctx, resolving_funcs[1], JS_UNDEFINED, 1,
+                          (JSValueConst *)&reason);
+    while (JS_ExecutePendingJob(rt, &c1) > 0)
+        ;
+    assert(c.reject_count == 1);
+    assert(c.handle_count == 1);
+    JS_FreeValue(ctx, ret);
+    JS_FreeValue(ctx, reason);
+    JS_FreeValue(ctx, resolving_funcs[0]);
+    JS_FreeValue(ctx, resolving_funcs[1]);
+    JS_FreeValue(ctx, promise2);
+
+    JS_FreeContext(ctx);
+    JS_FreeRuntime(rt);
+}
+
+static void promise_then(void)
+{
+    const char *s;
+    JSRuntime *rt = new_runtime();
+    JSContext *ctx = JS_NewContext(rt);
+    JSContext *c1;
+    JSValue got = JS_UNDEFINED;
+    JS_SetContextOpaque(ctx, &got);
+
+    // the result promise is intrinsic: neither an overridden then() nor
+    // Symbol.species is consulted
+    static const char code[] =
+        "class P extends Promise {"
+        "  static get [Symbol.species]() { throw new Error('species'); }"
+        "  then() { throw new Error('then'); }"
+        "}"
+        "P.resolve('ok')";
+    JSValue promise = eval(ctx, code);
+    assert(JS_IsPromise(promise));
+    JSValue on_fulfilled = JS_NewCFunction(ctx, save_value, "onFulfilled", 1);
+    JSValue result = JS_PromiseThen(ctx, promise, on_fulfilled, JS_UNDEFINED);
+    assert(JS_IsPromise(result));
+    while (JS_ExecutePendingJob(rt, &c1) > 0)
+        ;
+    s = JS_ToCString(ctx, got);
+    assert(s);
+    assert(!strcmp(s, "ok"));
+    JS_FreeCString(ctx, s);
+    JS_FreeValue(ctx, got);
+    assert(JS_PromiseState(ctx, result) == JS_PROMISE_FULFILLED);
+    JS_FreeValue(ctx, result);
+    JS_FreeValue(ctx, on_fulfilled);
+    JS_FreeValue(ctx, promise);
+
+    // rejection handler receives the reason when the promise rejects later
+    JSValue resolving_funcs[2];
+    JSValue promise2 = JS_NewPromiseCapability(ctx, resolving_funcs);
+    JSValue on_rejected = JS_NewCFunction(ctx, save_value, "onRejected", 1);
+    JSValue result2 = JS_PromiseThen(ctx, promise2, JS_UNDEFINED, on_rejected);
+    assert(JS_IsPromise(result2));
+    got = JS_UNDEFINED;
+    JSValue reason = JS_NewString(ctx, "boom");
+    JSValue ret = JS_Call(ctx, resolving_funcs[1], JS_UNDEFINED, 1,
+                          (JSValueConst *)&reason);
+    while (JS_ExecutePendingJob(rt, &c1) > 0)
+        ;
+    s = JS_ToCString(ctx, got);
+    assert(s);
+    assert(!strcmp(s, "boom"));
+    JS_FreeCString(ctx, s);
+    JS_FreeValue(ctx, got);
+    assert(JS_PromiseState(ctx, result2) == JS_PROMISE_FULFILLED);
+    JS_FreeValue(ctx, ret);
+    JS_FreeValue(ctx, reason);
+    JS_FreeValue(ctx, result2);
+    JS_FreeValue(ctx, on_rejected);
+    JS_FreeValue(ctx, resolving_funcs[0]);
+    JS_FreeValue(ctx, resolving_funcs[1]);
+    JS_FreeValue(ctx, promise2);
+
+    // a non-promise argument is a TypeError
+    JSValue bad = JS_PromiseThen(ctx, JS_UNDEFINED, JS_UNDEFINED, JS_UNDEFINED);
+    assert(JS_IsException(bad));
+    JSValue exc = JS_GetException(ctx);
+    JS_FreeValue(ctx, exc);
+
+    JS_FreeContext(ctx);
+    JS_FreeRuntime(rt);
+}
+
 static void runtime_cstring_free(void)
 {
     JSRuntime *rt = new_runtime();
@@ -776,6 +928,43 @@ static void new_errors(void)
     JS_FreeRuntime(rt);
 }
 
+static void backtrace_oom_callsite_array(void)
+{
+    static const char setup_code[] =
+        "Error.prepareStackTrace = (e, frames) => frames;\n"
+        "globalThis.f = () => new Error();\n";
+    JSValue global_object, func, ret;
+    JSMemoryUsage stats;
+    uint32_t headroom;
+    JSRuntime *rt;
+    JSContext *ctx;
+
+    rt = new_runtime();
+    ctx = JS_NewContext(rt);
+    global_object = JS_GetGlobalObject(ctx);
+
+    ret = eval(ctx, setup_code);
+    assert(!JS_IsException(ret));
+    JS_FreeValue(ctx, ret);
+
+    func = JS_GetPropertyStr(ctx, global_object, "f");
+    assert(JS_IsFunction(ctx, func));
+
+    for (headroom = 0; headroom < 2048; headroom++) {
+        JS_ComputeMemoryUsage(rt, &stats);
+        JS_SetMemoryLimit(rt, (size_t)stats.malloc_size + headroom);
+        ret = JS_Call(ctx, func, JS_UNDEFINED, 0, NULL);
+        JS_SetMemoryLimit(rt, 0);
+        JS_FreeValue(ctx, ret);
+        JS_FreeValue(ctx, JS_GetException(ctx));
+    }
+
+    JS_FreeValue(ctx, func);
+    JS_FreeValue(ctx, global_object);
+    JS_FreeContext(ctx);
+    JS_FreeRuntime(rt);
+}
+
 static void backtrace_oom_current_exception(void)
 {
     static const char setup_code[] =
@@ -800,6 +989,44 @@ static void backtrace_oom_current_exception(void)
     assert(JS_IsException(ret));
     assert(JS_HasException(ctx));
     exception = JS_GetException(ctx);
+    JS_FreeValue(ctx, exception);
+    JS_SetMemoryLimit(rt, 0);
+
+    JS_FreeContext(ctx);
+    JS_FreeRuntime(rt);
+}
+
+static void proxy_own_keys_huge_length(void)
+{
+    static const char setup_code[] =
+        "globalThis.p = new Proxy({}, {\n"
+        "    ownKeys() { return { length: 0x20000000 }; },\n"
+        "});";
+    JSMemoryUsage stats;
+    JSValue ret, exception;
+    JSRuntime *rt;
+    JSContext *ctx;
+    const char *str;
+
+    rt = new_runtime();
+    ctx = JS_NewContext(rt);
+
+    ret = eval(ctx, setup_code);
+    assert(!JS_IsException(ret));
+    JS_FreeValue(ctx, ret);
+
+    JS_ComputeMemoryUsage(rt, &stats);
+    JS_SetMemoryLimit(rt, (size_t)stats.malloc_size + 128 * 1024);
+
+    ret = eval(ctx, "Object.keys(p)");
+    assert(JS_IsException(ret));
+    JS_FreeValue(ctx, ret);
+    exception = JS_GetException(ctx);
+    str = JS_ToCString(ctx, exception);
+    assert(str);
+    /* the trap result has no index 0, so the first key must be rejected */
+    assert(!strcmp(str, "TypeError: proxy: properties must be strings or symbols"));
+    JS_FreeCString(ctx, str);
     JS_FreeValue(ctx, exception);
     JS_SetMemoryLimit(rt, 0);
 
@@ -1131,6 +1358,470 @@ static void new_symbol(void)
     JS_FreeRuntime(rt);
 }
 
+static void bulk_free_macros(void) {
+    JSRuntime *rt = new_runtime();
+    JSContext *ctx = JS_NewContext(rt);
+
+    JSValue val0 = JS_NewObject(ctx);
+    JSValue val1 = JS_NewArray(ctx);
+    JSValue val2 = JS_NewDate(ctx, 0.0);
+    
+    JSMemoryUsage mem_usage;
+    JS_ComputeMemoryUsage(rt, &mem_usage);
+    int obj_count = mem_usage.obj_count;
+
+    JS_FreeValues(ctx, val0, val1);
+    JS_FreeValuesRT(rt, val2);
+
+    // silly atoms to ensure qjs doesn't find built-ins that match
+    JSAtom atom0 = JS_NewAtom(ctx, "ALL!!");
+    JSAtom atom1 = JS_NewAtom(ctx, "YOUR!!");
+    JSAtom atom2 = JS_NewAtom(ctx, "ATOMS!!");
+    JSAtom atom3 = JS_NewAtom(ctx, "ARE!!");
+    JSAtom atom4 = JS_NewAtom(ctx, "BELONG!!");
+    JSAtom atom5 = JS_NewAtom(ctx, "TO US!!");
+
+    JS_ComputeMemoryUsage(rt, &mem_usage);
+    assert((obj_count - 3) == mem_usage.obj_count);
+    int atom_count = mem_usage.atom_count;
+
+    JS_FreeAtoms(ctx, atom1, atom3, atom4);
+    JS_FreeAtomsRT(rt, atom0, atom2, atom5);
+
+    JS_ComputeMemoryUsage(rt, &mem_usage);
+    assert((atom_count - 6) == mem_usage.atom_count);
+
+    JS_FreeContext(ctx);
+    JS_FreeRuntime(rt);
+}
+
+static int detach_free_count;
+
+static void *detach_realloc_func(JSRuntime *rt, void *opaque, void *ptr,
+                                 size_t size)
+{
+    if (size == 0) {
+        detach_free_count++;
+        free(ptr);
+        return NULL;
+    }
+    return realloc(ptr, size);
+}
+
+static void detach_array_buffer_free_once(void)
+{
+    JSValue obj;
+    uint8_t *buf;
+
+    JSRuntime *rt = new_runtime();
+    JSContext *ctx = JS_NewContext(rt);
+
+    detach_free_count = 0;
+    buf = malloc(8);
+    obj = JS_NewArrayBuffer(ctx, buf, 8, /*max_len*/0, detach_realloc_func,
+                            NULL, false);
+    assert(JS_IsArrayBuffer(obj));
+
+    /* detaching releases the backing store exactly once */
+    JS_DetachArrayBuffer(ctx, obj);
+    assert(detach_free_count == 1);
+
+    /* finalizing the detached buffer must not release it a second time */
+    JS_FreeValue(ctx, obj);
+    assert(detach_free_count == 1);
+
+    JS_FreeContext(ctx);
+    JS_FreeRuntime(rt);
+}
+
+static void *realloc_array_buffer_data(JSRuntime *rt, void *opaque, void *ptr,
+                                       size_t size)
+{
+    if (size == 0) {
+        free(ptr);
+        return NULL;
+    }
+    return realloc(ptr, size);
+}
+
+static void typed_array_sort_index_overflow(void)
+{
+    const size_t len = 0x40000010; /* 2**30 + 16 */
+    JSMemoryUsage stats;
+    JSValue global, buffer, ret;
+    JSRuntime *rt;
+    JSContext *ctx;
+    uint8_t *buf;
+
+    /* the data is never read, but keep it real memory so a regression
+       corrupts the heap in a way ASan can see rather than segfaulting */
+    buf = calloc(1, len);
+    rt = new_runtime();
+    ctx = JS_NewContext(rt);
+
+    buffer = JS_NewArrayBuffer(ctx, buf, len, /*max_len*/0,
+                               realloc_array_buffer_data, NULL, false);
+    assert(JS_IsArrayBuffer(buffer));
+    global = JS_GetGlobalObject(ctx);
+    JS_SetPropertyStr(ctx, global, "buf", buffer);
+    JS_FreeValue(ctx, global);
+
+    /* Cap memory so that the correctly computed 4 GB index array also
+       fails to allocate on 64 bit platforms; the undersized allocation a
+       32 bit platform computes fits well within the cap. */
+    JS_ComputeMemoryUsage(rt, &stats);
+    JS_SetMemoryLimit(rt, (size_t)stats.malloc_size + 1024 * 1024);
+
+    ret = eval(ctx, "new Uint8Array(buf).sort((a, b) => a - b)");
+    assert(JS_IsException(ret));
+    assert(JS_HasException(ctx));
+    JS_FreeValue(ctx, ret);
+
+    JS_FreeContext(ctx);
+    JS_FreeRuntime(rt);
+}
+
+static int transfer_free_count;
+static int transfer_realloc_count;
+
+static void *transfer_realloc_func(JSRuntime *rt, void *opaque, void *ptr,
+                                   size_t size)
+{
+    if (size == 0) {
+        transfer_free_count++;
+        free(ptr);
+        return NULL;
+    }
+    transfer_realloc_count++;
+    return realloc(ptr, size);
+}
+
+/* a realloc function that can only free, never resize */
+static void *failing_realloc_func(JSRuntime *rt, void *opaque, void *ptr,
+                                  size_t size)
+{
+    if (size == 0) {
+        transfer_free_count++;
+        free(ptr);
+    }
+    return NULL;
+}
+
+static JSValue make_external_ab(JSContext *ctx, uint8_t **pbuf, size_t len,
+                                size_t max_len,
+                                JSReallocArrayBufferDataFunc *realloc_func)
+{
+    uint8_t *buf = malloc(max_len > len ? max_len : len);
+    memset(buf, 0xAB, len);
+    JSValue obj = JS_NewArrayBuffer(ctx, buf, len, max_len, realloc_func, NULL,
+                                    /*is_shared*/false);
+    assert(JS_IsArrayBuffer(obj));
+    JSValue global = JS_GetGlobalObject(ctx);
+    JS_SetPropertyStr(ctx, global, "ab", JS_DupValue(ctx, obj));
+    JS_FreeValue(ctx, global);
+    *pbuf = buf;
+    return obj;
+}
+
+static void transfer_external_array_buffer(void)
+{
+    JSValue obj, ret, exc, det;
+    const char *s;
+    uint8_t *buf, *p;
+    size_t i, size;
+
+    JSRuntime *rt = new_runtime();
+    JSContext *ctx = JS_NewContext(rt);
+
+    // same-length transfer succeeds and reuses the backing store; each variant
+    // detaches the source, so use a fresh buffer per iteration
+    {
+        static const char *const exprs[] = {
+            "ab.transfer()", "ab.transfer(8)", "ab.transferToFixedLength()",
+            "ab.transferToFixedLength(8)", "ab.transferToImmutable()",
+        };
+        for (i = 0; i < countof(exprs); i++) {
+            transfer_free_count = 0;
+            transfer_realloc_count = 0;
+            obj = make_external_ab(ctx, &buf, 8, /*max_len*/0,
+                                   transfer_realloc_func);
+
+            ret = eval(ctx, exprs[i]);
+            assert(!JS_IsException(ret));
+            assert(JS_IsArrayBuffer(ret));
+            assert(transfer_realloc_count == 0);
+            p = JS_GetArrayBuffer(ctx, &size, ret);
+            assert(p == buf);
+            assert(size == 8);
+            assert(p[0] == 0xAB && p[7] == 0xAB);
+            det = eval(ctx, "ab.detached");
+            assert(JS_IsBool(det));
+            assert(JS_VALUE_GET_BOOL(det));
+            JS_FreeValue(ctx, det);
+            assert(transfer_free_count == 0);
+            JS_FreeValue(ctx, ret);
+            assert(transfer_free_count == 1);
+
+            ret = eval(ctx, "globalThis.ab = undefined");
+            JS_FreeValue(ctx, ret);
+            JS_FreeValue(ctx, obj);
+            assert(transfer_free_count == 1);
+        }
+    }
+
+    // a length-changing transfer resizes the external store through the
+    // realloc function and hands it over to the new ArrayBuffer
+    {
+        static const struct {
+            const char *code;
+            size_t len;
+        } cases[] = {
+            { "ab.transfer(4)", 4 },
+            { "ab.transfer(16)", 16 },
+            { "ab.transferToFixedLength(4)", 4 },
+            { "ab.transferToImmutable(16)", 16 },
+        };
+        for (i = 0; i < countof(cases); i++) {
+            transfer_free_count = 0;
+            transfer_realloc_count = 0;
+            obj = make_external_ab(ctx, &buf, 8, /*max_len*/0,
+                                   transfer_realloc_func);
+
+            ret = eval(ctx, cases[i].code);
+            assert(!JS_IsException(ret));
+            assert(JS_IsArrayBuffer(ret));
+            assert(transfer_realloc_count == 1);
+            assert(transfer_free_count == 0);
+            p = JS_GetArrayBuffer(ctx, &size, ret);
+            assert(size == cases[i].len);
+            assert(p[0] == 0xAB && p[3] == 0xAB);
+            if (cases[i].len > 8)
+                assert(p[8] == 0 && p[15] == 0); // the grown tail is zeroed
+            det = eval(ctx, "ab.detached");
+            assert(JS_IsBool(det));
+            assert(JS_VALUE_GET_BOOL(det));
+            JS_FreeValue(ctx, det);
+
+            // the source handed the store over; releasing the new AB frees it
+            JS_FreeValue(ctx, ret);
+            assert(transfer_free_count == 1);
+
+            ret = eval(ctx, "globalThis.ab = undefined");
+            JS_FreeValue(ctx, ret);
+            JS_FreeValue(ctx, obj);
+            assert(transfer_free_count == 1);
+        }
+    }
+
+    // a transfer that fails to realloc throws and leaves the source alone
+    {
+        transfer_free_count = 0;
+        obj = make_external_ab(ctx, &buf, 8, /*max_len*/0,
+                               failing_realloc_func);
+
+        ret = eval(ctx, "ab.transfer(16)");
+        assert(JS_IsException(ret));
+        JS_FreeValue(ctx, ret);
+        exc = JS_GetException(ctx);
+        assert(JS_IsError(exc));
+        s = JS_ToCString(ctx, exc);
+        assert(s);
+        assert(strstr(s, "out of memory"));
+        JS_FreeCString(ctx, s);
+        JS_FreeValue(ctx, exc);
+
+        det = eval(ctx, "ab.detached");
+        assert(JS_IsBool(det));
+        assert(!JS_VALUE_GET_BOOL(det));
+        JS_FreeValue(ctx, det);
+        p = JS_GetArrayBuffer(ctx, &size, obj);
+        assert(p == buf && size == 8 && p[0] == 0xAB);
+        assert(transfer_free_count == 0);
+
+        ret = eval(ctx, "globalThis.ab = undefined");
+        JS_FreeValue(ctx, ret);
+        JS_FreeValue(ctx, obj);
+        assert(transfer_free_count == 1);
+    }
+
+    // transfer(0) changes the length but doesn't realloc: it detaches the
+    // source (freeing the external store) and yields a fresh empty AB
+    {
+        transfer_free_count = 0;
+        transfer_realloc_count = 0;
+        obj = make_external_ab(ctx, &buf, 8, /*max_len*/0,
+                               transfer_realloc_func);
+
+        ret = eval(ctx, "ab.transfer(0)");
+        assert(!JS_IsException(ret));
+        assert(JS_IsArrayBuffer(ret));
+        p = JS_GetArrayBuffer(ctx, &size, ret);
+        assert(size == 0);
+        assert(transfer_free_count == 1);
+        JS_FreeValue(ctx, ret);
+
+        det = eval(ctx, "ab.detached");
+        assert(JS_IsBool(det));
+        assert(JS_VALUE_GET_BOOL(det));
+        JS_FreeValue(ctx, det);
+
+        ret = eval(ctx, "globalThis.ab = undefined");
+        JS_FreeValue(ctx, ret);
+        JS_FreeValue(ctx, obj);
+        assert(transfer_free_count == 1);
+    }
+
+    JS_FreeContext(ctx);
+    JS_FreeRuntime(rt);
+}
+
+static void resize_external_array_buffer(void)
+{
+    JSValue obj, global, ret, exc, det;
+    const char *s;
+    uint8_t *buf, *p;
+    size_t size;
+
+    JSRuntime *rt = new_runtime();
+    JSContext *ctx = JS_NewContext(rt);
+
+    transfer_free_count = 0;
+    transfer_realloc_count = 0;
+    obj = make_external_ab(ctx, &buf, 8, /*max_len*/16, transfer_realloc_func);
+
+    ret = eval(ctx, "ab.resizable && ab.maxByteLength === 16");
+    assert(JS_IsBool(ret));
+    assert(JS_VALUE_GET_BOOL(ret));
+    JS_FreeValue(ctx, ret);
+
+    // growing reallocs through the callback and zeroes the new tail
+    ret = eval(ctx, "ab.resize(16), ab.byteLength");
+    assert(!JS_IsException(ret));
+    assert(JS_VALUE_GET_INT(ret) == 16);
+    JS_FreeValue(ctx, ret);
+    assert(transfer_realloc_count == 1);
+    p = JS_GetArrayBuffer(ctx, &size, obj);
+    assert(size == 16);
+    assert(p[0] == 0xAB && p[7] == 0xAB);
+    assert(p[8] == 0 && p[15] == 0);
+
+    // and so does shrinking
+    ret = eval(ctx, "ab.resize(4), ab.byteLength");
+    assert(!JS_IsException(ret));
+    assert(JS_VALUE_GET_INT(ret) == 4);
+    JS_FreeValue(ctx, ret);
+    assert(transfer_realloc_count == 2);
+    p = JS_GetArrayBuffer(ctx, &size, obj);
+    assert(size == 4);
+    assert(p[0] == 0xAB && p[3] == 0xAB);
+
+    // resizing past maxByteLength still throws, without calling the callback
+    ret = eval(ctx, "ab.resize(17)");
+    assert(JS_IsException(ret));
+    JS_FreeValue(ctx, ret);
+    exc = JS_GetException(ctx);
+    s = JS_ToCString(ctx, exc);
+    assert(s);
+    assert(strstr(s, "invalid array buffer length"));
+    JS_FreeCString(ctx, s);
+    JS_FreeValue(ctx, exc);
+    assert(transfer_realloc_count == 2);
+
+    // a resizable external AB carries its maxByteLength across a transfer
+    ret = eval(ctx, "ab.transfer(8)");
+    assert(!JS_IsException(ret));
+    assert(transfer_realloc_count == 3);
+    det = eval(ctx, "ab.detached");
+    assert(JS_IsBool(det));
+    assert(JS_VALUE_GET_BOOL(det));
+    JS_FreeValue(ctx, det);
+    global = JS_GetGlobalObject(ctx);
+    JS_SetPropertyStr(ctx, global, "ab2", ret);
+    JS_FreeValue(ctx, global);
+    ret = eval(ctx, "ab2.resizable && ab2.maxByteLength === 16");
+    assert(JS_IsBool(ret));
+    assert(JS_VALUE_GET_BOOL(ret));
+    JS_FreeValue(ctx, ret);
+    ret = eval(ctx, "ab2.resize(16), ab2.byteLength");
+    assert(!JS_IsException(ret));
+    assert(JS_VALUE_GET_INT(ret) == 16);
+    JS_FreeValue(ctx, ret);
+    assert(transfer_realloc_count == 4);
+
+    assert(transfer_free_count == 0);
+    ret = eval(ctx, "globalThis.ab = globalThis.ab2 = undefined");
+    JS_FreeValue(ctx, ret);
+    JS_FreeValue(ctx, obj);
+    assert(transfer_free_count == 1);
+
+    JS_FreeContext(ctx);
+    JS_FreeRuntime(rt);
+}
+
+/* hands the buffer over to the runtime allocator, the way quickjs manages the
+   memory of ArrayBuffers it allocates itself */
+static void *runtime_realloc_func(JSRuntime *rt, void *opaque, void *ptr,
+                                  size_t size)
+{
+    return js_realloc_rt(rt, ptr, size);
+}
+
+static void transfer_default_managed_array_buffer(void)
+{
+    JSValue obj, global, ret, det;
+    uint8_t *buf, *p;
+    size_t size;
+
+    JSRuntime *rt = new_runtime();
+    JSContext *ctx = JS_NewContext(rt);
+
+    buf = js_malloc(ctx, 8);
+    memset(buf, 0xAB, 8);
+    obj = JS_NewArrayBuffer(ctx, buf, 8, /*max_len*/0,
+                            runtime_realloc_func, NULL, false);
+    assert(JS_IsArrayBuffer(obj));
+    global = JS_GetGlobalObject(ctx);
+    JS_SetPropertyStr(ctx, global, "ab", JS_DupValue(ctx, obj));
+    JS_FreeValue(ctx, global);
+
+    ret = eval(ctx, "ab.transfer(16)");
+    assert(!JS_IsException(ret));
+    assert(JS_IsArrayBuffer(ret));
+    p = JS_GetArrayBuffer(ctx, &size, ret);
+    assert(size == 16);
+    assert(p[0] == 0xAB && p[7] == 0xAB);
+    assert(p[8] == 0 && p[15] == 0);
+    det = eval(ctx, "ab.detached");
+    assert(JS_IsBool(det));
+    assert(JS_VALUE_GET_BOOL(det));
+    JS_FreeValue(ctx, det);
+    JS_FreeValue(ctx, ret);
+    ret = eval(ctx, "globalThis.ab = undefined");
+    JS_FreeValue(ctx, ret);
+    JS_FreeValue(ctx, obj);
+
+    buf = js_malloc(ctx, 8);
+    memset(buf, 0xCD, 8);
+    obj = JS_NewArrayBuffer(ctx, buf, 8, /*max_len*/0,
+                            runtime_realloc_func, NULL, false);
+    global = JS_GetGlobalObject(ctx);
+    JS_SetPropertyStr(ctx, global, "ab", JS_DupValue(ctx, obj));
+    JS_FreeValue(ctx, global);
+
+    ret = eval(ctx, "ab.transferToFixedLength(4)");
+    assert(!JS_IsException(ret));
+    p = JS_GetArrayBuffer(ctx, &size, ret);
+    assert(size == 4);
+    assert(p[0] == 0xCD && p[3] == 0xCD);
+    JS_FreeValue(ctx, ret);
+    ret = eval(ctx, "globalThis.ab = undefined");
+    JS_FreeValue(ctx, ret);
+    JS_FreeValue(ctx, obj);
+
+    JS_FreeContext(ctx);
+    JS_FreeRuntime(rt);
+}
+
 int main(void)
 {
     cfunctions();
@@ -1140,6 +1831,9 @@ int main(void)
     raw_context_global_var();
     is_array();
     module_serde();
+    module_unhandled_rejection();
+    promise_mark_as_handled();
+    promise_then();
     runtime_cstring_free();
     utf16_string();
     weak_map_gc_check();
@@ -1147,11 +1841,19 @@ int main(void)
     dump_memory_usage();
     new_errors();
     backtrace_oom_current_exception();
+    backtrace_oom_callsite_array();
+    proxy_own_keys_huge_length();
     global_object_prototype();
     slice_string_tocstring();
     immutable_array_buffer();
     shared_array_buffer_growth();
     get_uint8array();
     new_symbol();
+    bulk_free_macros();
+    detach_array_buffer_free_once();
+    typed_array_sort_index_overflow();
+    transfer_external_array_buffer();
+    resize_external_array_buffer();
+    transfer_default_managed_array_buffer();
     return 0;
 }

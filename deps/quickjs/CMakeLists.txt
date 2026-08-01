@@ -40,6 +40,7 @@ xoption(QJS_ENABLE_ASAN "Enable AddressSanitizer (ASan)" OFF)
 xoption(QJS_ENABLE_MSAN "Enable MemorySanitizer (MSan)" OFF)
 xoption(QJS_ENABLE_TSAN "Enable ThreadSanitizer (TSan)" OFF)
 xoption(QJS_ENABLE_UBSAN "Enable UndefinedBehaviorSanitizer (UBSan)" OFF)
+xoption(QJS_ENABLE_GC_STRESS "Force a full GC before every allocation (GC stress test)" OFF)
 
 # Used to properly define JS_LIBC_EXTERN.
 add_compile_definitions(QUICKJS_NG_BUILD)
@@ -242,6 +243,11 @@ add_link_options(
     -fno-sanitize-recover=all
     -fno-omit-frame-pointer
 )
+endif()
+
+if(QJS_ENABLE_GC_STRESS)
+message(STATUS "Building with GC stress (FORCE_GC_AT_MALLOC)")
+add_compile_definitions(FORCE_GC_AT_MALLOC)
 endif()
 
 
@@ -555,6 +561,8 @@ if (QJS_ENABLE_INSTALL)
     if(NOT IOS AND NOT TVOS AND NOT WATCHOS)
         install(TARGETS qjs_exe RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
         install(TARGETS qjsc RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+        install(FILES qjs.man DESTINATION ${CMAKE_INSTALL_DATADIR}/man/man1/qjs.1)
+        install(FILES qjsc.man DESTINATION ${CMAKE_INSTALL_DATADIR}/man/man1/qjsc.1)
     endif()
     install(TARGETS qjs EXPORT qjsConfig
             RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
