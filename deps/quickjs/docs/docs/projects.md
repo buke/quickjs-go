@@ -85,4 +85,13 @@ Nordstjernen web browser.
 
 ## [quickjs-cpp](https://github.com/qr243vbi/quickjs-cpp)
 
-Header only library for quickjs-ng with modern C++ interface.
+Header only library for quickjs-ng with modern C++ interface (Archived).
+
+## [NekoBox](https://github.com/qr243vbi/nekobox)
+
+A lightweight proxy client, empowered by sing-box and thrift.
+
+## [RongJS](https://github.com/LingXia-Dev/Rong)
+
+A multi-engine JavaScript runtime and Rust embedding API with first-class QuickJS-NG support.
+
