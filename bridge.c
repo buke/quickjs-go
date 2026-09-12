@@ -189,6 +189,8 @@ static void QuickjsGoPromiseRejectionTracker(JSContext *ctx,
     JSRuntime *rt = JS_GetRuntime(ctx);
     (void)opaque;
 
+    goHostPromiseRejectionTracker(rt, ctx, promise, reason, is_handled ? 1 : 0);
+
     qjsgo_mutex_lock(&g_rejection_states_mu);
     RejectionStateEntry *state = getRejectionState(rt, 1);
     if (!state) {
@@ -247,6 +249,29 @@ static void QuickjsGoPromiseRejectionTracker(JSContext *ctx,
     state->tail = entry;
 
     qjsgo_mutex_unlock(&g_rejection_states_mu);
+}
+
+static void QuickjsGoPromiseHook(JSContext *ctx,
+                                 JSPromiseHookType type,
+                                 JSValueConst promise,
+                                 JSValueConst parent_promise,
+                                 void *opaque) {
+    JSRuntime *rt = JS_GetRuntime(ctx);
+    (void)opaque;
+    goPromiseHook(rt, ctx, (int)type, promise, parent_promise);
+}
+
+void SetQuickjsGoPromiseHook(JSRuntime *rt, int enabled) {
+    if (!rt) {
+        return;
+    }
+
+    if (enabled) {
+        JS_SetPromiseHook(rt, QuickjsGoPromiseHook, NULL);
+        return;
+    }
+
+    JS_SetPromiseHook(rt, NULL, NULL);
 }
 
 void SetPromiseRejectionTracker(JSRuntime *rt, int enabled) {
@@ -342,6 +367,23 @@ JSValue CallPropertyByNameLen(JSContext *ctx, JSValueConst obj, const char *name
     JSValue ret = JS_Call(ctx, fn, obj, argc, argv);
     JS_FreeValue(ctx, fn);
     return ret;
+}
+
+static JSValue QuickjsGoCallableJob(JSContext *ctx, int argc, JSValueConst *argv) {
+    if (argc < 1) {
+        return JS_ThrowInternalError(ctx, "invalid native job payload");
+    }
+    if (!JS_IsFunction(ctx, argv[0])) {
+        return JS_ThrowTypeError(ctx, "native job target must be callable");
+    }
+    return JS_Call(ctx, argv[0], JS_UNDEFINED, argc - 1, argv + 1);
+}
+
+int EnqueueCallableJob(JSContext *ctx, int argc, JSValue *argv) {
+    if (!ctx || argc < 1 || !argv) {
+        return -1;
+    }
+    return JS_EnqueueJob(ctx, QuickjsGoCallableJob, argc, argv);
 }
 
 int DetectModuleSourceWithProbe(JSContext *ctx, const char *code, size_t code_len) {

@@ -110,6 +110,30 @@ func (ctx *Context) Schedule(job func(*Context)) bool {
 	}
 }
 
+// EnqueueJob enqueues a job to run on the Context thread.
+func (ctx *Context) EnqueueJob(job func(*Context)) bool {
+	return ctx.Schedule(job)
+}
+
+// EnqueueNativeJob enqueues a callable into the QuickJS native job queue.
+// The callable and all args must belong to the same Context.
+func (ctx *Context) EnqueueNativeJob(fn *Value, args ...*Value) bool {
+	if !ctx.hasValidRef() || fn == nil || !fn.belongsTo(ctx) || !fn.IsFunction() {
+		return false
+	}
+
+	cArgs := make([]C.JSValue, len(args)+1)
+	cArgs[0] = fn.ref
+	for i, arg := range args {
+		if arg == nil || !arg.belongsTo(ctx) {
+			return false
+		}
+		cArgs[i+1] = arg.ref
+	}
+
+	return C.EnqueueCallableJob(ctx.ref, C.int(len(cArgs)), &cArgs[0]) == 0
+}
+
 // ProcessJobs drains all pending scheduled jobs.
 // Call this regularly (e.g., inside Loop or Await) to allow resolve/reject handlers to run.
 func (ctx *Context) ProcessJobs() {
@@ -1468,4 +1492,46 @@ func (ctx *Context) NewPromise(executor func(resolve, reject func(*Value))) *Val
 // Deprecated: Use NewPromise() instead.
 func (ctx *Context) Promise(executor func(resolve, reject func(*Value))) *Value {
 	return ctx.NewPromise(executor)
+}
+
+// PromiseCapability mirrors QuickJS promise capability tuple.
+type PromiseCapability struct {
+	Promise *Value
+	Resolve *Value
+	Reject  *Value
+}
+
+// NewPromiseCapability creates a promise plus its resolve/reject functions.
+func (ctx *Context) NewPromiseCapability() *PromiseCapability {
+	if !ctx.hasValidRef() {
+		return nil
+	}
+
+	resolving := [2]C.JSValue{C.JS_NewUndefined(), C.JS_NewUndefined()}
+	promise := C.JS_NewPromiseCapability(ctx.ref, &resolving[0])
+	if bool(C.JS_IsException(promise)) {
+		return nil
+	}
+	return &PromiseCapability{
+		Promise: &Value{ctx: ctx, ref: promise},
+		Resolve: &Value{ctx: ctx, ref: resolving[0]},
+		Reject:  &Value{ctx: ctx, ref: resolving[1]},
+	}
+}
+
+// NewSettledPromise creates an already-fulfilled or already-rejected promise.
+func (ctx *Context) NewSettledPromise(value *Value, isReject bool) *Value {
+	if !ctx.hasValidRef() {
+		return nil
+	}
+
+	input := C.JS_NewUndefined()
+	if value != nil {
+		if !value.belongsTo(ctx) {
+			return nil
+		}
+		input = value.ref
+	}
+
+	return &Value{ctx: ctx, ref: C.JS_NewSettledPromise(ctx.ref, C.bool(isReject), input)}
 }

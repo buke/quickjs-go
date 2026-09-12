@@ -1542,7 +1542,56 @@ func TestPromiseState(t *testing.T) {
 	// Test non-promise value (covers first if branch) - Updated to use New* methods
 	nonPromise := ctx.NewString("not a promise")
 	defer nonPromise.Free()
-	require.Equal(t, PromisePending, nonPromise.PromiseState())
+	require.Equal(t, PromiseNotAPromise, nonPromise.PromiseState())
+
+	var nilValue *Value
+	require.Equal(t, PromiseNotAPromise, nilValue.PromiseState())
+}
+
+func TestPromiseResult(t *testing.T) {
+	useStableOwnerHooksForLegacySubtests(t)
+
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	fulfilled := ctx.Eval(`Promise.resolve("ok")`)
+	require.False(t, fulfilled.IsException())
+	defer fulfilled.Free()
+
+	fulfilledResult := fulfilled.PromiseResult()
+	require.NotNil(t, fulfilledResult)
+	defer fulfilledResult.Free()
+	require.Equal(t, "ok", fulfilledResult.ToString())
+
+	rejected := ctx.Eval(`Promise.reject("bad")`)
+	require.False(t, rejected.IsException())
+	defer rejected.Free()
+
+	rejectedResult := rejected.PromiseResult()
+	require.NotNil(t, rejectedResult)
+	defer rejectedResult.Free()
+	require.Equal(t, "bad", rejectedResult.ToString())
+
+	pending := ctx.Eval(`new Promise(() => {})`)
+	require.False(t, pending.IsException())
+	defer pending.Free()
+
+	pendingResult := pending.PromiseResult()
+	require.NotNil(t, pendingResult)
+	defer pendingResult.Free()
+	require.True(t, pendingResult.IsUndefined())
+
+	nonPromise := ctx.NewString("not a promise")
+	defer nonPromise.Free()
+	nonPromiseResult := nonPromise.PromiseResult()
+	require.NotNil(t, nonPromiseResult)
+	defer nonPromiseResult.Free()
+	require.True(t, nonPromiseResult.IsUndefined())
+
+	var nilValue *Value
+	require.Nil(t, nilValue.PromiseResult())
 }
 
 // TestValueAwait tests promise await functionality

@@ -1114,26 +1114,34 @@ func (v *Value) IsPromise() bool {
 type PromiseState int
 
 const (
-	PromisePending PromiseState = iota
-	PromiseFulfilled
-	PromiseRejected
+	PromiseNotAPromise PromiseState = PromiseState(C.JS_PROMISE_NOT_A_PROMISE)
+	PromisePending     PromiseState = PromiseState(C.JS_PROMISE_PENDING)
+	PromiseFulfilled   PromiseState = PromiseState(C.JS_PROMISE_FULFILLED)
+	PromiseRejected    PromiseState = PromiseState(C.JS_PROMISE_REJECTED)
 )
 
-// PromiseState returns the state of the Promise
+// PromiseState returns the promise state, or PromiseNotAPromise.
 func (v *Value) PromiseState() PromiseState {
-	if !v.IsPromise() {
-		return PromisePending
+	if !v.hasValidContext() {
+		return PromiseNotAPromise
 	}
 
-	state := C.JS_PromiseState(v.ctx.ref, v.ref)
+	state := PromiseState(C.JS_PromiseState(v.ctx.ref, v.ref))
 	switch state {
-	case C.JSPromiseStateEnum(C.JS_PROMISE_PENDING):
-		return PromisePending
-	case C.JSPromiseStateEnum(C.JS_PROMISE_FULFILLED):
-		return PromiseFulfilled
+	case PromiseNotAPromise, PromisePending, PromiseFulfilled, PromiseRejected:
+		return state
 	default:
-		return PromiseRejected
+		return PromiseNotAPromise
 	}
+}
+
+// PromiseResult returns the current promise result value.
+// Non-promise values follow quickjs-ng behavior and return undefined.
+func (v *Value) PromiseResult() *Value {
+	if !v.hasValidContext() {
+		return nil
+	}
+	return &Value{ctx: v.ctx, ref: C.JS_PromiseResult(v.ctx.ref, v.ref)}
 }
 
 // Await waits for promise resolution and executes pending jobs
