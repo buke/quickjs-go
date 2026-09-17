@@ -50,7 +50,7 @@ jobs:
       shell: cmd
 
     - name: Upload coverage to Codecov
-      uses: codecov/codecov-action@v7.0.0
+      uses: codecov/codecov-action@v7.1.0
       env:
         CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
       with:
