@@ -1160,7 +1160,7 @@ func TestContextPromise(t *testing.T) {
 		// Test PromiseState on non-Promise
 		nonPromise := ctx.NewString("not a promise")
 		defer nonPromise.Free()
-		require.Equal(t, PromisePending, nonPromise.PromiseState()) // Should return default
+		require.Equal(t, PromiseNotAPromise, nonPromise.PromiseState())
 	})
 
 	t.Run("ValueAwait", func(t *testing.T) {
@@ -1266,6 +1266,212 @@ func TestContextPromise(t *testing.T) {
 
 		require.False(t, result.IsException())
 		require.Equal(t, "async scheduler value", result.ToString())
+	})
+}
+
+func TestContextPromisePrimitives(t *testing.T) {
+	useStableOwnerHooksForLegacySubtests(t)
+
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	t.Run("NewPromiseCapability", func(t *testing.T) {
+		capability := ctx.NewPromiseCapability()
+		require.NotNil(t, capability)
+		require.NotNil(t, capability.Promise)
+		require.NotNil(t, capability.Resolve)
+		require.NotNil(t, capability.Reject)
+		defer capability.Promise.Free()
+		defer capability.Resolve.Free()
+		defer capability.Reject.Free()
+		require.True(t, capability.Promise.IsPromise())
+
+		thisVal := ctx.NewUndefined()
+		defer thisVal.Free()
+
+		resolvedValue := ctx.NewString("capability resolved")
+		defer resolvedValue.Free()
+		resolvedCall := capability.Resolve.Execute(thisVal, resolvedValue)
+		require.NotNil(t, resolvedCall)
+		defer resolvedCall.Free()
+		require.False(t, resolvedCall.IsException())
+
+		resolvedResult := ctx.Await(capability.Promise)
+		defer resolvedResult.Free()
+		require.False(t, resolvedResult.IsException())
+		require.Equal(t, "capability resolved", resolvedResult.ToString())
+
+		rejectedCapability := ctx.NewPromiseCapability()
+		require.NotNil(t, rejectedCapability)
+		defer rejectedCapability.Promise.Free()
+		defer rejectedCapability.Resolve.Free()
+		defer rejectedCapability.Reject.Free()
+
+		errObj := ctx.NewError(errors.New("capability rejected"))
+		defer errObj.Free()
+		rejectedCall := rejectedCapability.Reject.Execute(thisVal, errObj)
+		require.NotNil(t, rejectedCall)
+		defer rejectedCall.Free()
+		require.False(t, rejectedCall.IsException())
+
+		rejectedResult := ctx.Await(rejectedCapability.Promise)
+		defer rejectedResult.Free()
+		require.True(t, rejectedResult.IsException())
+		err := ctx.Exception()
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "capability rejected")
+	})
+
+	t.Run("NewPromiseCapabilityException", func(t *testing.T) {
+		rtLowMem := NewRuntime()
+		defer rtLowMem.Close()
+		ctxLowMem := rtLowMem.NewContext()
+		require.NotNil(t, ctxLowMem)
+		defer ctxLowMem.Close()
+
+		// Force allocation failure path for JS_NewPromiseCapability.
+		rtLowMem.SetMemoryLimit(256)
+		require.Nil(t, ctxLowMem.NewPromiseCapability())
+	})
+
+	t.Run("NewSettledPromise", func(t *testing.T) {
+		fulfilledValue := ctx.NewString("settled fulfilled")
+		defer fulfilledValue.Free()
+		fulfilledPromise := ctx.NewSettledPromise(fulfilledValue, false)
+		require.NotNil(t, fulfilledPromise)
+		defer fulfilledPromise.Free()
+		require.True(t, fulfilledPromise.IsPromise())
+
+		fulfilledResult := ctx.Await(fulfilledPromise)
+		defer fulfilledResult.Free()
+		require.False(t, fulfilledResult.IsException())
+		require.Equal(t, "settled fulfilled", fulfilledResult.ToString())
+
+		errObj := ctx.NewError(errors.New("settled rejected"))
+		defer errObj.Free()
+		rejectedPromise := ctx.NewSettledPromise(errObj, true)
+		require.NotNil(t, rejectedPromise)
+		defer rejectedPromise.Free()
+		require.True(t, rejectedPromise.IsPromise())
+
+		rejectedResult := ctx.Await(rejectedPromise)
+		defer rejectedResult.Free()
+		require.True(t, rejectedResult.IsException())
+		err := ctx.Exception()
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "settled rejected")
+
+		undefinedPromise := ctx.NewSettledPromise(nil, false)
+		require.NotNil(t, undefinedPromise)
+		defer undefinedPromise.Free()
+		undefinedResult := ctx.Await(undefinedPromise)
+		defer undefinedResult.Free()
+		require.True(t, undefinedResult.IsUndefined())
+	})
+
+	t.Run("PromisePrimitiveFailClosed", func(t *testing.T) {
+		var nilCtx *Context
+		require.Nil(t, nilCtx.NewPromiseCapability())
+		require.Nil(t, nilCtx.NewSettledPromise(nil, false))
+		require.False(t, nilCtx.EnqueueJob(func(*Context) {}))
+		require.False(t, nilCtx.EnqueueNativeJob(nil))
+
+		otherRT := NewRuntime()
+		defer otherRT.Close()
+		otherCtx := otherRT.NewContext()
+		require.NotNil(t, otherCtx)
+		defer otherCtx.Close()
+		foreignValue := otherCtx.NewString("foreign")
+		defer foreignValue.Free()
+		require.Nil(t, ctx.NewSettledPromise(foreignValue, false))
+
+		foreignFn := otherCtx.Eval(`() => 1`)
+		require.NotNil(t, foreignFn)
+		defer foreignFn.Free()
+		require.False(t, foreignFn.IsException())
+		require.False(t, ctx.EnqueueNativeJob(foreignFn))
+
+		nativeFn := ctx.Eval(`() => 0`)
+		require.NotNil(t, nativeFn)
+		defer nativeFn.Free()
+		require.False(t, nativeFn.IsException())
+		require.False(t, ctx.EnqueueNativeJob(nativeFn, foreignValue))
+
+		notCallable := ctx.NewString("not callable")
+		defer notCallable.Free()
+		require.False(t, ctx.EnqueueNativeJob(notCallable))
+		require.False(t, ctx.EnqueueNativeJob(nil))
+
+		closedRT := NewRuntime()
+		closedCtx := closedRT.NewContext()
+		require.NotNil(t, closedCtx)
+		closedCtx.Close()
+		require.Nil(t, closedCtx.NewPromiseCapability())
+		require.Nil(t, closedCtx.NewSettledPromise(nil, false))
+		require.False(t, closedCtx.EnqueueJob(func(*Context) {}))
+		require.False(t, closedCtx.EnqueueNativeJob(nil))
+		closedRT.Close()
+	})
+
+	t.Run("EnqueueJob", func(t *testing.T) {
+		executed := false
+		require.True(t, ctx.EnqueueJob(func(inner *Context) {
+			require.Same(t, ctx, inner)
+			executed = true
+		}))
+		ctx.ProcessJobs()
+		require.True(t, executed)
+	})
+
+	t.Run("EnqueueNativeJob", func(t *testing.T) {
+		initCounter := ctx.Eval(`globalThis.__nativeJobCounter = 0;`)
+		require.NotNil(t, initCounter)
+		defer initCounter.Free()
+		require.False(t, initCounter.IsException())
+
+		callable := ctx.Eval(`(delta) => { globalThis.__nativeJobCounter += delta; return globalThis.__nativeJobCounter; }`)
+		require.NotNil(t, callable)
+		defer callable.Free()
+		require.False(t, callable.IsException())
+
+		arg := ctx.NewInt32(2)
+		defer arg.Free()
+		require.True(t, ctx.EnqueueNativeJob(callable, arg))
+
+		before := ctx.Eval(`globalThis.__nativeJobCounter`)
+		require.NotNil(t, before)
+		defer before.Free()
+		require.False(t, before.IsException())
+		require.EqualValues(t, 0, before.ToInt32())
+
+		status, jobCtx := rt.ExecutePendingJob()
+		require.Greater(t, status, 0)
+		if jobCtx != nil {
+			require.Same(t, ctx, jobCtx)
+		}
+
+		after := ctx.Eval(`globalThis.__nativeJobCounter`)
+		require.NotNil(t, after)
+		defer after.Free()
+		require.False(t, after.IsException())
+		require.EqualValues(t, 2, after.ToInt32())
+
+		thrower := ctx.Eval(`() => { throw new Error("native job failed"); }`)
+		require.NotNil(t, thrower)
+		defer thrower.Free()
+		require.False(t, thrower.IsException())
+
+		require.True(t, ctx.EnqueueNativeJob(thrower))
+		status, jobCtx = rt.ExecutePendingJob()
+		require.Less(t, status, 0)
+		if jobCtx != nil {
+			require.Same(t, ctx, jobCtx)
+		}
+		err := ctx.Exception()
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "native job failed")
 	})
 }
 

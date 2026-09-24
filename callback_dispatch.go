@@ -48,6 +48,24 @@ func goInterruptHandler(runtimePtr *C.JSRuntime) C.int {
 	return C.int(runtime.callInterruptHandler())
 }
 
+//export goPromiseHook
+func goPromiseHook(runtimePtr *C.JSRuntime, ctx *C.JSContext, hookType C.int, promise C.JSValueConst, parentPromise C.JSValueConst) {
+	runtime := getRuntimeFromJS(runtimePtr)
+	if runtime == nil {
+		return
+	}
+	runtime.callPromiseHook(ctx, PromiseHookType(hookType), C.JSValue(promise), C.JSValue(parentPromise))
+}
+
+//export goHostPromiseRejectionTracker
+func goHostPromiseRejectionTracker(runtimePtr *C.JSRuntime, ctx *C.JSContext, promise C.JSValueConst, reason C.JSValueConst, isHandled C.int) {
+	runtime := getRuntimeFromJS(runtimePtr)
+	if runtime == nil {
+		return
+	}
+	runtime.callHostPromiseRejectionTracker(ctx, C.JSValue(promise), C.JSValue(reason), isHandled != 0)
+}
+
 //export goFunctionProxy
 func goFunctionProxy(ctx *C.JSContext, thisVal C.JSValueConst,
 	argc C.int, argv *C.JSValueConst, magic C.int) C.JSValue {
