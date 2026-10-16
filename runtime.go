@@ -19,8 +19,32 @@ import (
 // Return != 0 if the JS code needs to be interrupted
 type InterruptHandler func() int
 
+// PromiseHookType mirrors quickjs-ng JSPromiseHookType.
+type PromiseHookType int
+
+const (
+	PromiseHookInit    PromiseHookType = PromiseHookType(C.JS_PROMISE_HOOK_INIT)
+	PromiseHookBefore  PromiseHookType = PromiseHookType(C.JS_PROMISE_HOOK_BEFORE)
+	PromiseHookAfter   PromiseHookType = PromiseHookType(C.JS_PROMISE_HOOK_AFTER)
+	PromiseHookResolve PromiseHookType = PromiseHookType(C.JS_PROMISE_HOOK_RESOLVE)
+)
+
+// PromiseHook receives runtime-level promise lifecycle events.
+type PromiseHook func(ctx *Context, hookType PromiseHookType, promise *Value, parentPromise *Value)
+
+// HostPromiseRejectionTracker receives host rejection tracking events.
+type HostPromiseRejectionTracker func(ctx *Context, promise *Value, reason *Value, isHandled bool)
+
 type interruptHandlerHolder struct {
 	fn InterruptHandler
+}
+
+type promiseHookHolder struct {
+	fn PromiseHook
+}
+
+type hostPromiseRejectionTrackerHolder struct {
+	fn HostPromiseRejectionTracker
 }
 
 // runtimeNewContextHook is used in tests to force JS_NewContext failure paths.
@@ -67,6 +91,8 @@ type Runtime struct {
 	ownerGoroutineID       atomic.Uint64
 	ownerThreadID          atomic.Uint64
 	interruptHandlerState  atomic.Pointer[interruptHandlerHolder]
+	promiseHookState       atomic.Pointer[promiseHookHolder]
+	hostRejectionHookState atomic.Pointer[hostPromiseRejectionTrackerHolder]
 	contexts               sync.Map
 	contextsByID           sync.Map
 	contextIDCounter       atomic.Uint64
@@ -160,7 +186,7 @@ const (
 	DumpFlagAtoms           uint64 = C.JS_DUMP_ATOMS
 	DumpFlagShapes          uint64 = C.JS_DUMP_SHAPES
 	// DumpFlagAbortOnLeaks aborts on atom/object/string leaks and is intended for testing.
-	DumpFlagAbortOnLeaks    uint64 = C.JS_ABORT_ON_LEAKS
+	DumpFlagAbortOnLeaks uint64 = C.JS_ABORT_ON_LEAKS
 )
 
 // IntrinsicSet controls which QuickJS intrinsics are injected into a raw context.
@@ -624,7 +650,10 @@ func (r *Runtime) Close() {
 
 		ref := r.ref
 		r.interruptHandlerState.Store(nil)
+		r.promiseHookState.Store(nil)
+		r.hostRejectionHookState.Store(nil)
 		C.ClearInterruptHandler(ref)
+		C.SetQuickjsGoPromiseHook(ref, 0)
 		C.SetPromiseRejectionTracker(ref, 0)
 
 		r.constructorRegistry.Range(func(key, _ interface{}) bool {
@@ -899,6 +928,111 @@ func (r *Runtime) SetExecuteTimeout(timeout uint64) {
 	r.interruptHandlerState.Store(nil)
 }
 
+// IsJobPending reports whether there are pending jobs in the runtime queue.
+func (r *Runtime) IsJobPending() bool {
+	if r == nil {
+		return false
+	}
+	if !r.ensureOwnerAccess() {
+		return false
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if r.closed.Load() || r.ref == nil {
+		return false
+	}
+	return bool(C.JS_IsJobPending(r.ref))
+}
+
+// PendingJobContext returns the Context for the next pending job, if any.
+func (r *Runtime) PendingJobContext() *Context {
+	if r == nil {
+		return nil
+	}
+	if !r.ensureOwnerAccess() {
+		return nil
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if r.closed.Load() || r.ref == nil {
+		return nil
+	}
+	ctxRef := C.JS_GetPendingJobContext(r.ref)
+	if ctxRef == nil {
+		return nil
+	}
+	return getContextFromJS(ctxRef)
+}
+
+// GetPendingJobContext returns the Context for the next pending job.
+// Deprecated: Use PendingJobContext() instead.
+func (r *Runtime) GetPendingJobContext() *Context {
+	return r.PendingJobContext()
+}
+
+// ExecutePendingJob runs one pending runtime job and returns the raw status code.
+// Return values mirror quickjs-ng:
+//
+//	> 0: one job executed
+//	== 0: no pending jobs
+//	< 0: job execution raised an exception in the returned Context
+func (r *Runtime) ExecutePendingJob() (int, *Context) {
+	if r == nil {
+		return 0, nil
+	}
+	if !r.ensureOwnerAccess() {
+		return 0, nil
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if r.closed.Load() || r.ref == nil {
+		return 0, nil
+	}
+
+	var ctxRef *C.JSContext
+	status := int(C.JS_ExecutePendingJob(r.ref, &ctxRef))
+	if ctxRef == nil {
+		return status, nil
+	}
+	return status, getContextFromJS(ctxRef)
+}
+
+// DrainPendingJobs executes pending runtime jobs until the queue is empty,
+// an error occurs, or max jobs have been executed.
+//
+// If max > 0, at most max jobs are executed. If max <= 0, all available
+// pending jobs are drained.
+func (r *Runtime) DrainPendingJobs(max int) (executed int, lastCtx *Context, err error) {
+	if r == nil {
+		return 0, nil, nil
+	}
+
+	for {
+		if max > 0 && executed >= max {
+			return executed, lastCtx, nil
+		}
+
+		status, ctx := r.ExecutePendingJob()
+		if ctx != nil {
+			lastCtx = ctx
+		}
+
+		if status > 0 {
+			executed++
+			continue
+		}
+		if status == 0 {
+			return executed, lastCtx, nil
+		}
+
+		err = errors.New("quickjs: failed to execute pending job")
+		if ctx != nil && ctx.HasException() {
+			err = ctx.Exception()
+		}
+		return executed, lastCtx, err
+	}
+}
+
 // SetStripInfo is retained for backward compatibility only.
 // Deprecated: quickjs-ng does not expose a runtime-level strip-info API, so this method is a no-op.
 func (r *Runtime) SetStripInfo(strip int) {
@@ -983,6 +1117,50 @@ func (r *Runtime) ClearInterruptHandler() {
 	C.ClearInterruptHandler(r.ref)
 }
 
+// SetPromiseHook registers a runtime-level promise hook.
+// Pass nil to clear the hook.
+func (r *Runtime) SetPromiseHook(hook PromiseHook) {
+	if r == nil {
+		return
+	}
+	if !r.ensureOwnerAccess() {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.closed.Load() || r.ref == nil {
+		return
+	}
+	if hook == nil {
+		r.promiseHookState.Store(nil)
+		C.SetQuickjsGoPromiseHook(r.ref, 0)
+		return
+	}
+	r.promiseHookState.Store(&promiseHookHolder{fn: hook})
+	C.SetQuickjsGoPromiseHook(r.ref, 1)
+}
+
+// SetHostPromiseRejectionTracker registers a host rejection tracker callback.
+// Pass nil to clear the hook.
+func (r *Runtime) SetHostPromiseRejectionTracker(tracker HostPromiseRejectionTracker) {
+	if r == nil {
+		return
+	}
+	if !r.ensureOwnerAccess() {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.closed.Load() || r.ref == nil {
+		return
+	}
+	if tracker == nil {
+		r.hostRejectionHookState.Store(nil)
+		return
+	}
+	r.hostRejectionHookState.Store(&hostPromiseRejectionTrackerHolder{fn: tracker})
+}
+
 // callInterruptHandler is called from C layer via runtime mapping (internal use)
 func (r *Runtime) callInterruptHandler() int {
 	if r == nil {
@@ -993,6 +1171,45 @@ func (r *Runtime) callInterruptHandler() int {
 		return holder.fn()
 	}
 	return 0 // No interrupt
+}
+
+// callPromiseHook is called from C layer via runtime mapping (internal use).
+func (r *Runtime) callPromiseHook(ctxRef *C.JSContext, hookType PromiseHookType, promise C.JSValue, parentPromise C.JSValue) {
+	if r == nil {
+		return
+	}
+	holder := r.promiseHookState.Load()
+	if holder == nil || holder.fn == nil {
+		return
+	}
+	ctx := getContextFromJS(ctxRef)
+	if ctx == nil {
+		return
+	}
+	promiseVal := &Value{ctx: ctx, ref: promise, borrowed: true}
+	var parentVal *Value
+	if !bool(C.JS_IsUndefined(parentPromise)) {
+		parentVal = &Value{ctx: ctx, ref: parentPromise, borrowed: true}
+	}
+	holder.fn(ctx, hookType, promiseVal, parentVal)
+}
+
+// callHostPromiseRejectionTracker is called from C layer via runtime mapping (internal use).
+func (r *Runtime) callHostPromiseRejectionTracker(ctxRef *C.JSContext, promise C.JSValue, reason C.JSValue, isHandled bool) {
+	if r == nil {
+		return
+	}
+	holder := r.hostRejectionHookState.Load()
+	if holder == nil || holder.fn == nil {
+		return
+	}
+	ctx := getContextFromJS(ctxRef)
+	if ctx == nil {
+		return
+	}
+	promiseVal := &Value{ctx: ctx, ref: promise, borrowed: true}
+	reasonVal := &Value{ctx: ctx, ref: reason, borrowed: true}
+	holder.fn(ctx, promiseVal, reasonVal, isHandled)
 }
 
 // NewContext creates a new JavaScript context with default host bootstrap.
