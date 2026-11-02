@@ -66,6 +66,10 @@
 #include <grp.h>
 #endif
 
+#if defined(__COSMOPOLITAN__)
+#include <cosmo.h>
+#endif
+
 #if defined(__APPLE__)
 typedef sig_t sighandler_t;
 #include <crt_externs.h>
@@ -1085,14 +1089,14 @@ static JSValue js_std_gc(JSContext *ctx, JSValueConst this_val,
     return JS_UNDEFINED;
 }
 
-static int interrupt_handler(JSRuntime *rt, void *opaque)
+static int interrupt_handler(JSContext *ctx, void *opaque)
 {
     JSThreadState *ts = opaque;
 
     if (1 & (os_pending_signals >> SIGINT))
         return 1;
     if (ts->prev_interrupt_handler)
-        return ts->prev_interrupt_handler(rt, ts->prev_interrupt_opaque);
+        return ts->prev_interrupt_handler(ctx, ts->prev_interrupt_opaque);
     return 0;
 }
 
@@ -2853,7 +2857,7 @@ static int js_os_poll_internal(JSContext *ctx, int timeout_ms, int flags)
 {
     JSRuntime *rt = JS_GetRuntime(ctx);
     JSThreadState *ts = js_get_thread_state(rt);
-    int r, w, ret, nfds, min_delay;
+    int r, w, ret, nfds, min_delay, poll_nfds;
     JSOSRWHandler *rh;
     struct list_head *el;
     struct pollfd *pfd, *pfds, pfds_local[64];
@@ -2947,12 +2951,14 @@ static int js_os_poll_internal(JSContext *ctx, int timeout_ms, int flags)
     // linear-ish in practice because we bail out on the first hit,
     // i.e., it's probably good enough for now
     ret = 0;
+    /* poll() returns the number of ready descriptors, not the array length. */
+    poll_nfds = nfds;
     nfds = poll(pfds, nfds, min_delay);
     if (nfds < 0) {
         ret = -1;
         goto done;
     }
-    for (pfd = pfds; nfds-- > 0; pfd++) {
+    for (pfd = pfds; poll_nfds-- > 0; pfd++) {
         rh = find_rh(ts, pfd->fd);
         if (rh) {
             r = (POLLERR|POLLHUP|POLLNVAL|POLLIN) * !JS_IsNull(rh->rw_func[0]);
@@ -4117,7 +4123,7 @@ static void worker_func(void *opaque)
 
     js_std_add_helpers(ctx, -1, NULL);
 
-    val = JS_LoadModule(ctx, args->basename, args->filename);
+    val = JS_LoadModule(ctx, args->basename, args->filename, JS_UNDEFINED);
     free(args->filename);
     free(args->basename);
     free(args);
@@ -4542,7 +4548,29 @@ static int js_os_init(JSContext *ctx, JSModuleDef *m)
     }
 #endif /* USE_WORKER */
 
-    return JS_SetModuleExportList(ctx, m, js_os_funcs, countof(js_os_funcs));
+    if (JS_SetModuleExportList(ctx, m, js_os_funcs, countof(js_os_funcs)))
+        return -1;
+
+#ifdef __COSMOPOLITAN__
+    const char *platform;
+    if (IsLinux()) {
+        platform = "linux";
+    } else if (IsNetbsd()) {
+        platform = "netbsd";
+    } else if (IsOpenbsd()) {
+        platform = "openbsd";
+    } else if (IsWindows()) {
+        platform = "win32";
+    } else if (IsXnu()) {
+        platform = "darwin";
+    } else {
+        platform = "unknown";
+    }
+    if (JS_SetModuleExport(ctx, m, "platform", JS_NewString(ctx, platform)))
+        return -1;
+#endif /* __COSMOPOLITAN__ */
+
+    return 0;
 }
 
 JSModuleDef *js_init_module_os(JSContext *ctx, const char *module_name)

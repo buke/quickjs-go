@@ -61,11 +61,11 @@ jobs:
           - { os: ubuntu-latest, arch: x86, runTest262: true }
           - { os: ubuntu-latest, arch: riscv64 }
 
-          - { os: macos-14, configType: Debug }
-          - { os: macos-14, configType: Release }
-          - { os: macos-14, configType: examples }
-          - { os: macos-14, configType: shared }
-          - { os: macos-14, configType: asan+ubsan, runTest262: true }
+          - { os: macos-15, configType: Debug }
+          - { os: macos-15, configType: Release }
+          - { os: macos-15, configType: examples }
+          - { os: macos-15, configType: shared }
+          - { os: macos-15, configType: asan+ubsan, runTest262: true }
     steps:
       - uses: actions/checkout@v7
         with:
@@ -74,7 +74,7 @@ jobs:
       - name: install TCC
         if: ${{ matrix.config.configType == 'tcc' }}
         run: |
-          pushd /tmp
+          pushd "$RUNNER_TEMP"
           git clone https://repo.or.cz/tinycc.git
           cd tinycc
           git checkout c21576f8a32715ab439690d18184b0e02022bbbd
@@ -183,8 +183,8 @@ jobs:
           - { arch: x64, vsArch: x64, buildType: Release, os: windows-latest, msvc: 18 }
           - { arch: Win32, vsArch: x86, buildType: Debug, os: windows-latest, msvc: 18 }
           - { arch: Win32, vsArch: x86, buildType: Release, os: windows-latest, msvc: 18 }
-          - { arch: ARM64, vsArch: arm64, buildType: Debug, os: windows-11-arm, msvc: 17 }
-          - { arch: ARM64, vsArch: arm64, buildType: Release, os: windows-11-arm, msvc: 17 }
+          - { arch: ARM64, vsArch: arm64, buildType: Debug, os: windows-11-arm, msvc: 18 }
+          - { arch: ARM64, vsArch: arm64, buildType: Release, os: windows-11-arm, msvc: 18 }
     steps:
       - uses: actions/checkout@v7
       - name: build
@@ -461,8 +461,8 @@ jobs:
       - uses: jcbhmr/setup-wasmtime@v2
       - name: setup wasi-sdk
         run: |
-          wget -nv https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-29/wasi-sdk-29.0-x86_64-linux.deb -P /tmp
-          sudo apt install /tmp/wasi-sdk*.deb
+          wget -nv https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-29/wasi-sdk-29.0-x86_64-linux.deb -P "$RUNNER_TEMP"
+          sudo apt install "$RUNNER_TEMP/wasi-sdk-29.0-x86_64-linux.deb"
       - name: test
         run: |
           cmake -B build -DQJS_BUILD_WERROR=ON -DCMAKE_TOOLCHAIN_FILE=/opt/wasi-sdk/share/cmake/wasi-sdk.cmake
@@ -477,6 +477,58 @@ jobs:
           cmake -B build -DQJS_BUILD_WERROR=ON -DCMAKE_TOOLCHAIN_FILE=/opt/wasi-sdk/share/cmake/wasi-sdk.cmake -DQJS_WASI_REACTOR=ON
           make -C build qjs_wasi
           ls -lh build/qjs.wasm
+      - name: check wasi reactor exports
+        run: |
+          exports=$(/opt/wasi-sdk/bin/llvm-nm --extern-only --defined-only --just-symbol-name build/qjs.wasm)
+          expected=(
+            # Reactor entry points
+            qjs_init qjs_init_argv qjs_get_context qjs_destroy
+            # libc allocator
+            malloc free realloc calloc
+            # Some of core JS_EXTERN API
+            JS_NewRuntime JS_FreeRuntime JS_NewContext JS_FreeContext
+            JS_Eval JS_FreeValue JS_GetException JS_ToCStringLen2
+            # Some of quickjs-libc JS_LIBC_EXTERN API
+            js_std_add_helpers js_std_init_handlers
+          )
+          missing=0
+          for sym in "${expected[@]}"; do
+            echo "$exports" | grep -qx "$sym" || { echo "missing export: $sym"; missing=1; }
+          done
+          exit $missing
+      - name: check wasi reactor table is exported and growable
+        shell: node {0}
+        run: |
+          const m = new WebAssembly.Module(require('fs').readFileSync('build/qjs.wasm'));
+          const imports = {};
+          for (const i of WebAssembly.Module.imports(m)) (imports[i.module] ??= {})[i.name] = () => {};
+          new WebAssembly.Instance(m, imports).exports.__indirect_function_table.grow(1);
+
+  cosmopolitan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: setup cosmocc
+        run: |
+          wget -nv https://github.com/jart/cosmopolitan/releases/download/4.0.2/cosmocc-4.0.2.zip -P "$RUNNER_TEMP"
+          mkdir -p "$RUNNER_TEMP/cosmocc"
+          unzip -q "$RUNNER_TEMP/cosmocc-4.0.2.zip" -d "$RUNNER_TEMP/cosmocc"
+          echo "$RUNNER_TEMP/cosmocc/bin" >> "$GITHUB_PATH"
+      - name: setup ape loader
+        run: |
+          sudo cp "$RUNNER_TEMP/cosmocc/bin/ape-x86_64.elf" /usr/bin/ape
+          sudo sh -c "echo ':APE:M::MZqFpD::/usr/bin/ape:' > /proc/sys/fs/binfmt_misc/register"
+          sudo sh -c "echo ':APE-jart:M::jartsr::/usr/bin/ape:' > /proc/sys/fs/binfmt_misc/register"
+      - name: build
+        run: |
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=cosmocc -DCMAKE_AR="$(command -v cosmoar)"
+          cmake --build build -j$(getconf _NPROCESSORS_ONLN)
+      - name: stats
+        run: |
+          build/qjs -qd
+      - name: test
+        run: |
+          build/run-test262 -c tests.conf
 
   cygwin:
     runs-on: windows-latest
