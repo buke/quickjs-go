@@ -1013,15 +1013,23 @@ func (ctx *Context) LoadModuleURL(basename, filename string, attributes *Value) 
 	return &Value{ctx: ctx, ref: C.JS_LoadModule(ctx.ref, basePtr, filePtr, attrs)}
 }
 
+// finishDynamicImportResultHook overrides FinishDynamicImport C return codes in tests.
+var finishDynamicImportResultHook func(ret C.int) C.int
+
+func applyFinishDynamicImportResult(ret C.int) C.int {
+	if hook := finishDynamicImportResultHook; hook != nil {
+		return hook(ret)
+	}
+	return ret
+}
+
 // FinishDynamicImport completes a previously deferred JS import().
 // token ownership is consumed. On success, modulePromise ownership is consumed.
 // On error, modulePromise (if any) is freed by the caller still; pass nil with err set.
 func (ctx *Context) FinishDynamicImport(token *Value, modulePromise *Value, err error) error {
 	if ctx == nil || !ctx.hasValidRef() {
+		// hasValidRef also enforces owner-goroutine access.
 		return errors.New("quickjs: context is closed")
-	}
-	if !ctx.runtime.ensureOwnerAccess() {
-		return errOwnerAccessDenied
 	}
 	if token == nil || !token.belongsTo(ctx) || token.borrowed {
 		return errors.New("quickjs: invalid dynamic import token")
@@ -1031,7 +1039,7 @@ func (ctx *Context) FinishDynamicImport(token *Value, modulePromise *Value, err 
 
 	if err != nil {
 		msg := C.CString(err.Error())
-		ret := C.FinishDynamicImportWithError(ctx.ref, token.ref, msg)
+		ret := applyFinishDynamicImportResult(C.FinishDynamicImportWithError(ctx.ref, token.ref, msg))
 		C.free(unsafe.Pointer(msg))
 		token.ref = C.JS_NewUndefined()
 		if modulePromise != nil {
@@ -1045,7 +1053,7 @@ func (ctx *Context) FinishDynamicImport(token *Value, modulePromise *Value, err 
 
 	if modulePromise == nil || !modulePromise.belongsTo(ctx) {
 		msg := C.CString("quickjs: dynamic import module promise is required")
-		ret := C.FinishDynamicImportWithError(ctx.ref, token.ref, msg)
+		ret := applyFinishDynamicImportResult(C.FinishDynamicImportWithError(ctx.ref, token.ref, msg))
 		C.free(unsafe.Pointer(msg))
 		token.ref = C.JS_NewUndefined()
 		if ret != 0 {
@@ -1054,7 +1062,7 @@ func (ctx *Context) FinishDynamicImport(token *Value, modulePromise *Value, err 
 		return nil
 	}
 
-	ret := C.FinishDynamicImportSuccess(ctx.ref, token.ref, modulePromise.ref)
+	ret := applyFinishDynamicImportResult(C.FinishDynamicImportSuccess(ctx.ref, token.ref, modulePromise.ref))
 	token.ref = C.JS_NewUndefined()
 	modulePromise.ref = C.JS_NewUndefined()
 	if ret != 0 {

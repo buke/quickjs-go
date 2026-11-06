@@ -8,6 +8,7 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+	"unsafe"
 
 	"github.com/stretchr/testify/require"
 )
@@ -1095,6 +1096,9 @@ func TestRuntimeDynamicImportFailClosed(t *testing.T) {
 		return nil, nil
 	})
 	nilRT.ClearDynamicImportHandler()
+	nilRT.SetDefaultDynamicImport(true)
+	nilRT.registerPendingDynamicImport(nil, nil)
+	nilRT.unregisterPendingDynamicImport(nil)
 
 	rt := NewRuntime()
 	rt.Close()
@@ -1102,13 +1106,268 @@ func TestRuntimeDynamicImportFailClosed(t *testing.T) {
 		return nil, nil
 	})
 	rt.ClearDynamicImportHandler()
+	rt.SetDefaultDynamicImport(true)
+	rt.SetDefaultDynamicImport(false)
 
 	closed := NewRuntime()
 	ctx := closed.NewContext()
 	require.Error(t, ctx.FinishDynamicImport(nil, nil, fmt.Errorf("x")))
 	ctx.Close()
 	require.Error(t, ctx.FinishDynamicImport(nil, nil, fmt.Errorf("x")))
+	require.Nil(t, ctx.LoadModuleURL(".", "./x.js", nil))
 	closed.Close()
+}
+
+func TestRuntimeDynamicImportDefaultFlagWithCustomHandler(t *testing.T) {
+	rt := NewRuntime(WithModuleImport(true))
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	rt.SetDynamicImportHandler(func(ctx *Context, basename, filename string, token *Value, attributes *Value) (*Value, error) {
+		return nil, fmt.Errorf("custom still active")
+	})
+	rt.SetDefaultDynamicImport(true) // custom handler wins
+	result := ctx.Eval(`(async () => import("./test/fib_module.js"))()`, EvalAwait(true))
+	defer result.Free()
+	require.True(t, result.IsException())
+	require.Contains(t, ctx.Exception().Error(), "custom still active")
+
+	rt.ClearDynamicImportHandler() // restores default stub because flag stayed enabled
+	result2 := ctx.Eval(`
+		(async function() {
+			const mod = await import("./test/fib_module.js");
+			return mod.fib(3);
+		})()
+	`, EvalAwait(true))
+	defer result2.Free()
+	require.False(t, result2.IsException(), "%v", ctx.Exception())
+	require.EqualValues(t, 2, result2.ToInt32())
+
+	rt.SetDefaultDynamicImport(false)
+	rt.SetDynamicImportHandler(nil)
+}
+
+func TestRuntimeDynamicImportOwnerDenied(t *testing.T) {
+	oldGIDHook := ownerCheckCurrentGoroutineID
+	oldThreadHook := ownerCheckCurrentThreadID
+	defer func() {
+		ownerCheckCurrentGoroutineID = oldGIDHook
+		ownerCheckCurrentThreadID = oldThreadHook
+	}()
+
+	var gid atomic.Uint64
+	gid.Store(601)
+	ownerCheckCurrentGoroutineID = func() uint64 { return gid.Load() }
+	ownerCheckCurrentThreadID = func() uint64 { return 1 }
+
+	rt := NewRuntime(WithModuleImport(true))
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	gid.Store(602)
+	rt.SetDefaultDynamicImport(true)
+	rt.SetDynamicImportHandler(func(ctx *Context, basename, filename string, token *Value, attributes *Value) (*Value, error) {
+		return nil, nil
+	})
+	rt.ClearDynamicImportHandler()
+	tok := ctx.NewString("tok")
+	require.Error(t, ctx.FinishDynamicImport(tok, nil, fmt.Errorf("x")))
+	tok.Free()
+}
+
+func TestRuntimeDynamicImportGoDispatchBranches(t *testing.T) {
+	rt := NewRuntime(WithModuleImport(true))
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	_, err := rt.callDynamicImportHandler(ctx, ".", "./x.js", nil, nil)
+	require.Error(t, err)
+
+	calls := 0
+	rt.SetDynamicImportHandler(func(c *Context, basename, filename string, token *Value, attributes *Value) (*Value, error) {
+		calls++
+		return c.NewString("leftover"), fmt.Errorf("fail with promise")
+	})
+	invokeGoDynamicImportForTest(ctx, ".", "./missing.js")
+	require.Equal(t, 1, calls)
+	_ = ctx.Exception()
+
+	rt.SetDynamicImportHandler(func(c *Context, basename, filename string, token *Value, attributes *Value) (*Value, error) {
+		calls++
+		return nil, nil
+	})
+	invokeGoDynamicImportForTest(ctx, ".", "./missing.js")
+	require.Equal(t, 2, calls)
+	_ = ctx.Exception()
+
+	other := rt.NewContext()
+	var foreignPromise *Value
+	rt.SetDynamicImportHandler(func(c *Context, basename, filename string, token *Value, attributes *Value) (*Value, error) {
+		calls++
+		foreignPromise = other.NewString("foreign-promise")
+		return foreignPromise, nil
+	})
+	invokeGoDynamicImportForTest(ctx, ".", "./missing.js")
+	require.Equal(t, 3, calls)
+	if foreignPromise != nil {
+		foreignPromise.Free()
+	}
+	other.Close()
+	_ = ctx.Exception()
+
+	rt.SetDynamicImportHandler(func(c *Context, basename, filename string, token *Value, attributes *Value) (*Value, error) {
+		calls++
+		return c.LoadModuleURL(basename, filename, attributes), nil
+	})
+	invokeGoDynamicImportForTest(ctx, ".", "./test/fib_module.js")
+	require.Equal(t, 4, calls)
+	rt.ClearDynamicImportHandler()
+
+	// Missing context / nil-runtime early returns (after handler coverage above).
+	unregisterContext(ctx.ref)
+	invokeGoDynamicImportForTest(ctx, ".", "./missing.js")
+	registerContext(ctx.ref, ctx)
+
+	savedRT := ctx.runtime
+	ctx.runtime = nil
+	invokeGoDynamicImportForTest(ctx, ".", "./missing.js")
+	ctx.runtime = savedRT
+}
+
+func TestRuntimeDynamicImportLoadModuleURLAttrs(t *testing.T) {
+	rt := NewRuntime(WithModuleImport(true))
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	other := rt.NewContext()
+	foreign := other.NewString("attr")
+	require.Nil(t, ctx.LoadModuleURL(".", "./test/fib_module.js", foreign))
+	foreign.Free()
+	other.Close()
+
+	attrs := ctx.NewObject()
+	mod := ctx.LoadModuleURL(".", "./test/fib_module.js", attrs)
+	require.NotNil(t, mod)
+	mod.Free()
+	attrs.Free()
+}
+
+func TestRuntimeDynamicImportFinishErrorAndNilPromise(t *testing.T) {
+	rt := NewRuntime(WithModuleImport(true))
+	defer rt.Close()
+
+	var pendingToken *Value
+	rt.SetDynamicImportHandler(func(c *Context, basename, filename string, token *Value, attributes *Value) (*Value, error) {
+		pendingToken = token
+		base, file := basename, filename
+		ok := c.Schedule(func(c *Context) {
+			leftover := c.NewString("to-free")
+			require.NoError(t, c.FinishDynamicImport(pendingToken, leftover, fmt.Errorf("deferred fail")))
+			_ = base
+			_ = file
+		})
+		require.True(t, ok)
+		return nil, ErrDynamicImportPending
+	})
+
+	ctx := rt.NewContext()
+	defer ctx.Close()
+	p := ctx.Eval(`(async () => import("./test/fib_module.js"))()`)
+	require.NotNil(t, p)
+	awaited := ctx.Await(p)
+	if awaited != nil {
+		awaited.Free()
+	}
+	require.NotNil(t, pendingToken)
+
+	pendingToken = nil
+	rt.SetDynamicImportHandler(func(c *Context, basename, filename string, token *Value, attributes *Value) (*Value, error) {
+		pendingToken = token
+		ok := c.Schedule(func(c *Context) {
+			borrowed := &Value{ctx: c, ref: pendingToken.ref, borrowed: true}
+			require.Error(t, c.FinishDynamicImport(borrowed, nil, nil))
+			require.NoError(t, c.FinishDynamicImport(pendingToken, nil, nil))
+		})
+		require.True(t, ok)
+		return nil, ErrDynamicImportPending
+	})
+	p2 := ctx.Eval(`(async () => import("./test/fib_module.js"))()`)
+	require.NotNil(t, p2)
+	awaited2 := ctx.Await(p2)
+	if awaited2 != nil {
+		awaited2.Free()
+	}
+	require.NotNil(t, pendingToken)
+}
+
+func TestRuntimeDynamicImportFinishFailureHook(t *testing.T) {
+	_ = forceFinishDynamicImportFailureForTest(false) // cover disable no-op path
+
+	rt := NewRuntime(WithModuleImport(true))
+	defer rt.Close()
+	restore := forceFinishDynamicImportFailureForTest(true)
+	defer restore()
+
+	var pendingToken *Value
+	phase := 0
+	rt.SetDynamicImportHandler(func(c *Context, basename, filename string, token *Value, attributes *Value) (*Value, error) {
+		pendingToken = token
+		p := phase
+		phase++
+		ok := c.Schedule(func(c *Context) {
+			switch p {
+			case 0:
+				require.Error(t, c.FinishDynamicImport(pendingToken, c.NewString("x"), fmt.Errorf("hooked")))
+			case 1:
+				require.Error(t, c.FinishDynamicImport(pendingToken, nil, nil))
+			case 2:
+				promise := c.LoadModuleURL(basename, filename, attributes)
+				require.Error(t, c.FinishDynamicImport(pendingToken, promise, nil))
+			}
+		})
+		require.True(t, ok)
+		return nil, ErrDynamicImportPending
+	})
+
+	ctx := rt.NewContext()
+	defer ctx.Close()
+	for i := 0; i < 3; i++ {
+		p := ctx.Eval(`(async () => import("./test/fib_module.js"))()`)
+		require.NotNil(t, p)
+		awaited := ctx.Await(p)
+		if awaited != nil {
+			awaited.Free()
+		}
+	}
+	require.Equal(t, 3, phase)
+	_ = pendingToken
+}
+
+func TestRuntimeDynamicImportFailClosePending(t *testing.T) {
+	rt := NewRuntime(WithModuleImport(true))
+	ctx := rt.NewContext()
+
+	rt.pendingDynamicImports.Store(uintptr(1), "bad-type")
+	rt.pendingDynamicImports.Store(uintptr(2), &pendingDynamicImport{})
+	// Nil-context pending entries cannot JS_FreeValue; use an already-undefined ref.
+	deadTok := &Value{}
+	rt.pendingDynamicImports.Store(uintptr(unsafe.Pointer(deadTok)), &pendingDynamicImport{ctx: nil, token: deadTok})
+
+	var livePending *Value
+	rt.SetDynamicImportHandler(func(c *Context, basename, filename string, token *Value, attributes *Value) (*Value, error) {
+		livePending = token
+		return nil, ErrDynamicImportPending
+	})
+	p := ctx.Eval(`(async () => import("./test/fib_module.js"))()`)
+	require.NotNil(t, p)
+	drainPendingJobsForTest(rt)
+	require.NotNil(t, livePending)
+	p.Free()
+	rt.Close()
 }
 
 func TestRuntimeTimeoutOpaqueLifecycle(t *testing.T) {
