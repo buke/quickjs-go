@@ -3,6 +3,8 @@
 #include "quickjs-libc.h"
 #include "cutils.h" 
 #include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
 #include <time.h>
 
 #ifdef _WIN32
@@ -852,6 +854,20 @@ JSValue CreateClassInstance(JSContext *ctx, JSValue constructor,
     // In Scheme C, the constructor proxy will call this function, then call the 
     // constructor function, and finally associate the returned Go object
     return obj;
+}
+
+// ============================================================================
+// ARRAY BUFFER HELPERS
+// ============================================================================
+
+void *QuickjsGoArrayBufferRealloc(JSRuntime *rt, void *opaque, void *ptr, size_t size) {
+    (void)rt;
+    (void)opaque;
+    if (size == 0) {
+        free(ptr);
+        return NULL;
+    }
+    return realloc(ptr, size);
 }
 
 // ============================================================================

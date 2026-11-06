@@ -1417,6 +1417,14 @@ func (v *Value) SetImmutableArrayBuffer(immutable bool) bool {
 	return C.JS_SetImmutableArrayBuffer(v.ref, C.bool(immutable)) == 0
 }
 
+// DetachArrayBuffer detaches the ArrayBuffer backing store.
+func (v *Value) DetachArrayBuffer() {
+	if v == nil || !v.hasValidContext() || !v.IsByteArray() {
+		return
+	}
+	C.JS_DetachArrayBuffer(v.ctx.ref, v.ref)
+}
+
 // resolveClassIDFromInheritance attempts to resolve classID by checking if this constructor
 // extends a registered class and should use the parent's classID
 func (v *Value) resolveClassIDFromInheritance() (uint32, bool) {

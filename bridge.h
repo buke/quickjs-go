@@ -131,6 +131,7 @@ extern void ClearInterruptHandler(JSRuntime *rt);
 extern void SetExecuteTimeout(JSRuntime *rt, time_t timeout);
 extern void SetPromiseRejectionTracker(JSRuntime *rt, int enabled);
 extern int GetTimeoutOpaqueCount(void);
+extern void *QuickjsGoArrayBufferRealloc(JSRuntime *rt, void *opaque, void *ptr, size_t size);
 
 // Dynamic import (quickjs-ng v0.18.0+)
 extern void SetDefaultDynamicImportFunc(JSRuntime *rt);
