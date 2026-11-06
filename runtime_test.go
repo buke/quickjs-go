@@ -2,6 +2,7 @@ package quickjs
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -976,6 +977,138 @@ func TestRuntimeSetModuleImportToggle(t *testing.T) {
 	require.NotNil(t, ctx)
 	defer ctx.Close()
 	requireImportFailure(ctx)
+}
+
+func TestRuntimeDynamicImportHandlerSync(t *testing.T) {
+	rt := NewRuntime(WithModuleImport(true))
+	defer rt.Close()
+
+	calls := 0
+	rt.SetDynamicImportHandler(func(ctx *Context, basename, filename string, token *Value, attributes *Value) (*Value, error) {
+		calls++
+		require.NotNil(t, token)
+		require.NotNil(t, attributes)
+		promise := ctx.LoadModuleURL(basename, filename, attributes)
+		require.NotNil(t, promise)
+		return promise, nil
+	})
+
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	result := ctx.Eval(`
+		(async function() {
+			const mod = await import("./test/fib_module.js");
+			return mod.fib(6);
+		})()
+	`, EvalAwait(true))
+	defer result.Free()
+
+	require.False(t, result.IsException(), "%v", ctx.Exception())
+	require.EqualValues(t, 8, result.ToInt32())
+	require.GreaterOrEqual(t, calls, 1)
+
+	rt.ClearDynamicImportHandler()
+	// Legacy sync import() path (no dynamic-import callback) still loads files.
+	result2 := ctx.Eval(`
+		(async function() {
+			const mod = await import("./test/fib_module.js");
+			return mod.fib(5);
+		})()
+	`, EvalAwait(true))
+	defer result2.Free()
+	require.False(t, result2.IsException(), "%v", ctx.Exception())
+	require.EqualValues(t, 5, result2.ToInt32())
+
+	rt.SetDefaultDynamicImport(true)
+	result3 := ctx.Eval(`
+		(async function() {
+			const mod = await import("./test/fib_module.js");
+			return mod.fib(4);
+		})()
+	`, EvalAwait(true))
+	defer result3.Free()
+	require.False(t, result3.IsException(), "%v", ctx.Exception())
+	require.EqualValues(t, 3, result3.ToInt32())
+}
+
+func TestRuntimeDynamicImportHandlerError(t *testing.T) {
+	rt := NewRuntime(WithModuleImport(true))
+	defer rt.Close()
+
+	rt.SetDynamicImportHandler(func(ctx *Context, basename, filename string, token *Value, attributes *Value) (*Value, error) {
+		return nil, fmt.Errorf("blocked import: %s", filename)
+	})
+
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	result := ctx.Eval(`(async () => import("./test/fib_module.js"))()`, EvalAwait(true))
+	defer result.Free()
+	require.True(t, result.IsException())
+	err := ctx.Exception()
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "blocked import")
+}
+
+func TestRuntimeDynamicImportHandlerDeferred(t *testing.T) {
+	rt := NewRuntime(WithModuleImport(true))
+	defer rt.Close()
+
+	var pendingToken *Value
+	rt.SetDynamicImportHandler(func(ctx *Context, basename, filename string, token *Value, attributes *Value) (*Value, error) {
+		pendingToken = token
+		base, file := basename, filename
+		attrs := ctx.duplicateValue(attributes)
+		ok := ctx.Schedule(func(c *Context) {
+			promise := c.LoadModuleURL(base, file, attrs)
+			require.NoError(t, c.FinishDynamicImport(pendingToken, promise, nil))
+			attrs.Free()
+		})
+		require.True(t, ok)
+		return nil, ErrDynamicImportPending
+	})
+
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	// EvalAwait uses C EvalAndAwait and does not drain Context.Schedule;
+	// deferred FinishDynamicImport requires Go Await/ProcessJobs.
+	promise := ctx.Eval(`
+		(async function() {
+			const mod = await import("./test/fib_module.js");
+			return mod.fib(7);
+		})()
+	`)
+	require.NotNil(t, promise)
+	result := ctx.Await(promise)
+	defer result.Free()
+
+	require.False(t, result.IsException(), "%v", ctx.Exception())
+	require.EqualValues(t, 13, result.ToInt32())
+	require.NotNil(t, pendingToken)
+}
+
+func TestRuntimeDynamicImportFailClosed(t *testing.T) {
+	var nilRT *Runtime
+	nilRT.SetDynamicImportHandler(func(ctx *Context, basename, filename string, token *Value, attributes *Value) (*Value, error) {
+		return nil, nil
+	})
+	nilRT.ClearDynamicImportHandler()
+
+	rt := NewRuntime()
+	rt.Close()
+	rt.SetDynamicImportHandler(func(ctx *Context, basename, filename string, token *Value, attributes *Value) (*Value, error) {
+		return nil, nil
+	})
+	rt.ClearDynamicImportHandler()
+
+	closed := NewRuntime()
+	ctx := closed.NewContext()
+	require.Error(t, ctx.FinishDynamicImport(nil, nil, fmt.Errorf("x")))
+	ctx.Close()
+	require.Error(t, ctx.FinishDynamicImport(nil, nil, fmt.Errorf("x")))
+	closed.Close()
 }
 
 func TestRuntimeTimeoutOpaqueLifecycle(t *testing.T) {

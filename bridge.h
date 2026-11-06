@@ -132,6 +132,13 @@ extern void SetExecuteTimeout(JSRuntime *rt, time_t timeout);
 extern void SetPromiseRejectionTracker(JSRuntime *rt, int enabled);
 extern int GetTimeoutOpaqueCount(void);
 
+// Dynamic import (quickjs-ng v0.18.0+)
+extern void SetDefaultDynamicImportFunc(JSRuntime *rt);
+extern void SetGoDynamicImportFunc(JSRuntime *rt);
+extern void ClearDynamicImportFunc(JSRuntime *rt);
+extern int FinishDynamicImportSuccess(JSContext *ctx, JSValue token, JSValue promise);
+extern int FinishDynamicImportWithError(JSContext *ctx, JSValue token, const char *message);
+
 // =============================================================================
 // MODULE-RELATED DECLARATIONS - NEW FOR MODULE BUILDER
 // =============================================================================
