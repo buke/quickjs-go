@@ -14,6 +14,8 @@ import (
 
 /*
 #include <stdint.h> // for uintptr_t
+#include <stdlib.h>
+#include <string.h>
 #include "bridge.h"
 */
 import "C"
@@ -465,12 +467,103 @@ func (ctx *Context) String(v string) *Value {
 	return ctx.NewString(v)
 }
 
+// ArrayBufferOptions configures NewArrayBufferFromBytes.
+type ArrayBufferOptions struct {
+	// MaxByteLength enables a resizable ArrayBuffer when > len(data).
+	// 0 keeps a fixed-length buffer.
+	MaxByteLength int
+}
+
 // NewArrayBuffer returns a ArrayBuffer value with given binary data.
 func (ctx *Context) NewArrayBuffer(binaryData []byte) *Value {
+	if !ctx.hasValidRef() {
+		return nil
+	}
 	if len(binaryData) == 0 {
 		return &Value{ctx: ctx, ref: C.JS_NewArrayBufferCopy(ctx.ref, nil, 0)}
 	}
 	return &Value{ctx: ctx, ref: C.JS_NewArrayBufferCopy(ctx.ref, (*C.uchar)(&binaryData[0]), C.size_t(len(binaryData)))}
+}
+
+// NewResizableArrayBuffer creates a zero-filled resizable ArrayBuffer owned by QuickJS.
+// maxByteLength must be >= length.
+func (ctx *Context) NewResizableArrayBuffer(length, maxByteLength int) *Value {
+	if !ctx.hasValidRef() || length < 0 || maxByteLength < length {
+		return nil
+	}
+	allocSize := maxByteLength
+	if allocSize == 0 {
+		allocSize = length
+	}
+	var buf unsafe.Pointer
+	if allocSize > 0 {
+		buf = C.calloc(1, C.size_t(allocSize))
+		if buf == nil {
+			return nil
+		}
+	}
+	return &Value{
+		ctx: ctx,
+		ref: C.JS_NewArrayBuffer(
+			ctx.ref,
+			(*C.uint8_t)(buf),
+			C.size_t(length),
+			C.size_t(maxByteLength),
+			(*C.JSReallocArrayBufferDataFunc)(C.QuickjsGoArrayBufferRealloc),
+			nil,
+			C.bool(false),
+		),
+	}
+}
+
+// NewArrayBufferFromBytes wraps or copies bytes into an ArrayBuffer.
+// When MaxByteLength == 0, the slice is used zero-copy without a realloc callback;
+// the caller must keep data alive until the ArrayBuffer is freed or detached.
+// When MaxByteLength > 0, bytes are copied into a QuickJS-owned resizable buffer.
+func (ctx *Context) NewArrayBufferFromBytes(data []byte, opts ArrayBufferOptions) *Value {
+	if !ctx.hasValidRef() {
+		return nil
+	}
+	if opts.MaxByteLength < 0 || (opts.MaxByteLength > 0 && opts.MaxByteLength < len(data)) {
+		return nil
+	}
+	if opts.MaxByteLength == 0 {
+		if len(data) == 0 {
+			return ctx.NewArrayBuffer(nil)
+		}
+		return &Value{
+			ctx: ctx,
+			ref: C.JS_NewArrayBuffer(
+				ctx.ref,
+				(*C.uint8_t)(unsafe.Pointer(&data[0])),
+				C.size_t(len(data)),
+				0,
+				nil,
+				nil,
+				C.bool(false),
+			),
+		}
+	}
+
+	buf := C.calloc(1, C.size_t(opts.MaxByteLength))
+	if buf == nil {
+		return nil
+	}
+	if len(data) > 0 {
+		C.memcpy(buf, unsafe.Pointer(&data[0]), C.size_t(len(data)))
+	}
+	return &Value{
+		ctx: ctx,
+		ref: C.JS_NewArrayBuffer(
+			ctx.ref,
+			(*C.uint8_t)(buf),
+			C.size_t(len(data)),
+			C.size_t(opts.MaxByteLength),
+			(*C.JSReallocArrayBufferDataFunc)(C.QuickjsGoArrayBufferRealloc),
+			nil,
+			C.bool(false),
+		),
+	}
 }
 
 // ArrayBuffer returns a ArrayBuffer value with given binary data.

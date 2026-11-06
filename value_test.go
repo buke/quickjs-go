@@ -4,6 +4,7 @@ import (
 	"errors"
 	"math"
 	"math/big"
+	goruntime "runtime"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -2389,4 +2390,53 @@ func TestValueCallConstructorComprehensive(t *testing.T) {
 			instance.Free()
 		}
 	})
+}
+
+func TestResizableAndExternalArrayBuffer(t *testing.T) {
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	ab := ctx.NewResizableArrayBuffer(4, 16)
+	require.NotNil(t, ab)
+	defer ab.Free()
+	require.True(t, ab.IsByteArray())
+
+	resized := ctx.Eval(`
+		(function(buf) {
+			buf.resize(8);
+			return buf.byteLength;
+		})
+	`)
+	defer resized.Free()
+	result := resized.Execute(ctx.NewUndefined(), ab)
+	defer result.Free()
+	require.False(t, result.IsException(), "%v", ctx.Exception())
+	require.EqualValues(t, 8, result.ToInt32())
+
+	data := []byte{1, 2, 3, 4}
+	ext := ctx.NewArrayBufferFromBytes(data, ArrayBufferOptions{})
+	require.NotNil(t, ext)
+	defer ext.Free()
+	bytes, err := ext.ToByteArray(4)
+	require.NoError(t, err)
+	require.Equal(t, data, bytes)
+	goruntime.KeepAlive(data)
+
+	copied := ctx.NewArrayBufferFromBytes([]byte{9, 8}, ArrayBufferOptions{MaxByteLength: 8})
+	require.NotNil(t, copied)
+	defer copied.Free()
+	require.True(t, copied.IsByteArray())
+
+	detachTarget := ctx.NewArrayBuffer([]byte{1, 2, 3, 4})
+	require.NotNil(t, detachTarget)
+	detachTarget.DetachArrayBuffer()
+	_, err = detachTarget.ToByteArray(4)
+	require.Error(t, err)
+	detachTarget.Free()
+
+	require.Nil(t, (*Context)(nil).NewResizableArrayBuffer(1, 2))
+	require.Nil(t, ctx.NewResizableArrayBuffer(8, 4))
+	(*Value)(nil).DetachArrayBuffer()
 }
