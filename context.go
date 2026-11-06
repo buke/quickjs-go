@@ -1010,6 +1010,86 @@ func (ctx *Context) EvalFile(filePath string, opts ...EvalOption) *Value {
 	return ctx.Eval(string(b), opts...)
 }
 
+// LoadModuleURL loads a module via JS_LoadModule and returns its evaluate promise.
+// attributes may be nil (treated as undefined). Caller must Free the returned value.
+func (ctx *Context) LoadModuleURL(basename, filename string, attributes *Value) *Value {
+	if !ctx.hasValidRef() {
+		return nil
+	}
+	if attributes != nil && !attributes.belongsTo(ctx) {
+		return nil
+	}
+
+	basePtr := C.CString(basename)
+	filePtr := C.CString(filename)
+	defer C.free(unsafe.Pointer(basePtr))
+	defer C.free(unsafe.Pointer(filePtr))
+
+	attrs := C.JS_NewUndefined()
+	if attributes != nil {
+		attrs = attributes.ref
+	}
+	return &Value{ctx: ctx, ref: C.JS_LoadModule(ctx.ref, basePtr, filePtr, attrs)}
+}
+
+// finishDynamicImportResultHook overrides FinishDynamicImport C return codes in tests.
+var finishDynamicImportResultHook func(ret C.int) C.int
+
+func applyFinishDynamicImportResult(ret C.int) C.int {
+	if hook := finishDynamicImportResultHook; hook != nil {
+		return hook(ret)
+	}
+	return ret
+}
+
+// FinishDynamicImport completes a previously deferred JS import().
+// token ownership is consumed. On success, modulePromise ownership is consumed.
+// On error, modulePromise (if any) is freed by the caller still; pass nil with err set.
+func (ctx *Context) FinishDynamicImport(token *Value, modulePromise *Value, err error) error {
+	if ctx == nil || !ctx.hasValidRef() {
+		// hasValidRef also enforces owner-goroutine access.
+		return errors.New("quickjs: context is closed")
+	}
+	if token == nil || !token.belongsTo(ctx) || token.borrowed {
+		return errors.New("quickjs: invalid dynamic import token")
+	}
+
+	ctx.runtime.unregisterPendingDynamicImport(token)
+
+	if err != nil {
+		msg := C.CString(err.Error())
+		ret := applyFinishDynamicImportResult(C.FinishDynamicImportWithError(ctx.ref, token.ref, msg))
+		C.free(unsafe.Pointer(msg))
+		token.ref = C.JS_NewUndefined()
+		if modulePromise != nil {
+			modulePromise.Free()
+		}
+		if ret != 0 {
+			return errors.New("quickjs: FinishDynamicImport failed")
+		}
+		return nil
+	}
+
+	if modulePromise == nil || !modulePromise.belongsTo(ctx) {
+		msg := C.CString("quickjs: dynamic import module promise is required")
+		ret := applyFinishDynamicImportResult(C.FinishDynamicImportWithError(ctx.ref, token.ref, msg))
+		C.free(unsafe.Pointer(msg))
+		token.ref = C.JS_NewUndefined()
+		if ret != 0 {
+			return errors.New("quickjs: FinishDynamicImport failed")
+		}
+		return nil
+	}
+
+	ret := applyFinishDynamicImportResult(C.FinishDynamicImportSuccess(ctx.ref, token.ref, modulePromise.ref))
+	token.ref = C.JS_NewUndefined()
+	modulePromise.ref = C.JS_NewUndefined()
+	if ret != 0 {
+		return errors.New("quickjs: FinishDynamicImport failed")
+	}
+	return nil
+}
+
 // LoadModule returns a js value with given code and module name.
 func (ctx *Context) LoadModule(code string, moduleName string, opts ...EvalOption) *Value {
 	options := EvalOptions{
