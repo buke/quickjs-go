@@ -879,9 +879,8 @@ static void clearTimeoutState(JSRuntime *rt);
 // Simplified interrupt handler (no handlerArgs complexity)
 // quickjs-ng v0.18.0+: JSInterruptHandler takes JSContext*, not JSRuntime*
 int interruptHandler(JSContext *ctx, void *opaque) {
-    (void)ctx;
     JSRuntime *runtimePtr = (JSRuntime*)opaque;
-    return goInterruptHandler(runtimePtr);
+    return goInterruptHandler(ctx, runtimePtr);
 }
 
 void SetInterruptHandler(JSRuntime *rt) {
@@ -1052,6 +1051,61 @@ void SetExecuteTimeout(JSRuntime *rt, time_t timeout) {
         free(ts);
         clearTimeoutState(rt);
     }
+}
+
+// ============================================================================
+// DYNAMIC IMPORT (quickjs-ng v0.18.0+)
+// ============================================================================
+
+static void defaultDynamicImportHandler(JSContext *ctx, const char *basename,
+                                        const char *filename, JSValue token,
+                                        JSValueConst attributes, void *opaque) {
+    JSValue exception = JS_UNDEFINED;
+    JSValue promise;
+
+    (void)opaque;
+    promise = JS_LoadModule(ctx, basename, filename, attributes);
+    if (JS_IsException(promise)) {
+        exception = JS_GetException(ctx);
+    }
+    JS_FinishDynamicImport(ctx, token, promise, exception);
+}
+
+static void goDynamicImportHandler(JSContext *ctx, const char *basename,
+                                   const char *filename, JSValue token,
+                                   JSValueConst attributes, void *opaque) {
+    (void)opaque;
+    goDynamicImport(ctx, (char *)basename, (char *)filename, token, attributes);
+}
+
+void SetDefaultDynamicImportFunc(JSRuntime *rt) {
+    JS_SetDynamicImportFunc(rt, defaultDynamicImportHandler, NULL);
+}
+
+void SetGoDynamicImportFunc(JSRuntime *rt) {
+    JS_SetDynamicImportFunc(rt, goDynamicImportHandler, (void *)rt);
+}
+
+void ClearDynamicImportFunc(JSRuntime *rt) {
+    JS_SetDynamicImportFunc(rt, NULL, NULL);
+}
+
+int FinishDynamicImportSuccess(JSContext *ctx, JSValue token, JSValue promise) {
+    return JS_FinishDynamicImport(ctx, token, promise, JS_UNDEFINED);
+}
+
+int FinishDynamicImportWithError(JSContext *ctx, JSValue token, const char *message) {
+    JSValue exception = JS_NewError(ctx);
+    if (!JS_IsException(exception)) {
+        const char *msg = message ? message : "dynamic import failed";
+        JS_DefinePropertyValueStr(ctx, exception, "message",
+                                  JS_NewString(ctx, msg),
+                                  JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);
+        JS_DefinePropertyValueStr(ctx, exception, "name",
+                                  JS_NewString(ctx, "Error"),
+                                  JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);
+    }
+    return JS_FinishDynamicImport(ctx, token, JS_EXCEPTION, exception);
 }
 
 // ============================================================================

@@ -1,6 +1,9 @@
 package quickjs
 
-import "unsafe"
+import (
+	"errors"
+	"unsafe"
+)
 
 /*
 #include <stdint.h>
@@ -40,12 +43,56 @@ func getContextAndObject(ctx *C.JSContext, magic C.int, notFoundErr proxyError) 
 }
 
 //export goInterruptHandler
-func goInterruptHandler(runtimePtr *C.JSRuntime) C.int {
+func goInterruptHandler(ctx *C.JSContext, runtimePtr *C.JSRuntime) C.int {
 	runtime := getRuntimeFromJS(runtimePtr)
 	if runtime == nil {
 		return C.int(0)
 	}
-	return C.int(runtime.callInterruptHandler())
+	return C.int(runtime.callInterruptHandler(getContextFromJS(ctx)))
+}
+
+//export goDynamicImport
+func goDynamicImport(ctx *C.JSContext, basename *C.char, filename *C.char, token C.JSValue, attributes C.JSValueConst) {
+	goCtx := getContextFromJS(ctx)
+	if goCtx == nil || goCtx.runtime == nil {
+		msg := C.CString("quickjs: context not found for dynamic import")
+		C.FinishDynamicImportWithError(ctx, token, msg)
+		C.free(unsafe.Pointer(msg))
+		return
+	}
+
+	rt := goCtx.runtime
+	tokenVal := &Value{ctx: goCtx, ref: token}
+	attrsVal := &Value{ctx: goCtx, ref: C.JSValue(attributes), borrowed: true}
+
+	promise, err := rt.callDynamicImportHandler(goCtx, C.GoString(basename), C.GoString(filename), tokenVal, attrsVal)
+	if errors.Is(err, ErrDynamicImportPending) {
+		rt.registerPendingDynamicImport(goCtx, tokenVal)
+		return
+	}
+
+	if err != nil {
+		msg := C.CString(err.Error())
+		C.FinishDynamicImportWithError(ctx, tokenVal.ref, msg)
+		C.free(unsafe.Pointer(msg))
+		tokenVal.ref = C.JS_NewUndefined()
+		if promise != nil {
+			promise.Free()
+		}
+		return
+	}
+
+	if promise == nil || !promise.belongsTo(goCtx) {
+		msg := C.CString("quickjs: dynamic import handler returned nil promise")
+		C.FinishDynamicImportWithError(ctx, tokenVal.ref, msg)
+		C.free(unsafe.Pointer(msg))
+		tokenVal.ref = C.JS_NewUndefined()
+		return
+	}
+
+	C.FinishDynamicImportSuccess(ctx, tokenVal.ref, promise.ref)
+	tokenVal.ref = C.JS_NewUndefined()
+	promise.ref = C.JS_NewUndefined()
 }
 
 //export goFunctionProxy

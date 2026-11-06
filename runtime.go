@@ -19,8 +19,31 @@ import (
 // Return != 0 if the JS code needs to be interrupted
 type InterruptHandler func() int
 
+// ContextInterruptHandler receives the executing JS context when interrupting.
+type ContextInterruptHandler func(ctx *Context) int
+
 type interruptHandlerHolder struct {
-	fn InterruptHandler
+	fn        InterruptHandler
+	contextFn ContextInterruptHandler
+}
+
+// ErrDynamicImportPending indicates the DynamicImportHandler will finish later
+// via Context.FinishDynamicImport on the owner goroutine (e.g. after Context.Schedule).
+var ErrDynamicImportPending = errors.New("quickjs: dynamic import pending")
+
+// DynamicImportHandler handles JS import() after the microtask runs.
+// token ownership transfers to the handler when returning ErrDynamicImportPending;
+// otherwise the bridge finishes the import and consumes token/modulePromise.
+// attributes is borrowed for the duration of the call; Dup if retaining.
+type DynamicImportHandler func(ctx *Context, basename, filename string, token *Value, attributes *Value) (modulePromise *Value, err error)
+
+type dynamicImportHandlerHolder struct {
+	fn DynamicImportHandler
+}
+
+type pendingDynamicImport struct {
+	ctx   *Context
+	token *Value
 }
 
 // runtimeNewContextHook is used in tests to force JS_NewContext failure paths.
@@ -66,17 +89,20 @@ type Runtime struct {
 	options                *Options
 	ownerGoroutineID       atomic.Uint64
 	ownerThreadID          atomic.Uint64
-	interruptHandlerState  atomic.Pointer[interruptHandlerHolder]
-	contexts               sync.Map
-	contextsByID           sync.Map
-	contextIDCounter       atomic.Uint64
-	constructorRegistry    sync.Map
-	classObjectRegistry    sync.Map
-	classObjectIDsByCtx    sync.Map
-	classObjectIDCounter   atomic.Int32
-	closeOnce              sync.Once
-	closed                 atomic.Bool
-	stdHandlersInitialized bool
+	interruptHandlerState      atomic.Pointer[interruptHandlerHolder]
+	dynamicImportHandlerState  atomic.Pointer[dynamicImportHandlerHolder]
+	defaultDynamicImportEnabled atomic.Bool
+	pendingDynamicImports      sync.Map // map[uintptr]*pendingDynamicImport
+	contexts                   sync.Map
+	contextsByID               sync.Map
+	contextIDCounter           atomic.Uint64
+	constructorRegistry        sync.Map
+	classObjectRegistry        sync.Map
+	classObjectIDsByCtx        sync.Map
+	classObjectIDCounter       atomic.Int32
+	closeOnce                  sync.Once
+	closed                     atomic.Bool
+	stdHandlersInitialized     bool
 }
 
 // isAlive reports whether the runtime still has a valid native handle and
@@ -552,7 +578,7 @@ func NewRuntime(opts ...Option) *Runtime {
 	}
 
 	if rt.options.moduleImport {
-		rt.SetModuleImport(rt.options.moduleImport)
+		rt.SetModuleImport(true)
 	}
 
 	// Set timeout after other options (will override interrupt handler)
@@ -602,8 +628,10 @@ func (r *Runtime) Close() {
 		return
 	}
 
-	r.closeOnce.Do(func() {
+		r.closeOnce.Do(func() {
 		r.closed.Store(true)
+
+		r.failClosePendingDynamicImports()
 
 		var contexts []*Context
 		r.contexts.Range(func(_, value interface{}) bool {
@@ -624,7 +652,10 @@ func (r *Runtime) Close() {
 
 		ref := r.ref
 		r.interruptHandlerState.Store(nil)
+		r.dynamicImportHandlerState.Store(nil)
+		r.defaultDynamicImportEnabled.Store(false)
 		C.ClearInterruptHandler(ref)
+		C.ClearDynamicImportFunc(ref)
 		C.SetPromiseRejectionTracker(ref, 0)
 
 		r.constructorRegistry.Range(func(key, _ interface{}) bool {
@@ -919,6 +950,8 @@ func (r *Runtime) SetStripInfo(strip int) {
 
 // SetModuleImport installs or clears the default quickjs-libc file/module loader.
 // When disabled, import resolution fails closed unless another loader is installed.
+// Note: this does not install JS_SetDynamicImportFunc; use SetDefaultDynamicImport
+// or SetDynamicImportHandler for the v0.18+ dynamic-import callback path.
 func (r *Runtime) SetModuleImport(moduleImport bool) {
 	if r == nil {
 		return
@@ -938,6 +971,122 @@ func (r *Runtime) SetModuleImport(moduleImport bool) {
 	C.JS_SetModuleLoaderFunc2(r.ref, (*C.JSModuleNormalizeFunc)(unsafe.Pointer(nil)), nil, nil, unsafe.Pointer(nil))
 }
 
+// SetDefaultDynamicImport installs or clears the qjs-compatible C stub
+// (JS_LoadModule + JS_FinishDynamicImport). Prefer the legacy sync import() path
+// (callback unset) when using ModuleBuilder virtual modules.
+func (r *Runtime) SetDefaultDynamicImport(enabled bool) {
+	if r == nil {
+		return
+	}
+	if !r.ensureOwnerAccess() {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.closed.Load() || r.ref == nil {
+		return
+	}
+	r.defaultDynamicImportEnabled.Store(enabled)
+	if r.dynamicImportHandlerState.Load() != nil {
+		return // custom Go handler wins until cleared
+	}
+	if enabled {
+		C.SetDefaultDynamicImportFunc(r.ref)
+		return
+	}
+	C.ClearDynamicImportFunc(r.ref)
+}
+
+// SetDynamicImportHandler installs a custom JS import() handler.
+// Passing nil clears the custom handler; restores SetDefaultDynamicImport stub if enabled.
+func (r *Runtime) SetDynamicImportHandler(handler DynamicImportHandler) {
+	if r == nil {
+		return
+	}
+	if !r.ensureOwnerAccess() {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.closed.Load() || r.ref == nil {
+		return
+	}
+	if handler != nil {
+		r.dynamicImportHandlerState.Store(&dynamicImportHandlerHolder{fn: handler})
+		C.SetGoDynamicImportFunc(r.ref)
+		return
+	}
+	r.clearDynamicImportHandlerLocked()
+}
+
+// ClearDynamicImportHandler clears the custom dynamic-import handler.
+func (r *Runtime) ClearDynamicImportHandler() {
+	if r == nil {
+		return
+	}
+	if !r.ensureOwnerAccess() {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.ref == nil {
+		return
+	}
+	r.clearDynamicImportHandlerLocked()
+}
+
+func (r *Runtime) clearDynamicImportHandlerLocked() {
+	r.dynamicImportHandlerState.Store(nil)
+	if r.defaultDynamicImportEnabled.Load() {
+		C.SetDefaultDynamicImportFunc(r.ref)
+		return
+	}
+	C.ClearDynamicImportFunc(r.ref)
+}
+
+func (r *Runtime) callDynamicImportHandler(ctx *Context, basename, filename string, token *Value, attributes *Value) (*Value, error) {
+	holder := r.dynamicImportHandlerState.Load()
+	if holder == nil || holder.fn == nil {
+		return nil, errors.New("quickjs: dynamic import handler not set")
+	}
+	return holder.fn(ctx, basename, filename, token, attributes)
+}
+
+func (r *Runtime) registerPendingDynamicImport(ctx *Context, token *Value) {
+	if r == nil || token == nil {
+		return
+	}
+	r.pendingDynamicImports.Store(uintptr(unsafe.Pointer(token)), &pendingDynamicImport{ctx: ctx, token: token})
+}
+
+func (r *Runtime) unregisterPendingDynamicImport(token *Value) {
+	if r == nil || token == nil {
+		return
+	}
+	r.pendingDynamicImports.Delete(uintptr(unsafe.Pointer(token)))
+}
+
+func (r *Runtime) failClosePendingDynamicImports() {
+	r.pendingDynamicImports.Range(func(key, value interface{}) bool {
+		r.pendingDynamicImports.Delete(key)
+		pending, ok := value.(*pendingDynamicImport)
+		if !ok || pending == nil || pending.token == nil {
+			return true
+		}
+		token := pending.token
+		ctx := pending.ctx
+		if ctx != nil && ctx.hasValidRef() {
+			msg := C.CString("quickjs: runtime closed with pending dynamic import")
+			C.FinishDynamicImportWithError(ctx.ref, token.ref, msg)
+			C.free(unsafe.Pointer(msg))
+			token.ref = C.JS_NewUndefined()
+			return true
+		}
+		token.ref = C.JS_NewUndefined()
+		return true
+	})
+}
+
 // SetInterruptHandler sets a user interrupt handler using simplified approach.
 // This will override any timeout handler (expected behavior)
 func (r *Runtime) SetInterruptHandler(handler InterruptHandler) {
@@ -954,16 +1103,35 @@ func (r *Runtime) SetInterruptHandler(handler InterruptHandler) {
 	}
 	if handler != nil {
 		r.interruptHandlerState.Store(&interruptHandlerHolder{fn: handler})
-	} else {
-		r.interruptHandlerState.Store(nil)
-	}
-
-	if handler != nil {
-		// Simplified call - no handlerArgs complexity
 		C.SetInterruptHandler(r.ref)
-	} else {
-		C.ClearInterruptHandler(r.ref)
+		return
 	}
+	r.interruptHandlerState.Store(nil)
+	C.ClearInterruptHandler(r.ref)
+}
+
+// SetContextInterruptHandler sets a context-aware interrupt handler.
+// Prefer this over SetInterruptHandler when the interrupting context matters.
+// Overrides timeout handlers (same slot as SetInterruptHandler).
+func (r *Runtime) SetContextInterruptHandler(handler ContextInterruptHandler) {
+	if r == nil {
+		return
+	}
+	if !r.ensureOwnerAccess() {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.closed.Load() || r.ref == nil {
+		return
+	}
+	if handler != nil {
+		r.interruptHandlerState.Store(&interruptHandlerHolder{contextFn: handler})
+		C.SetInterruptHandler(r.ref)
+		return
+	}
+	r.interruptHandlerState.Store(nil)
+	C.ClearInterruptHandler(r.ref)
 }
 
 // ClearInterruptHandler clears the user interrupt handler
@@ -984,15 +1152,21 @@ func (r *Runtime) ClearInterruptHandler() {
 }
 
 // callInterruptHandler is called from C layer via runtime mapping (internal use)
-func (r *Runtime) callInterruptHandler() int {
+func (r *Runtime) callInterruptHandler(ctx *Context) int {
 	if r == nil {
 		return 0
 	}
 	holder := r.interruptHandlerState.Load()
-	if holder != nil && holder.fn != nil {
+	if holder == nil {
+		return 0
+	}
+	if holder.contextFn != nil {
+		return holder.contextFn(ctx)
+	}
+	if holder.fn != nil {
 		return holder.fn()
 	}
-	return 0 // No interrupt
+	return 0
 }
 
 // NewContext creates a new JavaScript context with default host bootstrap.

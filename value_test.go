@@ -5,6 +5,7 @@ import (
 	"math"
 	"math/big"
 	goruntime "runtime"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -1543,7 +1544,86 @@ func TestPromiseState(t *testing.T) {
 	// Test non-promise value (covers first if branch) - Updated to use New* methods
 	nonPromise := ctx.NewString("not a promise")
 	defer nonPromise.Free()
-	require.Equal(t, PromisePending, nonPromise.PromiseState())
+	require.Equal(t, PromiseNotAPromise, nonPromise.PromiseState())
+	require.Nil(t, nonPromise.Then(nil, nil))
+
+	fulfilled := ctx.Eval(`Promise.resolve(42)`)
+	defer fulfilled.Free()
+	result := fulfilled.PromiseResult()
+	defer result.Free()
+	require.EqualValues(t, 42, result.ToInt32())
+
+	onFulfilled := ctx.NewFunction(func(ctx *Context, this *Value, args []*Value) *Value {
+		if len(args) > 0 {
+			return ctx.NewInt32(args[0].ToInt32() + 1)
+		}
+		return ctx.NewInt32(0)
+	})
+	defer onFulfilled.Free()
+
+	chained := fulfilled.Then(onFulfilled, nil)
+	require.NotNil(t, chained)
+	deferred := ctx.Await(chained)
+	defer deferred.Free()
+	require.False(t, deferred.IsException())
+	require.EqualValues(t, 43, deferred.ToInt32())
+
+	rejected := ctx.Eval(`Promise.reject("boom")`)
+	defer rejected.Free()
+	rejected.MarkAsHandled()
+	require.Equal(t, PromiseRejected, rejected.PromiseState())
+	reason := rejected.PromiseResult()
+	defer reason.Free()
+	require.Equal(t, "boom", reason.ToString())
+
+	require.Nil(t, (*Value)(nil).PromiseResult())
+	require.Nil(t, (*Value)(nil).Then(nil, nil))
+	(*Value)(nil).MarkAsHandled()
+	require.Equal(t, PromiseNotAPromise, (*Value)(nil).PromiseState())
+
+	nonPromise.MarkAsHandled()
+	bothUndef := fulfilled.Then(nil, nil)
+	require.NotNil(t, bothUndef)
+	bothUndef.Free()
+
+	onRejected := ctx.NewFunction(func(ctx *Context, this *Value, args []*Value) *Value {
+		if len(args) > 0 {
+			return ctx.NewString("handled:" + args[0].ToString())
+		}
+		return ctx.NewString("handled")
+	})
+	defer onRejected.Free()
+	rejected2 := ctx.Eval(`Promise.reject("boom2")`)
+	defer rejected2.Free()
+	rejected2.MarkAsHandled()
+	chainedReject := rejected2.Then(nil, onRejected)
+	require.NotNil(t, chainedReject)
+	handled := ctx.Await(chainedReject)
+	defer handled.Free()
+	require.False(t, handled.IsException())
+	require.Equal(t, "handled:boom2", handled.ToString())
+
+	otherRT := NewRuntime()
+	defer otherRT.Close()
+	other := otherRT.NewContext()
+	defer other.Close()
+	foreignFn := other.NewFunction(func(ctx *Context, this *Value, args []*Value) *Value {
+		return ctx.NewUndefined()
+	})
+	defer foreignFn.Free()
+	require.Nil(t, fulfilled.Then(foreignFn, nil))
+	require.Nil(t, fulfilled.Then(nil, foreignFn))
+
+	prevHook := promiseStateResultHook
+	promiseStateResultHook = func(state PromiseState) PromiseState { return PromiseState(999) }
+	require.Equal(t, PromiseNotAPromise, fulfilled.PromiseState())
+	promiseStateResultHook = prevHook
+
+	orphan := &Value{} // non-nil value without a usable context
+	require.Equal(t, PromiseNotAPromise, orphan.PromiseState())
+	require.Nil(t, orphan.PromiseResult())
+	require.Nil(t, orphan.Then(nil, nil))
+	orphan.MarkAsHandled()
 }
 
 // TestValueAwait tests promise await functionality
@@ -2439,4 +2519,125 @@ func TestResizableAndExternalArrayBuffer(t *testing.T) {
 	require.Nil(t, (*Context)(nil).NewResizableArrayBuffer(1, 2))
 	require.Nil(t, ctx.NewResizableArrayBuffer(8, 4))
 	(*Value)(nil).DetachArrayBuffer()
+}
+
+func TestUncatchablePrivateSymbolAndPropertyValue(t *testing.T) {
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	_ = ctx.ThrowInternalError("inspect")
+	require.True(t, ctx.HasException())
+	excErr := ctx.Exception()
+	require.Error(t, excErr)
+	typed, ok := excErr.(*Error)
+	require.True(t, ok)
+	require.True(t, typed.Uncatchable)
+
+	_ = ctx.ThrowInternalError("pending")
+	require.True(t, ctx.HasException())
+	ctx.ResetUncatchableError()
+	ex := ctx.Exception()
+	require.Error(t, ex)
+
+	obj := ctx.Eval(`({})`)
+	defer obj.Free()
+	priv := ctx.NewPrivateSymbol("slot")
+	defer priv.Free()
+	pub := ctx.NewSymbol("pub")
+	defer pub.Free()
+
+	val := ctx.NewInt32(7)
+	require.True(t, obj.SetValue(priv, val, 0))
+	val.Free()
+	got := obj.GetValue(priv)
+	defer got.Free()
+	require.EqualValues(t, 7, got.ToInt32())
+
+	pubVal := ctx.NewString("visible")
+	require.True(t, obj.SetValue(pub, pubVal, 0))
+	pubVal.Free()
+	gotPub := obj.GetValue(pub)
+	defer gotPub.Free()
+	require.Equal(t, "visible", gotPub.ToString())
+
+	explicit := ctx.NewInt32(9)
+	require.True(t, obj.SetValue(priv, explicit, PropWritable|PropConfigurable|PropEnumerable))
+	explicit.Free()
+
+	other := rt.NewContext()
+	foreignKey := other.NewString("foreign")
+	foreignVal := other.NewInt32(1)
+	require.Nil(t, obj.GetValue(foreignKey))
+	require.False(t, obj.SetValue(foreignKey, got, 0))
+	require.False(t, obj.SetValue(priv, foreignVal, 0))
+	foreignKey.Free()
+	foreignVal.Free()
+	other.Close()
+
+	require.Nil(t, (*Value)(nil).GetValue(priv))
+	require.False(t, (*Value)(nil).SetValue(priv, got, 0))
+	require.Nil(t, (*Context)(nil).NewPrivateSymbol("x"))
+	(*Context)(nil).ResetUncatchableError()
+	closedCtx := rt.NewContext()
+	closedCtx.Close()
+	require.Nil(t, closedCtx.NewPrivateSymbol("closed"))
+	closedCtx.ResetUncatchableError()
+	require.False(t, (*Value)(nil).IsUncatchableError())
+}
+
+func TestContextInterruptHandlerReceivesContext(t *testing.T) {
+	rt := NewRuntime()
+	defer rt.Close()
+
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	var seen *Context
+	rt.SetContextInterruptHandler(func(c *Context) int {
+		seen = c
+		return 1
+	})
+
+	result := ctx.Eval(`while(true){}`)
+	defer result.Free()
+	require.True(t, result.IsException())
+	err := ctx.Exception()
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "interrupted")
+	require.NotNil(t, seen)
+	require.Equal(t, ctx, seen)
+
+	rt.SetContextInterruptHandler(nil)
+}
+
+func TestContextInterruptHandlerFailClosed(t *testing.T) {
+	oldGIDHook := ownerCheckCurrentGoroutineID
+	oldThreadHook := ownerCheckCurrentThreadID
+	defer func() {
+		ownerCheckCurrentGoroutineID = oldGIDHook
+		ownerCheckCurrentThreadID = oldThreadHook
+	}()
+
+	var gid atomic.Uint64
+	gid.Store(701)
+	ownerCheckCurrentGoroutineID = func() uint64 { return gid.Load() }
+	ownerCheckCurrentThreadID = func() uint64 { return 1 }
+
+	var nilRT *Runtime
+	nilRT.SetContextInterruptHandler(func(ctx *Context) int { return 1 })
+	require.Equal(t, 0, nilRT.callInterruptHandler(nil))
+
+	rt := NewRuntime()
+	rt.interruptHandlerState.Store(&interruptHandlerHolder{})
+	require.Equal(t, 0, rt.callInterruptHandler(nil))
+
+	gid.Store(702)
+	rt.SetContextInterruptHandler(func(ctx *Context) int { return 1 })
+	gid.Store(701)
+
+	rt.Close()
+	rt.SetContextInterruptHandler(func(ctx *Context) int { return 1 })
+	rt.SetContextInterruptHandler(nil)
 }

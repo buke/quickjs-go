@@ -514,7 +514,40 @@ func (v *Value) ToError() error {
 		err.JSONString = jsonString
 	}
 
+	err.Uncatchable = v.IsUncatchableError()
+
 	return err
+}
+
+// IsUncatchableError reports whether the value is an uncatchable JS error
+// (e.g. OOM or InternalError after quickjs-ng v0.18.0).
+func (v *Value) IsUncatchableError() bool {
+	return v != nil && bool(C.JS_IsUncatchableError(v.ref))
+}
+
+// GetValue gets a property using a JS value key (string/symbol/private symbol/index).
+// Does not consume key; caller retains ownership.
+func (v *Value) GetValue(key *Value) *Value {
+	if !v.isAlive() || !key.belongsTo(v.ctx) {
+		return nil
+	}
+	dupKey := C.JS_DupValue(v.ctx.ref, key.ref)
+	return &Value{ctx: v.ctx, ref: C.JS_GetPropertyValue(v.ctx.ref, v.ref, dupKey)}
+}
+
+// SetValue sets a property using a JS value key. Caller retains key and val.
+// flags is a mix of Prop* constants; when 0, JS_PROP_C_W_E is used.
+func (v *Value) SetValue(key, val *Value, flags int) bool {
+	if !v.isAlive() || !key.belongsTo(v.ctx) || !val.belongsTo(v.ctx) {
+		return false
+	}
+	if flags == 0 {
+		flags = int(C.JS_PROP_C_W_E)
+	}
+	dupKey := C.JS_DupValue(v.ctx.ref, key.ref)
+	dupVal := C.JS_DupValue(v.ctx.ref, val.ref)
+	ret := C.JS_SetPropertyValue(v.ctx.ref, v.ref, dupKey, dupVal, C.int(flags))
+	return ret == 1
 }
 
 // propertyEnum is a wrapper around JSValue.
@@ -1114,26 +1147,71 @@ func (v *Value) IsPromise() bool {
 type PromiseState int
 
 const (
-	PromisePending PromiseState = iota
-	PromiseFulfilled
-	PromiseRejected
+	PromiseNotAPromise PromiseState = PromiseState(C.JS_PROMISE_NOT_A_PROMISE)
+	PromisePending     PromiseState = PromiseState(C.JS_PROMISE_PENDING)
+	PromiseFulfilled   PromiseState = PromiseState(C.JS_PROMISE_FULFILLED)
+	PromiseRejected    PromiseState = PromiseState(C.JS_PROMISE_REJECTED)
 )
 
-// PromiseState returns the state of the Promise
-func (v *Value) PromiseState() PromiseState {
-	if !v.IsPromise() {
-		return PromisePending
-	}
+// promiseStateResultHook overrides JS_PromiseState results in tests.
+var promiseStateResultHook func(state PromiseState) PromiseState
 
-	state := C.JS_PromiseState(v.ctx.ref, v.ref)
-	switch state {
-	case C.JSPromiseStateEnum(C.JS_PROMISE_PENDING):
-		return PromisePending
-	case C.JSPromiseStateEnum(C.JS_PROMISE_FULFILLED):
-		return PromiseFulfilled
-	default:
-		return PromiseRejected
+// PromiseState returns the promise state, or PromiseNotAPromise when v is not a Promise.
+func (v *Value) PromiseState() PromiseState {
+	if v == nil || !v.hasValidContext() {
+		return PromiseNotAPromise
 	}
+	state := PromiseState(C.JS_PromiseState(v.ctx.ref, v.ref))
+	if hook := promiseStateResultHook; hook != nil {
+		state = hook(state)
+	}
+	switch state {
+	case PromiseNotAPromise, PromisePending, PromiseFulfilled, PromiseRejected:
+		return state
+	default:
+		return PromiseNotAPromise
+	}
+}
+
+// PromiseResult returns the current promise result value (fulfillment value or rejection reason).
+// Caller must Free the returned value. For non-promise or pending promises, behavior matches QuickJS.
+func (v *Value) PromiseResult() *Value {
+	if v == nil || !v.hasValidContext() {
+		return nil
+	}
+	return &Value{ctx: v.ctx, ref: C.JS_PromiseResult(v.ctx.ref, v.ref)}
+}
+
+// Then attaches native promise reactions via JS_PromiseThen.
+// onFulfilled/onRejected may be nil (passed as undefined). Does not consume v or callbacks.
+// Returns a new promise owned by the caller, or nil if fail-closed.
+func (v *Value) Then(onFulfilled, onRejected *Value) *Value {
+	if v == nil || !v.hasValidContext() || !v.IsPromise() {
+		return nil
+	}
+	fulfilled := C.JS_NewUndefined()
+	rejected := C.JS_NewUndefined()
+	if onFulfilled != nil {
+		if !onFulfilled.belongsTo(v.ctx) {
+			return nil
+		}
+		fulfilled = onFulfilled.ref
+	}
+	if onRejected != nil {
+		if !onRejected.belongsTo(v.ctx) {
+			return nil
+		}
+		rejected = onRejected.ref
+	}
+	return &Value{ctx: v.ctx, ref: C.JS_PromiseThen(v.ctx.ref, v.ref, fulfilled, rejected)}
+}
+
+// MarkAsHandled marks a rejected promise as handled so it will not surface as unhandled.
+func (v *Value) MarkAsHandled() {
+	if v == nil || !v.hasValidContext() || !v.IsPromise() {
+		return
+	}
+	C.JS_PromiseMarkAsHandled(v.ctx.ref, v.ref)
 }
 
 // Await waits for promise resolution and executes pending jobs
