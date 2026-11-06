@@ -4,6 +4,7 @@ import (
 	"errors"
 	"math"
 	"math/big"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -2511,9 +2512,28 @@ func TestUncatchablePrivateSymbolAndPropertyValue(t *testing.T) {
 	defer gotPub.Free()
 	require.Equal(t, "visible", gotPub.ToString())
 
+	explicit := ctx.NewInt32(9)
+	require.True(t, obj.SetValue(priv, explicit, PropWritable|PropConfigurable|PropEnumerable))
+	explicit.Free()
+
+	other := rt.NewContext()
+	foreignKey := other.NewString("foreign")
+	foreignVal := other.NewInt32(1)
+	require.Nil(t, obj.GetValue(foreignKey))
+	require.False(t, obj.SetValue(foreignKey, got, 0))
+	require.False(t, obj.SetValue(priv, foreignVal, 0))
+	foreignKey.Free()
+	foreignVal.Free()
+	other.Close()
+
 	require.Nil(t, (*Value)(nil).GetValue(priv))
 	require.False(t, (*Value)(nil).SetValue(priv, got, 0))
 	require.Nil(t, (*Context)(nil).NewPrivateSymbol("x"))
+	(*Context)(nil).ResetUncatchableError()
+	closedCtx := rt.NewContext()
+	closedCtx.Close()
+	require.Nil(t, closedCtx.NewPrivateSymbol("closed"))
+	closedCtx.ResetUncatchableError()
 	require.False(t, (*Value)(nil).IsUncatchableError())
 }
 
@@ -2539,5 +2559,35 @@ func TestContextInterruptHandlerReceivesContext(t *testing.T) {
 	require.NotNil(t, seen)
 	require.Equal(t, ctx, seen)
 
+	rt.SetContextInterruptHandler(nil)
+}
+
+func TestContextInterruptHandlerFailClosed(t *testing.T) {
+	oldGIDHook := ownerCheckCurrentGoroutineID
+	oldThreadHook := ownerCheckCurrentThreadID
+	defer func() {
+		ownerCheckCurrentGoroutineID = oldGIDHook
+		ownerCheckCurrentThreadID = oldThreadHook
+	}()
+
+	var gid atomic.Uint64
+	gid.Store(701)
+	ownerCheckCurrentGoroutineID = func() uint64 { return gid.Load() }
+	ownerCheckCurrentThreadID = func() uint64 { return 1 }
+
+	var nilRT *Runtime
+	nilRT.SetContextInterruptHandler(func(ctx *Context) int { return 1 })
+	require.Equal(t, 0, nilRT.callInterruptHandler(nil))
+
+	rt := NewRuntime()
+	rt.interruptHandlerState.Store(&interruptHandlerHolder{})
+	require.Equal(t, 0, rt.callInterruptHandler(nil))
+
+	gid.Store(702)
+	rt.SetContextInterruptHandler(func(ctx *Context) int { return 1 })
+	gid.Store(701)
+
+	rt.Close()
+	rt.SetContextInterruptHandler(func(ctx *Context) int { return 1 })
 	rt.SetContextInterruptHandler(nil)
 }
