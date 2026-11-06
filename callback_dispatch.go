@@ -43,12 +43,12 @@ func getContextAndObject(ctx *C.JSContext, magic C.int, notFoundErr proxyError) 
 }
 
 //export goInterruptHandler
-func goInterruptHandler(runtimePtr *C.JSRuntime) C.int {
+func goInterruptHandler(ctx *C.JSContext, runtimePtr *C.JSRuntime) C.int {
 	runtime := getRuntimeFromJS(runtimePtr)
 	if runtime == nil {
 		return C.int(0)
 	}
-	return C.int(runtime.callInterruptHandler())
+	return C.int(runtime.callInterruptHandler(getContextFromJS(ctx)))
 }
 
 //export goDynamicImport

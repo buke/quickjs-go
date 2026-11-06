@@ -4,6 +4,7 @@ import (
 	"errors"
 	"math"
 	"math/big"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -2468,4 +2469,125 @@ func TestValueCallConstructorComprehensive(t *testing.T) {
 			instance.Free()
 		}
 	})
+}
+
+func TestUncatchablePrivateSymbolAndPropertyValue(t *testing.T) {
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	_ = ctx.ThrowInternalError("inspect")
+	require.True(t, ctx.HasException())
+	excErr := ctx.Exception()
+	require.Error(t, excErr)
+	typed, ok := excErr.(*Error)
+	require.True(t, ok)
+	require.True(t, typed.Uncatchable)
+
+	_ = ctx.ThrowInternalError("pending")
+	require.True(t, ctx.HasException())
+	ctx.ResetUncatchableError()
+	ex := ctx.Exception()
+	require.Error(t, ex)
+
+	obj := ctx.Eval(`({})`)
+	defer obj.Free()
+	priv := ctx.NewPrivateSymbol("slot")
+	defer priv.Free()
+	pub := ctx.NewSymbol("pub")
+	defer pub.Free()
+
+	val := ctx.NewInt32(7)
+	require.True(t, obj.SetValue(priv, val, 0))
+	val.Free()
+	got := obj.GetValue(priv)
+	defer got.Free()
+	require.EqualValues(t, 7, got.ToInt32())
+
+	pubVal := ctx.NewString("visible")
+	require.True(t, obj.SetValue(pub, pubVal, 0))
+	pubVal.Free()
+	gotPub := obj.GetValue(pub)
+	defer gotPub.Free()
+	require.Equal(t, "visible", gotPub.ToString())
+
+	explicit := ctx.NewInt32(9)
+	require.True(t, obj.SetValue(priv, explicit, PropWritable|PropConfigurable|PropEnumerable))
+	explicit.Free()
+
+	other := rt.NewContext()
+	foreignKey := other.NewString("foreign")
+	foreignVal := other.NewInt32(1)
+	require.Nil(t, obj.GetValue(foreignKey))
+	require.False(t, obj.SetValue(foreignKey, got, 0))
+	require.False(t, obj.SetValue(priv, foreignVal, 0))
+	foreignKey.Free()
+	foreignVal.Free()
+	other.Close()
+
+	require.Nil(t, (*Value)(nil).GetValue(priv))
+	require.False(t, (*Value)(nil).SetValue(priv, got, 0))
+	require.Nil(t, (*Context)(nil).NewPrivateSymbol("x"))
+	(*Context)(nil).ResetUncatchableError()
+	closedCtx := rt.NewContext()
+	closedCtx.Close()
+	require.Nil(t, closedCtx.NewPrivateSymbol("closed"))
+	closedCtx.ResetUncatchableError()
+	require.False(t, (*Value)(nil).IsUncatchableError())
+}
+
+func TestContextInterruptHandlerReceivesContext(t *testing.T) {
+	rt := NewRuntime()
+	defer rt.Close()
+
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	var seen *Context
+	rt.SetContextInterruptHandler(func(c *Context) int {
+		seen = c
+		return 1
+	})
+
+	result := ctx.Eval(`while(true){}`)
+	defer result.Free()
+	require.True(t, result.IsException())
+	err := ctx.Exception()
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "interrupted")
+	require.NotNil(t, seen)
+	require.Equal(t, ctx, seen)
+
+	rt.SetContextInterruptHandler(nil)
+}
+
+func TestContextInterruptHandlerFailClosed(t *testing.T) {
+	oldGIDHook := ownerCheckCurrentGoroutineID
+	oldThreadHook := ownerCheckCurrentThreadID
+	defer func() {
+		ownerCheckCurrentGoroutineID = oldGIDHook
+		ownerCheckCurrentThreadID = oldThreadHook
+	}()
+
+	var gid atomic.Uint64
+	gid.Store(701)
+	ownerCheckCurrentGoroutineID = func() uint64 { return gid.Load() }
+	ownerCheckCurrentThreadID = func() uint64 { return 1 }
+
+	var nilRT *Runtime
+	nilRT.SetContextInterruptHandler(func(ctx *Context) int { return 1 })
+	require.Equal(t, 0, nilRT.callInterruptHandler(nil))
+
+	rt := NewRuntime()
+	rt.interruptHandlerState.Store(&interruptHandlerHolder{})
+	require.Equal(t, 0, rt.callInterruptHandler(nil))
+
+	gid.Store(702)
+	rt.SetContextInterruptHandler(func(ctx *Context) int { return 1 })
+	gid.Store(701)
+
+	rt.Close()
+	rt.SetContextInterruptHandler(func(ctx *Context) int { return 1 })
+	rt.SetContextInterruptHandler(nil)
 }

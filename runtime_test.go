@@ -413,13 +413,13 @@ func TestCallInterruptHandler_DirectCall(t *testing.T) {
 
 	// Test return 0 branch when no handler is set
 	rt.ClearInterruptHandler()
-	require.Equal(t, 0, rt.callInterruptHandler())
+	require.Equal(t, 0, rt.callInterruptHandler(nil))
 
 	// Test handler invocation with different return values
 	testCases := []int{0, 1, 42, -1}
 	for _, expected := range testCases {
 		rt.SetInterruptHandler(func() int { return expected })
-		require.Equal(t, expected, rt.callInterruptHandler())
+		require.Equal(t, expected, rt.callInterruptHandler(nil))
 	}
 }
 
@@ -1581,7 +1581,7 @@ func TestRuntimeNilAndZeroValueGuards(t *testing.T) {
 		require.Nil(t, nilRT.NewBareContext())
 		require.Nil(t, nilRT.NewContextRaw(MinimalIntrinsics()))
 		require.Nil(t, nilRT.NewContextWithOptions(DefaultBootstrap()))
-		require.Equal(t, 0, nilRT.callInterruptHandler())
+		require.Equal(t, 0, nilRT.callInterruptHandler(nil))
 		nilRT.registerOwnedContext(nil)
 		nilRT.unregisterOwnedContext(nil, 0)
 		nilRT.registerConstructorClassID(dummyRef, 1)
