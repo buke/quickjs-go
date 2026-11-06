@@ -128,7 +128,7 @@ func TestBridgeMappingCorruptionFailClosed(t *testing.T) {
 	runtimeMapping.Store(rt.ref, "corrupted-runtime")
 	require.Nil(t, getRuntimeFromJS(rt.ref))
 	require.NotPanics(t, func() {
-		_ = goInterruptHandler(rt.ref)
+		_ = goInterruptHandler(ctx.ref, rt.ref)
 	})
 
 	registerContext(ctx.ref, ctx)
@@ -252,7 +252,7 @@ func TestBridgeMappingCloseContractStress(t *testing.T) {
 		require.Nil(t, getContextFromJS(ctxRef))
 		require.Nil(t, getRuntimeFromJS(rtRef))
 		require.NotPanics(t, func() {
-			_ = goInterruptHandler(rtRef)
+			_ = goInterruptHandler(ctxRef, rtRef)
 		})
 
 		contextMapping.Delete(ctxRef)

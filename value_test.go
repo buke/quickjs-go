@@ -2390,3 +2390,75 @@ func TestValueCallConstructorComprehensive(t *testing.T) {
 		}
 	})
 }
+
+func TestUncatchablePrivateSymbolAndPropertyValue(t *testing.T) {
+	rt := NewRuntime()
+	defer rt.Close()
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	_ = ctx.ThrowInternalError("inspect")
+	require.True(t, ctx.HasException())
+	excErr := ctx.Exception()
+	require.Error(t, excErr)
+	typed, ok := excErr.(*Error)
+	require.True(t, ok)
+	require.True(t, typed.Uncatchable)
+
+	_ = ctx.ThrowInternalError("pending")
+	require.True(t, ctx.HasException())
+	ctx.ResetUncatchableError()
+	ex := ctx.Exception()
+	require.Error(t, ex)
+
+	obj := ctx.Eval(`({})`)
+	defer obj.Free()
+	priv := ctx.NewPrivateSymbol("slot")
+	defer priv.Free()
+	pub := ctx.NewSymbol("pub")
+	defer pub.Free()
+
+	val := ctx.NewInt32(7)
+	require.True(t, obj.SetValue(priv, val, 0))
+	val.Free()
+	got := obj.GetValue(priv)
+	defer got.Free()
+	require.EqualValues(t, 7, got.ToInt32())
+
+	pubVal := ctx.NewString("visible")
+	require.True(t, obj.SetValue(pub, pubVal, 0))
+	pubVal.Free()
+	gotPub := obj.GetValue(pub)
+	defer gotPub.Free()
+	require.Equal(t, "visible", gotPub.ToString())
+
+	require.Nil(t, (*Value)(nil).GetValue(priv))
+	require.False(t, (*Value)(nil).SetValue(priv, got, 0))
+	require.Nil(t, (*Context)(nil).NewPrivateSymbol("x"))
+	require.False(t, (*Value)(nil).IsUncatchableError())
+}
+
+func TestContextInterruptHandlerReceivesContext(t *testing.T) {
+	rt := NewRuntime()
+	defer rt.Close()
+
+	ctx := rt.NewContext()
+	defer ctx.Close()
+
+	var seen *Context
+	rt.SetContextInterruptHandler(func(c *Context) int {
+		seen = c
+		return 1
+	})
+
+	result := ctx.Eval(`while(true){}`)
+	defer result.Free()
+	require.True(t, result.IsException())
+	err := ctx.Exception()
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "interrupted")
+	require.NotNil(t, seen)
+	require.Equal(t, ctx, seen)
+
+	rt.SetContextInterruptHandler(nil)
+}

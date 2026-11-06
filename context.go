@@ -459,6 +459,25 @@ func (ctx *Context) NewGlobalSymbolWithoutDescription() *Value {
 	return ctx.newSymbol(nil, true)
 }
 
+// NewPrivateSymbol returns a symbol visible only to C/Go code (not to JS).
+func (ctx *Context) NewPrivateSymbol(description string) *Value {
+	if !ctx.hasValidRef() {
+		return nil
+	}
+	desc := C.CString(description)
+	defer C.free(unsafe.Pointer(desc))
+	return &Value{ctx: ctx, ref: C.JS_NewPrivateSymbol(ctx.ref, desc)}
+}
+
+// ResetUncatchableError makes a pending uncatchable exception catchable again
+// (see JS_ResetUncatchableError).
+func (ctx *Context) ResetUncatchableError() {
+	if !ctx.hasValidRef() {
+		return
+	}
+	C.JS_ResetUncatchableError(ctx.ref)
+}
+
 // String returns a string value with given string.
 // Deprecated: Use NewString() instead.
 func (ctx *Context) String(v string) *Value {

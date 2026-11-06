@@ -863,9 +863,8 @@ static void clearTimeoutState(JSRuntime *rt);
 // Simplified interrupt handler (no handlerArgs complexity)
 // quickjs-ng v0.18.0+: JSInterruptHandler takes JSContext*, not JSRuntime*
 int interruptHandler(JSContext *ctx, void *opaque) {
-    (void)ctx;
     JSRuntime *runtimePtr = (JSRuntime*)opaque;
-    return goInterruptHandler(runtimePtr);
+    return goInterruptHandler(ctx, runtimePtr);
 }
 
 void SetInterruptHandler(JSRuntime *rt) {

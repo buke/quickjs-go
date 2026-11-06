@@ -19,8 +19,12 @@ import (
 // Return != 0 if the JS code needs to be interrupted
 type InterruptHandler func() int
 
+// ContextInterruptHandler receives the executing JS context when interrupting.
+type ContextInterruptHandler func(ctx *Context) int
+
 type interruptHandlerHolder struct {
-	fn InterruptHandler
+	fn        InterruptHandler
+	contextFn ContextInterruptHandler
 }
 
 // runtimeNewContextHook is used in tests to force JS_NewContext failure paths.
@@ -954,16 +958,35 @@ func (r *Runtime) SetInterruptHandler(handler InterruptHandler) {
 	}
 	if handler != nil {
 		r.interruptHandlerState.Store(&interruptHandlerHolder{fn: handler})
-	} else {
-		r.interruptHandlerState.Store(nil)
-	}
-
-	if handler != nil {
-		// Simplified call - no handlerArgs complexity
 		C.SetInterruptHandler(r.ref)
-	} else {
-		C.ClearInterruptHandler(r.ref)
+		return
 	}
+	r.interruptHandlerState.Store(nil)
+	C.ClearInterruptHandler(r.ref)
+}
+
+// SetContextInterruptHandler sets a context-aware interrupt handler.
+// Prefer this over SetInterruptHandler when the interrupting context matters.
+// Overrides timeout handlers (same slot as SetInterruptHandler).
+func (r *Runtime) SetContextInterruptHandler(handler ContextInterruptHandler) {
+	if r == nil {
+		return
+	}
+	if !r.ensureOwnerAccess() {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.closed.Load() || r.ref == nil {
+		return
+	}
+	if handler != nil {
+		r.interruptHandlerState.Store(&interruptHandlerHolder{contextFn: handler})
+		C.SetInterruptHandler(r.ref)
+		return
+	}
+	r.interruptHandlerState.Store(nil)
+	C.ClearInterruptHandler(r.ref)
 }
 
 // ClearInterruptHandler clears the user interrupt handler
@@ -984,15 +1007,21 @@ func (r *Runtime) ClearInterruptHandler() {
 }
 
 // callInterruptHandler is called from C layer via runtime mapping (internal use)
-func (r *Runtime) callInterruptHandler() int {
+func (r *Runtime) callInterruptHandler(ctx *Context) int {
 	if r == nil {
 		return 0
 	}
 	holder := r.interruptHandlerState.Load()
-	if holder != nil && holder.fn != nil {
+	if holder == nil {
+		return 0
+	}
+	if holder.contextFn != nil {
+		return holder.contextFn(ctx)
+	}
+	if holder.fn != nil {
 		return holder.fn()
 	}
-	return 0 // No interrupt
+	return 0
 }
 
 // NewContext creates a new JavaScript context with default host bootstrap.

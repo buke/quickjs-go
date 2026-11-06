@@ -514,7 +514,40 @@ func (v *Value) ToError() error {
 		err.JSONString = jsonString
 	}
 
+	err.Uncatchable = v.IsUncatchableError()
+
 	return err
+}
+
+// IsUncatchableError reports whether the value is an uncatchable JS error
+// (e.g. OOM or InternalError after quickjs-ng v0.18.0).
+func (v *Value) IsUncatchableError() bool {
+	return v != nil && bool(C.JS_IsUncatchableError(v.ref))
+}
+
+// GetValue gets a property using a JS value key (string/symbol/private symbol/index).
+// Does not consume key; caller retains ownership.
+func (v *Value) GetValue(key *Value) *Value {
+	if !v.isAlive() || !key.belongsTo(v.ctx) {
+		return nil
+	}
+	dupKey := C.JS_DupValue(v.ctx.ref, key.ref)
+	return &Value{ctx: v.ctx, ref: C.JS_GetPropertyValue(v.ctx.ref, v.ref, dupKey)}
+}
+
+// SetValue sets a property using a JS value key. Caller retains key and val.
+// flags is a mix of Prop* constants; when 0, JS_PROP_C_W_E is used.
+func (v *Value) SetValue(key, val *Value, flags int) bool {
+	if !v.isAlive() || !key.belongsTo(v.ctx) || !val.belongsTo(v.ctx) {
+		return false
+	}
+	if flags == 0 {
+		flags = int(C.JS_PROP_C_W_E)
+	}
+	dupKey := C.JS_DupValue(v.ctx.ref, key.ref)
+	dupVal := C.JS_DupValue(v.ctx.ref, val.ref)
+	ret := C.JS_SetPropertyValue(v.ctx.ref, v.ref, dupKey, dupVal, C.int(flags))
+	return ret == 1
 }
 
 // propertyEnum is a wrapper around JSValue.
