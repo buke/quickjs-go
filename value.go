@@ -1120,12 +1120,18 @@ const (
 	PromiseRejected    PromiseState = PromiseState(C.JS_PROMISE_REJECTED)
 )
 
+// promiseStateResultHook overrides JS_PromiseState results in tests.
+var promiseStateResultHook func(state PromiseState) PromiseState
+
 // PromiseState returns the promise state, or PromiseNotAPromise when v is not a Promise.
 func (v *Value) PromiseState() PromiseState {
 	if v == nil || !v.hasValidContext() {
 		return PromiseNotAPromise
 	}
 	state := PromiseState(C.JS_PromiseState(v.ctx.ref, v.ref))
+	if hook := promiseStateResultHook; hook != nil {
+		state = hook(state)
+	}
 	switch state {
 	case PromiseNotAPromise, PromisePending, PromiseFulfilled, PromiseRejected:
 		return state

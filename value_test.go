@@ -1577,6 +1577,51 @@ func TestPromiseState(t *testing.T) {
 	require.Nil(t, (*Value)(nil).PromiseResult())
 	require.Nil(t, (*Value)(nil).Then(nil, nil))
 	(*Value)(nil).MarkAsHandled()
+	require.Equal(t, PromiseNotAPromise, (*Value)(nil).PromiseState())
+
+	nonPromise.MarkAsHandled()
+	bothUndef := fulfilled.Then(nil, nil)
+	require.NotNil(t, bothUndef)
+	bothUndef.Free()
+
+	onRejected := ctx.NewFunction(func(ctx *Context, this *Value, args []*Value) *Value {
+		if len(args) > 0 {
+			return ctx.NewString("handled:" + args[0].ToString())
+		}
+		return ctx.NewString("handled")
+	})
+	defer onRejected.Free()
+	rejected2 := ctx.Eval(`Promise.reject("boom2")`)
+	defer rejected2.Free()
+	rejected2.MarkAsHandled()
+	chainedReject := rejected2.Then(nil, onRejected)
+	require.NotNil(t, chainedReject)
+	handled := ctx.Await(chainedReject)
+	defer handled.Free()
+	require.False(t, handled.IsException())
+	require.Equal(t, "handled:boom2", handled.ToString())
+
+	otherRT := NewRuntime()
+	defer otherRT.Close()
+	other := otherRT.NewContext()
+	defer other.Close()
+	foreignFn := other.NewFunction(func(ctx *Context, this *Value, args []*Value) *Value {
+		return ctx.NewUndefined()
+	})
+	defer foreignFn.Free()
+	require.Nil(t, fulfilled.Then(foreignFn, nil))
+	require.Nil(t, fulfilled.Then(nil, foreignFn))
+
+	prevHook := promiseStateResultHook
+	promiseStateResultHook = func(state PromiseState) PromiseState { return PromiseState(999) }
+	require.Equal(t, PromiseNotAPromise, fulfilled.PromiseState())
+	promiseStateResultHook = prevHook
+
+	orphan := &Value{} // non-nil value without a usable context
+	require.Equal(t, PromiseNotAPromise, orphan.PromiseState())
+	require.Nil(t, orphan.PromiseResult())
+	require.Nil(t, orphan.Then(nil, nil))
+	orphan.MarkAsHandled()
 }
 
 // TestValueAwait tests promise await functionality
