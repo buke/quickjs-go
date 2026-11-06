@@ -861,7 +861,9 @@ JSValue CreateClassInstance(JSContext *ctx, JSValue constructor,
 static void clearTimeoutState(JSRuntime *rt);
 
 // Simplified interrupt handler (no handlerArgs complexity)
-int interruptHandler(JSRuntime *rt, void *opaque) {
+// quickjs-ng v0.18.0+: JSInterruptHandler takes JSContext*, not JSRuntime*
+int interruptHandler(JSContext *ctx, void *opaque) {
+    (void)ctx;
     JSRuntime *runtimePtr = (JSRuntime*)opaque;
     return goInterruptHandler(runtimePtr);
 }
@@ -994,7 +996,8 @@ int GetTimeoutOpaqueCount(void) {
     return count;
 }
 
-int timeoutHandler(JSRuntime *rt, void *opaque) {
+int timeoutHandler(JSContext *ctx, void *opaque) {
+    (void)ctx;
     TimeoutStruct* ts = (TimeoutStruct*)opaque;
     time_t timeout = ts->timeout;
     time_t start = ts->start;
