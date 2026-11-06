@@ -145,8 +145,8 @@ jobs:
       - uses: actions/checkout@v7
       - name: setup wasi-sdk
         run: |
-          wget -nv https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-29/wasi-sdk-29.0-x86_64-linux.deb -P /tmp
-          sudo apt install /tmp/wasi-sdk*.deb
+          wget -nv https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-29/wasi-sdk-29.0-x86_64-linux.deb -P "$RUNNER_TEMP"
+          sudo apt install "$RUNNER_TEMP/wasi-sdk-29.0-x86_64-linux.deb"
       - name: build
         run: |
           cmake -B build -DCMAKE_TOOLCHAIN_FILE=/opt/wasi-sdk/share/cmake/wasi-sdk.cmake -DQJS_BUILD_WERROR=ON
@@ -165,8 +165,40 @@ jobs:
             build/qjs-wasi.wasm
             build/qjs-wasi-reactor.wasm
 
+  cosmopolitan:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: setup cosmocc
+        run: |
+          wget -nv https://github.com/jart/cosmopolitan/releases/download/4.0.2/cosmocc-4.0.2.zip -P "$RUNNER_TEMP"
+          mkdir -p "$RUNNER_TEMP/cosmocc"
+          unzip -q "$RUNNER_TEMP/cosmocc-4.0.2.zip" -d "$RUNNER_TEMP/cosmocc"
+          echo "$RUNNER_TEMP/cosmocc/bin" >> "$GITHUB_PATH"
+      - name: setup ape loader
+        run: |
+          sudo cp "$RUNNER_TEMP/cosmocc/bin/ape-x86_64.elf" /usr/bin/ape
+          sudo sh -c "echo ':APE:M::MZqFpD::/usr/bin/ape:' > /proc/sys/fs/binfmt_misc/register"
+          sudo sh -c "echo ':APE-jart:M::jartsr::/usr/bin/ape:' > /proc/sys/fs/binfmt_misc/register"
+      - name: build
+        run: |
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=cosmocc -DCMAKE_AR="$(command -v cosmoar)" -DQJS_BUILD_CLI_STATIC=ON
+          cmake --build build --target qjs_exe -j$(getconf _NPROCESSORS_ONLN)
+          cmake --build build --target qjsc -j$(getconf _NPROCESSORS_ONLN)
+          mv build/qjs build/qjs-cosmo.com
+          mv build/qjsc build/qjsc-cosmo.com
+      - name: check
+        run: |
+          file build/*-cosmo.com
+          build/qjs-cosmo.com -qd
+      - name: upload
+        uses: actions/upload-artifact@v7
+        with:
+          name: qjs-cosmo
+          path: build/*-cosmo.com
+
   upload-to-release:
-    needs: [linux, macos, windows, wasi, check_meson_version]
+    needs: [linux, macos, windows, wasi, cosmopolitan, check_meson_version]
     runs-on: ubuntu-22.04
     steps:
       - name: get assets
