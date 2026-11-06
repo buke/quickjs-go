@@ -2517,7 +2517,41 @@ func TestResizableAndExternalArrayBuffer(t *testing.T) {
 	detachTarget.Free()
 
 	require.Nil(t, (*Context)(nil).NewResizableArrayBuffer(1, 2))
+	require.Nil(t, (*Context)(nil).NewArrayBuffer(nil))
+	require.Nil(t, (*Context)(nil).NewArrayBufferFromBytes(nil, ArrayBufferOptions{}))
 	require.Nil(t, ctx.NewResizableArrayBuffer(8, 4))
+	require.Nil(t, ctx.NewResizableArrayBuffer(-1, 0))
+	require.Nil(t, ctx.NewArrayBufferFromBytes([]byte{1}, ArrayBufferOptions{MaxByteLength: -1}))
+	require.Nil(t, ctx.NewArrayBufferFromBytes([]byte{1, 2, 3}, ArrayBufferOptions{MaxByteLength: 2}))
+
+	emptyResizable := ctx.NewResizableArrayBuffer(0, 0)
+	require.NotNil(t, emptyResizable)
+	emptyResizable.Free()
+
+	emptyExt := ctx.NewArrayBufferFromBytes(nil, ArrayBufferOptions{})
+	require.NotNil(t, emptyExt)
+	emptyExt.Free()
+
+	emptyCopy := ctx.NewArrayBufferFromBytes(nil, ArrayBufferOptions{MaxByteLength: 4})
+	require.NotNil(t, emptyCopy)
+	emptyCopy.Free()
+
+	restoreAlloc := forceArrayBufferCallocFailureForTest(true)
+	require.Nil(t, ctx.NewResizableArrayBuffer(4, 8))
+	require.Nil(t, ctx.NewArrayBufferFromBytes([]byte{1}, ArrayBufferOptions{MaxByteLength: 8}))
+	restoreAlloc()
+	_ = forceArrayBufferCallocFailureForTest(false)
+
+	notBuffer := ctx.NewString("x")
+	notBuffer.DetachArrayBuffer()
+	notBuffer.Free()
+
+	closedCtx := rt.NewContext()
+	closedCtx.Close()
+	require.Nil(t, closedCtx.NewArrayBuffer(nil))
+	require.Nil(t, closedCtx.NewResizableArrayBuffer(1, 2))
+	require.Nil(t, closedCtx.NewArrayBufferFromBytes(nil, ArrayBufferOptions{}))
+
 	(*Value)(nil).DetachArrayBuffer()
 }
 

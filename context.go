@@ -493,6 +493,26 @@ type ArrayBufferOptions struct {
 	MaxByteLength int
 }
 
+// arrayBufferCallocHook overrides calloc for ArrayBuffer allocation in tests.
+var arrayBufferCallocHook func(size int) unsafe.Pointer
+
+func allocArrayBufferBytes(size int) unsafe.Pointer {
+	if hook := arrayBufferCallocHook; hook != nil {
+		return hook(size)
+	}
+	return C.calloc(1, C.size_t(size))
+}
+
+func forceArrayBufferCallocFailureForTest(enable bool) func() {
+	prev := arrayBufferCallocHook
+	if enable {
+		arrayBufferCallocHook = func(size int) unsafe.Pointer { return nil }
+	} else {
+		arrayBufferCallocHook = nil
+	}
+	return func() { arrayBufferCallocHook = prev }
+}
+
 // NewArrayBuffer returns a ArrayBuffer value with given binary data.
 func (ctx *Context) NewArrayBuffer(binaryData []byte) *Value {
 	if !ctx.hasValidRef() {
@@ -516,7 +536,7 @@ func (ctx *Context) NewResizableArrayBuffer(length, maxByteLength int) *Value {
 	}
 	var buf unsafe.Pointer
 	if allocSize > 0 {
-		buf = C.calloc(1, C.size_t(allocSize))
+		buf = allocArrayBufferBytes(allocSize)
 		if buf == nil {
 			return nil
 		}
@@ -564,7 +584,7 @@ func (ctx *Context) NewArrayBufferFromBytes(data []byte, opts ArrayBufferOptions
 		}
 	}
 
-	buf := C.calloc(1, C.size_t(opts.MaxByteLength))
+	buf := allocArrayBufferBytes(opts.MaxByteLength)
 	if buf == nil {
 		return nil
 	}
